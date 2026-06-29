@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:screenmonger}",
+            "name": "Debug screenmonger",
+            "target": "screenmonger",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug screenmonger"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:screenmonger}",
+            "name": "Release screenmonger",
+            "target": "screenmonger",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release screenmonger"
+        }
+    ]
+}
