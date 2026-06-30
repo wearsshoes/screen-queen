@@ -32,7 +32,15 @@ enum DisplayManager {
                 width: mode.map { CGFloat($0.pixelWidth) } ?? bounds.width,
                 height: mode.map { CGFloat($0.pixelHeight) } ?? bounds.height
             )
-            let physMM = CGDisplayScreenSize(id) // millimeters, from EDID
+
+            let vendor = CGDisplayVendorNumber(id)
+            let model = CGDisplayModelNumber(id)
+            let serial = CGDisplaySerialNumber(id)
+            let fingerprint = "\(vendor)-\(model)-\(serial)"
+
+            // Prefer a manual calibration over EDID, which some monitors fake.
+            let override = CalibrationStore.override(for: fingerprint)
+            let physMM = override ?? CGDisplayScreenSize(id)
 
             return DisplaySnapshot(
                 id: id,
@@ -40,11 +48,12 @@ enum DisplayManager {
                 bounds: bounds,
                 pixelSize: pixelSize,
                 physicalSizeMM: physMM,
+                physicalSizeIsCalibrated: override != nil,
                 isMain: CGDisplayIsMain(id) != 0,
                 isBuiltin: CGDisplayIsBuiltin(id) != 0,
-                vendor: CGDisplayVendorNumber(id),
-                model: CGDisplayModelNumber(id),
-                serial: CGDisplaySerialNumber(id),
+                vendor: vendor,
+                model: model,
+                serial: serial,
                 refreshHz: mode?.refreshRate ?? 0
             )
         }
@@ -58,8 +67,10 @@ enum DisplayManager {
     /// slightly from what was requested — callers should re-snapshot to refresh.
     ///
     /// Returns `false` (and rolls back) if any individual configuration fails.
+    /// `permanent: false` uses `.forSession` (in-memory, no disk write) — much
+    /// cheaper, for live drags. The final drop should pass `permanent: true`.
     @discardableResult
-    static func applyOrigins(_ origins: [CGDirectDisplayID: CGPoint]) -> Bool {
+    static func applyOrigins(_ origins: [CGDirectDisplayID: CGPoint], permanent: Bool = true) -> Bool {
         var configRef: CGDisplayConfigRef?
         guard CGBeginDisplayConfiguration(&configRef) == .success, let config = configRef else {
             return false
@@ -74,6 +85,23 @@ enum DisplayManager {
                 CGCancelDisplayConfiguration(config)
                 return false
             }
+        }
+        return CGCompleteDisplayConfiguration(config, permanent ? .permanently : .forSession) == .success
+    }
+
+    /// Switch a single display to a new mode, atomically. Returns `false` (and
+    /// rolls back) on failure. Resolution changes can blank a screen, so callers
+    /// must pair this with the keep/revert confirmation.
+    @discardableResult
+    static func applyMode(_ mode: CGDisplayMode, to id: CGDirectDisplayID) -> Bool {
+        var configRef: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&configRef) == .success, let config = configRef else {
+            return false
+        }
+        let err = CGConfigureDisplayWithDisplayMode(config, id, mode, nil)
+        if err != .success {
+            CGCancelDisplayConfiguration(config)
+            return false
         }
         return CGCompleteDisplayConfiguration(config, .permanently) == .success
     }

@@ -11,8 +11,21 @@ final class ArrangementCanvas: NSView {
     /// Called on drop with the desired global origin for every display.
     var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)?
 
+    /// Called during a drag whenever the resolved placement changes, so the real
+    /// displays can be repositioned live. Fires only on slot changes (not every
+    /// pixel) because `resolve` snaps to discrete adjacent placements.
+    var onDragUpdate: (([CGDirectDisplayID: CGPoint]) -> Void)?
+
     /// Called when the user picks "Set as Main Display" from a tile's context menu.
     var onSetMain: ((CGDirectDisplayID) -> Void)?
+
+    /// Called when the user picks a resolution from a tile's context menu.
+    var onSetMode: ((CGDirectDisplayID, CGDisplayMode) -> Void)?
+
+    /// Called to calibrate / reset a display's physical size.
+    var onCalibrate: ((CGDirectDisplayID) -> Void)?
+    var onCalibrateVisual: ((CGDirectDisplayID) -> Void)?
+    var onResetCalibration: ((CGDirectDisplayID) -> Void)?
 
     private var displays: [DisplaySnapshot] = []
 
@@ -109,11 +122,13 @@ final class ArrangementCanvas: NSView {
         // raw cursor position — this is where the display would actually land.
         let others = displays.filter { $0.id != id }.map(effectiveBounds)
         let resolved = resolve(size: dragged.bounds.size, freeOrigin: freeOrigin, against: others)
+        guard resolved != workingOrigins[id] else { return } // only act on slot changes
         workingOrigins[id] = resolved
         if abs(resolved.x - dragStartOrigin.x) > 0.5 || abs(resolved.y - dragStartOrigin.y) > 0.5 {
             dragMoved = true
         }
         needsDisplay = true
+        if dragMoved { onDragUpdate?(currentOrigins()) }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -121,8 +136,11 @@ final class ArrangementCanvas: NSView {
         guard draggedID != nil else { return }
         // A click without a real move shouldn't reconfigure anything.
         guard dragMoved else { needsDisplay = true; return }
-        let origins = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, effectiveBounds($0).origin) })
-        onCommit?(origins)
+        onCommit?(currentOrigins())
+    }
+
+    private func currentOrigins() -> [CGDirectDisplayID: CGPoint] {
+        Dictionary(uniqueKeysWithValues: displays.map { ($0.id, effectiveBounds($0).origin) })
     }
 
     // MARK: - Context menu
@@ -132,20 +150,89 @@ final class ArrangementCanvas: NSView {
         let p = convert(event.locationInWindow, from: nil)
         for d in displays.reversed() where t.viewRect(forGlobal: effectiveBounds(d)).contains(p) {
             let menu = NSMenu()
-            let item = NSMenuItem(title: "Set as Main Display",
-                                  action: #selector(setMainFromMenu(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = NSNumber(value: d.id)
-            item.isEnabled = !d.isMain
-            menu.addItem(item)
+            menu.addItem(withTitle: d.name, action: nil, keyEquivalent: "")
+            menu.addItem(.separator())
+
+            let mainItem = NSMenuItem(title: "Set as Main Display",
+                                      action: #selector(setMainFromMenu(_:)), keyEquivalent: "")
+            mainItem.target = self
+            mainItem.representedObject = NSNumber(value: d.id)
+            mainItem.isEnabled = !d.isMain
+            menu.addItem(mainItem)
+
+            menu.addItem(resolutionMenuItem(for: d))
+
+            menu.addItem(.separator())
+            if displays.count > 1 {
+                let matchItem = NSMenuItem(title: "Calibrate by Matching…",
+                                           action: #selector(calibrateVisualFromMenu(_:)), keyEquivalent: "")
+                matchItem.target = self
+                matchItem.representedObject = NSNumber(value: d.id)
+                menu.addItem(matchItem)
+            }
+            let calItem = NSMenuItem(title: "Calibrate by Diagonal…",
+                                     action: #selector(calibrateFromMenu(_:)), keyEquivalent: "")
+            calItem.target = self
+            calItem.representedObject = NSNumber(value: d.id)
+            menu.addItem(calItem)
+
+            if d.physicalSizeIsCalibrated {
+                let resetItem = NSMenuItem(title: "Reset Size to EDID",
+                                           action: #selector(resetCalibrationFromMenu(_:)), keyEquivalent: "")
+                resetItem.target = self
+                resetItem.representedObject = NSNumber(value: d.id)
+                menu.addItem(resetItem)
+            }
             return menu
         }
         return nil
     }
 
+    private func resolutionMenuItem(for d: DisplaySnapshot) -> NSMenuItem {
+        let item = NSMenuItem(title: "Resolution", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        let current = CGDisplayCopyDisplayMode(d.id)
+        for mode in ModeCatalog.menuModes(for: d.id) {
+            let mi = NSMenuItem(title: mode.label, action: #selector(setModeFromMenu(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = ModeChoice(id: d.id, mode: mode.cgMode)
+            if let current, ModeCatalog.sameMode(current, mode.cgMode) { mi.state = .on }
+            submenu.addItem(mi)
+        }
+        item.submenu = submenu
+        return item
+    }
+
+    /// Carries both the display id and chosen CGDisplayMode through a menu item.
+    private final class ModeChoice {
+        let id: CGDirectDisplayID
+        let mode: CGDisplayMode
+        init(id: CGDirectDisplayID, mode: CGDisplayMode) { self.id = id; self.mode = mode }
+    }
+
     @objc private func setMainFromMenu(_ sender: NSMenuItem) {
         guard let number = sender.representedObject as? NSNumber else { return }
         onSetMain?(number.uint32Value)
+    }
+
+    @objc private func setModeFromMenu(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? ModeChoice else { return }
+        onSetMode?(choice.id, choice.mode)
+    }
+
+    @objc private func calibrateFromMenu(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? NSNumber else { return }
+        onCalibrate?(number.uint32Value)
+    }
+
+    @objc private func calibrateVisualFromMenu(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? NSNumber else { return }
+        onCalibrateVisual?(number.uint32Value)
+    }
+
+    @objc private func resetCalibrationFromMenu(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? NSNumber else { return }
+        onResetCalibration?(number.uint32Value)
     }
 
     /// Resolve a free cursor position into the nearest *valid* placement: the
@@ -230,7 +317,10 @@ final class ArrangementCanvas: NSView {
         lines.append((display.isHiDPI ? "\(pts)  (HiDPI \(px))" : pts, .systemFont(ofSize: 10)))
 
         if let ppi = display.ppi {
-            lines.append((String(format: "%.0f ppi", ppi), .systemFont(ofSize: 10)))
+            let suffix = display.physicalSizeIsCalibrated
+                ? String(format: " (calibrated %.0f\")", display.diagonalInches)
+                : ""
+            lines.append((String(format: "%.0f ppi%@", ppi, suffix), .systemFont(ofSize: 10)))
         } else {
             lines.append(("ppi: unknown (needs calibration)", .systemFont(ofSize: 10)))
         }

@@ -23,10 +23,18 @@ struct DisplaySnapshot: Identifiable, Equatable {
     /// Native backing resolution in pixels.
     let pixelSize: CGSize
 
-    /// Physical size from EDID, in millimeters. May be `.zero` for displays
-    /// behind dumb adapters/KVMs that don't pass EDID through — those need the
-    /// manual calibration fallback (Phase 4).
+    /// Physical size in millimeters. From EDID by default, but replaced by a
+    /// user calibration when EDID is missing or wrong (see `CalibrationStore`).
     let physicalSizeMM: CGSize
+
+    /// Whether `physicalSizeMM` came from a manual calibration rather than EDID.
+    let physicalSizeIsCalibrated: Bool
+
+    /// Diagonal of the physical size, in inches (0 if size unknown).
+    var diagonalInches: Double {
+        let w = Double(physicalSizeMM.width), h = Double(physicalSizeMM.height)
+        return (w * w + h * h).squareRoot() / 25.4
+    }
 
     let isMain: Bool
     let isBuiltin: Bool
@@ -51,7 +59,31 @@ struct DisplaySnapshot: Identifiable, Equatable {
         return Double(pixelSize.width) / inches
     }
 
+    /// Effective *points* per physical inch — the density that actually governs
+    /// how big a dragged window looks, since macOS preserves a window's point
+    /// size across displays. Two screens with equal `pointsPerInch` show a
+    /// dragged element at the same physical size. `nil` when EDID size is absent.
+    var pointsPerInch: Double? {
+        guard physicalSizeMM.width > 1 else { return nil }
+        let inches = Double(physicalSizeMM.width) / 25.4
+        guard inches > 0 else { return nil }
+        return Double(bounds.width) / inches
+    }
+
     /// Stable identity for a physical display across reconnects. Serial is 0 on
     /// some panels; vendor+model still disambiguates most coworking setups.
     var fingerprint: String { "\(vendor)-\(model)-\(serial)" }
+
+    /// A copy repositioned to `origin` — used to build a *prospective* layout for
+    /// previewing a drag without actually reconfiguring the displays.
+    func movedTo(origin: CGPoint) -> DisplaySnapshot {
+        DisplaySnapshot(
+            id: id, name: name,
+            bounds: CGRect(origin: origin, size: bounds.size),
+            pixelSize: pixelSize, physicalSizeMM: physicalSizeMM,
+            physicalSizeIsCalibrated: physicalSizeIsCalibrated,
+            isMain: isMain, isBuiltin: isBuiltin,
+            vendor: vendor, model: model, serial: serial, refreshHz: refreshHz
+        )
+    }
 }
