@@ -50,24 +50,22 @@ final class OverlayController {
     }
 
     /// Rebuild overlay content. `displays` may be a prospective layout (drag /
-    /// nudge / align / zoom preview). No-op while hidden.
+    /// nudge / align / zoom preview); the bars are derived from it via the shared
+    /// `SchematicLayout`, so the glass matches the arranger. No-op while hidden.
     func update(with displays: [DisplaySnapshot]) {
         guard isVisible else { return }
 
-        let junctions = DisplayGraph.junctions(displays)
+        let bars = SchematicLayout(displays: displays).bars
         let colors = DisplayGraph.colors(displays)
         let byID = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
         let screens = screenMap()
 
-        // The reference element is 10 cm on the *real* main screen. During a zoom
+        // The bar is the window's point size (from the layout). During a zoom
         // preview the real screen is still at its current resolution, so each
         // display's bar is scaled by realWidth/prospectiveWidth to render the
-        // prospective physical size at the real pixel density.
+        // prospective size at the real pixel density.
         let real = DisplayManager.snapshot()
         let realWidths = Dictionary(uniqueKeysWithValues: real.map { ($0.id, $0.bounds.width) })
-        let realMainPPT = real.first(where: { $0.isMain })?.pointsPerInch
-            ?? real.compactMap { $0.pointsPerInch }.first ?? 100
-        let referenceLengthPoints = CGFloat(10.0 / 2.54 * realMainPPT)
 
         var live: Set<CGDirectDisplayID> = []
         for d in displays {
@@ -81,8 +79,7 @@ final class OverlayController {
 
             if let view = window.contentView as? OverlayView {
                 view.frame = CGRect(origin: .zero, size: screen.frame.size)
-                view.configure(me: d, byID: byID, junctions: junctions, colors: colors,
-                               referenceLengthPoints: referenceLengthPoints,
+                view.configure(me: d, byID: byID, bars: bars, colors: colors,
                                realWidths: realWidths)
             }
             window.orderFrontRegardless()

@@ -17,12 +17,8 @@ final class OverlayView: NSView {
 
     private var me: DisplaySnapshot?
     private var byID: [CGDirectDisplayID: DisplaySnapshot] = [:]
-    private var junctions: [Junction] = []
+    private var bars: [SeamBar] = []
     private var colors: [CGDirectDisplayID: NSColor] = [:]
-
-    /// Reference element length, in points (anchored to 10 cm on the reference
-    /// screen by the controller), capped per seam to fit the overlap.
-    private var referenceLengthPoints: CGFloat = 160
     private var realWidths: [CGDirectDisplayID: CGFloat] = [:]
     private let barThickness: CGFloat = 22
 
@@ -30,15 +26,13 @@ final class OverlayView: NSView {
 
     func configure(me: DisplaySnapshot,
                    byID: [CGDirectDisplayID: DisplaySnapshot],
-                   junctions: [Junction],
+                   bars: [SeamBar],
                    colors: [CGDirectDisplayID: NSColor],
-                   referenceLengthPoints: CGFloat,
                    realWidths: [CGDirectDisplayID: CGFloat]) {
         self.me = me
         self.byID = byID
-        self.junctions = junctions
+        self.bars = bars
         self.colors = colors
-        self.referenceLengthPoints = referenceLengthPoints
         self.realWidths = realWidths
         needsDisplay = true
     }
@@ -54,30 +48,31 @@ final class OverlayView: NSView {
         selfColor.withAlphaComponent(0.85).setStroke()
         outline.stroke()
 
-        for j in junctions where j.aID == me.id || j.bID == me.id {
-            let facingID = (j.aID == me.id) ? j.bID : j.aID
-            guard let facing = byID[facingID] else { continue }
+        for bar in bars where bar.aID == me.id || bar.bID == me.id {
+            let weAreA = (bar.aID == me.id)
+            let facingID = weAreA ? bar.bID : bar.aID
+            guard byID[facingID] != nil else { continue }
             // Bar is drawn in the *facing* screen's color (outline stays own
             // color), so each bar reads as "this is what's over there" — the
             // clearest to/from indication across the seam.
             let facingColor = colors[facingID] ?? .systemGray
 
-            // The bar renders the reference element's physical size on *this*
-            // screen. During a zoom preview the real screen is unchanged, so scale
-            // by realWidth/prospectiveWidth to show the prospective physical size.
+            // The bar is the window's point size — the same on both screens (only
+            // its physical size differs by density). During a zoom preview the real
+            // screen is unchanged, so scale by realWidth/prospectiveWidth.
             let factor = (realWidths[me.id] ?? me.bounds.width) / me.bounds.width
-            let length = min(referenceLengthPoints * factor, overlapPoints(me, facing) * 0.9)
+            let length = bar.windowPoints * factor
 
+            // The bar's position along the seam comes from the shared layout in
+            // this display's global point coords (continuous), mapped to local.
             let rect: NSRect
-            if j.isVertical {
-                let along = j.midpoint - origin.y
-                let seamAtRight = (j.aID == me.id) // we're the left display
-                let x = seamAtRight ? bounds.width - barThickness : 0
+            if bar.isVertical {
+                let along = (weAreA ? bar.pointAlongA : bar.pointAlongB) - origin.y
+                let x = weAreA ? bounds.width - barThickness : 0 // a = left display
                 rect = NSRect(x: x, y: along - length / 2, width: barThickness, height: length)
             } else {
-                let along = j.midpoint - origin.x
-                let seamAtBottom = (j.aID == me.id) // we're the top display
-                let y = seamAtBottom ? bounds.height - barThickness : 0
+                let along = (weAreA ? bar.pointAlongA : bar.pointAlongB) - origin.x
+                let y = weAreA ? bounds.height - barThickness : 0 // a = top display
                 rect = NSRect(x: along - length / 2, y: y, width: length, height: barThickness)
             }
             drawBar(rect, color: facingColor)
@@ -89,14 +84,5 @@ final class OverlayView: NSView {
         NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
         let p = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
         p.lineWidth = 2; color.setStroke(); p.stroke()
-    }
-
-    /// Overlap length (points) of the seam shared by `a` and `b`.
-    private func overlapPoints(_ a: DisplaySnapshot, _ b: DisplaySnapshot) -> CGFloat {
-        let A = a.bounds, B = b.bounds, tol: CGFloat = 2
-        if abs(A.maxX - B.minX) <= tol || abs(B.maxX - A.minX) <= tol {
-            return max(0, min(A.maxY, B.maxY) - max(A.minY, B.minY))
-        }
-        return max(0, min(A.maxX, B.maxX) - max(A.minX, B.minX))
     }
 }

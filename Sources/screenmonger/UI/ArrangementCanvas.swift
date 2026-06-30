@@ -122,42 +122,81 @@ final class ArrangementCanvas: NSView {
         Dictionary(uniqueKeysWithValues: displays.map { ($0.id, effectiveBounds($0).origin) })
     }
 
+    // MARK: - Physical layout (rendering)
+    //
+    // The point↔physical translation lives in `SchematicLayout`. The canvas owns
+    // only the *view* transform (fitting the physical rects into the window) and
+    // the interaction state; it builds a layout on demand from the effective
+    // snapshots plus the live alignment intent.
+
+    private func schematic() -> SchematicLayout {
+        SchematicLayout(displays: effectiveSnapshots())
+    }
+
+    /// Push the prospective layout to the on-glass overlay so it tracks the
+    /// manipulation; the overlay derives the same bars from these snapshots.
+    private func emitPreview() {
+        onPreview?(effectiveSnapshots())
+    }
+
+    private func physTransform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
+        let values = Array(rects.values)
+        guard let first = values.first else { return nil }
+        let union = values.dropFirst().reduce(first) { $0.union($1) }
+        guard union.width > 0, union.height > 0 else { return nil }
+        let availW = bounds.width - outerPadding * 2, availH = bounds.height - outerPadding * 2
+        let scale = min(availW / union.width, availH / union.height)
+        let offset = CGPoint(x: outerPadding + (availW - union.width * scale) / 2,
+                             y: outerPadding + (availH - union.height * scale) / 2)
+        return Transform(scale: scale, offset: offset, unionOrigin: union.origin)
+    }
+
     // MARK: - Mouse / dragging
+
+    /// The display whose rendered (physical) tile contains view point `p`.
+    private func display(at p: CGPoint) -> DisplaySnapshot? {
+        let rects = schematic().rects
+        guard let t = physTransform(rects) else { return nil }
+        return displays.reversed().first { rects[$0.id].map { t.viewRect(forGlobal: $0).contains(p) } ?? false }
+    }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        guard let t = currentTransform() else { return }
         let p = convert(event.locationInWindow, from: nil)
-        for d in displays.reversed() where t.viewRect(forGlobal: effectiveBounds(d)).contains(p) {
-            draggedID = d.id
-            selectedID = d.id
-            dragStartMouse = p
-            dragStartOrigin = effectiveBounds(d).origin
-            dragMoved = false
-            activeV = nil; activeH = nil
-            needsDisplay = true
-            return
-        }
+        guard let d = display(at: p) else { return }
+        draggedID = d.id
+        selectedID = d.id
+        dragStartMouse = p
+        dragStartOrigin = effectiveBounds(d).origin
+        dragMoved = false
+        activeV = nil; activeH = nil
+        needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let id = draggedID, let t = currentTransform(),
-              let dragged = displays.first(where: { $0.id == id }) else { return }
+        guard let id = draggedID, let dragged = displays.first(where: { $0.id == id }),
+              let t = physTransform(schematic().rects) else { return }
         let p = convert(event.locationInWindow, from: nil)
-        let free = CGPoint(x: dragStartOrigin.x + (p.x - dragStartMouse.x) / t.scale,
-                           y: dragStartOrigin.y + (p.y - dragStartMouse.y) / t.scale)
+        // Convert the cursor delta (view px) to a point delta so the physical tile
+        // tracks the cursor 1:1: view → inches (÷ physical scale) → points
+        // (× the display's points-per-inch).
+        let ps = SchematicLayout.physSize(dragged)
+        let pppX = dragged.bounds.width / max(ps.width, 0.01)
+        let pppY = dragged.bounds.height / max(ps.height, 0.01)
+        let free = CGPoint(x: dragStartOrigin.x + (p.x - dragStartMouse.x) / t.scale * pppX,
+                           y: dragStartOrigin.y + (p.y - dragStartMouse.y) / t.scale * pppY)
 
         let snap = !event.modifierFlags.contains(.shift) // Shift cancels snapping
         let others = displays.filter { $0.id != id }
         let resolved = resolveDrag(size: dragged.bounds.size, free: free, others: others,
-                                   scale: t.scale, dock: snap, align: snap)
+                                   scale: t.scale, dock: snap, align: snap, dragged: dragged)
         guard resolved != workingOrigins[id] else { return }
         workingOrigins[id] = resolved
         if abs(resolved.x - dragStartOrigin.x) > 0.5 || abs(resolved.y - dragStartOrigin.y) > 0.5 {
             dragMoved = true
         }
         needsDisplay = true
-        if dragMoved { onPreview?(effectiveSnapshots()) }
+        if dragMoved { emitPreview() }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -171,7 +210,8 @@ final class ArrangementCanvas: NSView {
     /// contiguous (flush to the nearest neighbor, no overlap/gap); `align`
     /// additionally magnet-snaps the slide along that edge to an alignment point.
     private func resolveDrag(size: CGSize, free: CGPoint, others: [DisplaySnapshot],
-                             scale: CGFloat, dock: Bool, align: Bool) -> CGPoint {
+                             scale: CGFloat, dock: Bool, align: Bool,
+                             dragged: DisplaySnapshot? = nil) -> CGPoint {
         activeV = nil; activeH = nil
         guard !others.isEmpty else { return free }
         guard dock else { return free } // fully free placement
@@ -199,25 +239,32 @@ final class ArrangementCanvas: NSView {
             }
         }
 
-        // 2) Snap the slide along the shared edge to an alignment point (magnetic),
-        //    clamped so the displays keep overlapping.
-        let threshold: CGFloat = 12 / scale
-        if align, let o = neighbor {
+        // 2) Snap the slide to the nearest of the seven alignment configs —
+        //    measured in *physical* (schematic) space, which is what's drawn and
+        //    dragged. Trial-place the docked candidate, read its rendered physical
+        //    rect, and snap when one of its anchors comes within ~12 px of the
+        //    neighbor's matching anchor. The committed origin stays the point
+        //    value; ties (equal physical size) prefer the more central config.
+        // Light magnet: snap the slide only when within a few view px of a
+        // *physical* anchor offset; otherwise leave it continuous. `activeV/H`
+        // record the snapped anchor purely so the tile markers can highlight it.
+        if align, let o = neighbor, let dragged {
+            let physScale = physTransform(SchematicLayout(displays: effectiveSnapshots()).rects)?.scale ?? scale
+            let childSel = selIsChild(dragged.id, of: o.id)
+            let threshold: CGFloat = 4 // view px
             if verticalSeam {
-                let lo = o.bounds.minY - size.height + 1, hi = o.bounds.maxY - 1
-                var bestDY = threshold
-                for s in Snapping.verticalAligns(selectedHeight: size.height, others: [o]) {
-                    let v = clamp(s.value, lo, hi)
-                    let d = abs(v - best.y)
-                    if d < bestDY { bestDY = d; best.y = v; activeV = (s.selfAnchor, s.otherAnchor, s.otherID) }
+                let p2v = physScale * SchematicLayout.physSize(dragged).height / max(size.height, 1)
+                var bestD = threshold
+                for s in SchematicLayout.verticalSnaps(sel: dragged, other: o, selIsChild: childSel) {
+                    let d = abs(s.value - best.y) * p2v
+                    if d < bestD { bestD = d; best.y = s.value; activeV = (s.selfAnchor, s.otherAnchor, s.otherID) }
                 }
             } else {
-                let lo = o.bounds.minX - size.width + 1, hi = o.bounds.maxX - 1
-                var bestDX = threshold
-                for s in Snapping.horizontalAligns(selectedWidth: size.width, others: [o]) {
-                    let v = clamp(s.value, lo, hi)
-                    let d = abs(v - best.x)
-                    if d < bestDX { bestDX = d; best.x = v; activeH = (s.selfAnchor, s.otherAnchor, s.otherID) }
+                let p2v = physScale * SchematicLayout.physSize(dragged).width / max(size.width, 1)
+                var bestD = threshold
+                for s in SchematicLayout.horizontalSnaps(sel: dragged, other: o, selIsChild: childSel) {
+                    let d = abs(s.value - best.x) * p2v
+                    if d < bestD { bestD = d; best.x = s.value; activeH = (s.selfAnchor, s.otherAnchor, s.otherID) }
                 }
             }
         }
@@ -352,7 +399,7 @@ final class ArrangementCanvas: NSView {
         workingOrigins[id] = resolveDrag(size: sel.bounds.size, free: nudgeFree,
                                          others: others, scale: scale, dock: true, align: false)
         needsDisplay = true
-        onPreview?(effectiveSnapshots())
+        emitPreview()
     }
 
     private func moveSelection(_ dir: MoveDirection) {
@@ -427,24 +474,59 @@ final class ArrangementCanvas: NSView {
                 redock(sel, around: join.other, seamVertical: false)
             }
         }
-        onPreview?(effectiveSnapshots())
+        emitPreview()
     }
 
     private func cycleAlign(_ sel: DisplaySnapshot, against others: [DisplaySnapshot],
                             vertical: Bool, increasing: Bool) {
         let s = effectiveBounds(sel)
+        guard let o = others.min(by: {
+            hypot(center(of: $0).x - s.midX, center(of: $0).y - s.midY)
+                < hypot(center(of: $1).x - s.midX, center(of: $1).y - s.midY)
+        }) else { return }
+        let step = increasing ? 1 : -1
+        let childSel = selIsChild(sel.id, of: o.id)
+
+        // The seven physical-anchor offsets are distinct point values (even for
+        // equal-point-width screens), already in spatial order, so cycling is
+        // just stepping the index and stopping at the extremes.
         if vertical {
-            let snaps = Snapping.verticalAligns(selectedHeight: s.height, others: others).sorted { $0.value < $1.value }
-            guard let t = nextSnap(snaps, value: { $0.value }, current: s.minY, increasing: increasing) else { return }
+            let snaps = SchematicLayout.verticalSnaps(sel: effectiveSnapshot(sel), other: effectiveSnapshot(o), selIsChild: childSel)
+            guard !snaps.isEmpty else { return }
+            let cur = activeV?.otherID == o.id
+                ? (snaps.firstIndex { $0.selfAnchor == activeV!.selfA && $0.otherAnchor == activeV!.otherA } ?? nearestIndex(snaps.map(\.value), s.minY))
+                : nearestIndex(snaps.map(\.value), s.minY)
+            let t = snaps[max(0, min(snaps.count - 1, cur + step))]
             workingOrigins[sel.id] = CGPoint(x: s.minX, y: t.value)
-            activeV = (t.selfAnchor, t.otherAnchor, t.otherID); activeH = nil
+            activeV = (t.selfAnchor, t.otherAnchor, o.id); activeH = nil
         } else {
-            let snaps = Snapping.horizontalAligns(selectedWidth: s.width, others: others).sorted { $0.value < $1.value }
-            guard let t = nextSnap(snaps, value: { $0.value }, current: s.minX, increasing: increasing) else { return }
+            let snaps = SchematicLayout.horizontalSnaps(sel: effectiveSnapshot(sel), other: effectiveSnapshot(o), selIsChild: childSel)
+            guard !snaps.isEmpty else { return }
+            let cur = activeH?.otherID == o.id
+                ? (snaps.firstIndex { $0.selfAnchor == activeH!.selfA && $0.otherAnchor == activeH!.otherA } ?? nearestIndex(snaps.map(\.value), s.minX))
+                : nearestIndex(snaps.map(\.value), s.minX)
+            let t = snaps[max(0, min(snaps.count - 1, cur + step))]
             workingOrigins[sel.id] = CGPoint(x: t.value, y: s.minY)
-            activeH = (t.selfAnchor, t.otherAnchor, t.otherID); activeV = nil
+            activeH = (t.selfAnchor, t.otherAnchor, o.id); activeV = nil
         }
         needsDisplay = true
+    }
+
+    /// Index of the value nearest `current` (used to seed cycling from the live,
+    /// possibly-unsnapped position).
+    private func nearestIndex(_ values: [CGFloat], _ current: CGFloat) -> Int {
+        var bestI = 0, bestD = CGFloat.greatestFiniteMagnitude
+        for (i, v) in values.enumerated() where abs(v - current) < bestD { bestD = abs(v - current); bestI = i }
+        return bestI
+    }
+
+    /// Whether `a` is rendered as the BFS child of the pair (a, b) — its density
+    /// governs the seam, so snap targets must be computed with it.
+    private func selIsChild(_ a: CGDirectDisplayID, of b: CGDirectDisplayID) -> Bool {
+        let p = schematic().parents
+        if p[a] == b { return true }
+        if p[b] == a { return false }
+        return !(displays.first { $0.id == a }?.isMain ?? false)
     }
 
     /// Re-dock the selected display onto the nearer perpendicular edge of `o`
@@ -463,13 +545,6 @@ final class ArrangementCanvas: NSView {
         }
         workingOrigins[sel.id] = origin
         needsDisplay = true
-    }
-
-    /// Next snap strictly beyond `current` in the given direction, or nil at the
-    /// extreme (no wraparound).
-    private func nextSnap<T>(_ snaps: [T], value: (T) -> CGFloat, current: CGFloat, increasing: Bool) -> T? {
-        if increasing { return snaps.first(where: { value($0) > current + 0.5 }) }
-        return snaps.last(where: { value($0) < current - 0.5 })
     }
 
     /// Step the selected display's resolution. Like alignment, this only sets a
@@ -521,7 +596,7 @@ final class ArrangementCanvas: NSView {
         }
 
         needsDisplay = true
-        onPreview?(effectiveSnapshots())
+        emitPreview()
     }
 
     /// If the selected display is currently docked *and* sitting on one of its
@@ -530,18 +605,21 @@ final class ArrangementCanvas: NSView {
     private func preservedAlignment(sel: DisplaySnapshot, oldBounds: CGRect, newSize: CGSize)
         -> (origin: CGPoint, v: (VAnchor, VAnchor, CGDirectDisplayID)?, h: (HAnchor, HAnchor, CGDirectDisplayID)?)? {
         guard let join = currentJoin(sel) else { return nil }
+        let other = effectiveSnapshot(join.other)
         let O = effectiveBounds(join.other)
+        let childSel = selIsChild(sel.id, of: join.other.id)
+        let newChild = sel.with(bounds: CGRect(origin: oldBounds.origin, size: newSize))
         if join.vertical {
-            let old = Snapping.verticalAligns(selectedHeight: oldBounds.height, others: [join.other])
+            let old = SchematicLayout.verticalSnaps(sel: sel.with(bounds: oldBounds), other: other, selIsChild: childSel)
             guard let match = old.first(where: { abs($0.value - oldBounds.minY) < 1.5 }) else { return nil }
-            let now = Snapping.verticalAligns(selectedHeight: newSize.height, others: [join.other])
+            let now = SchematicLayout.verticalSnaps(sel: newChild, other: other, selIsChild: childSel)
             guard let nw = now.first(where: { $0.selfAnchor == match.selfAnchor && $0.otherAnchor == match.otherAnchor }) else { return nil }
             let x = join.aPositive ? O.maxX : O.minX - newSize.width
             return (CGPoint(x: x, y: nw.value), (nw.selfAnchor, nw.otherAnchor, nw.otherID), nil)
         } else {
-            let old = Snapping.horizontalAligns(selectedWidth: oldBounds.width, others: [join.other])
+            let old = SchematicLayout.horizontalSnaps(sel: sel.with(bounds: oldBounds), other: other, selIsChild: childSel)
             guard let match = old.first(where: { abs($0.value - oldBounds.minX) < 1.5 }) else { return nil }
-            let now = Snapping.horizontalAligns(selectedWidth: newSize.width, others: [join.other])
+            let now = SchematicLayout.horizontalSnaps(sel: newChild, other: other, selIsChild: childSel)
             guard let nw = now.first(where: { $0.selfAnchor == match.selfAnchor && $0.otherAnchor == match.otherAnchor }) else { return nil }
             let y = join.aPositive ? O.maxY : O.minY - newSize.height
             return (CGPoint(x: nw.value, y: y), nil, (nw.selfAnchor, nw.otherAnchor, nw.otherID))
@@ -577,9 +655,8 @@ final class ArrangementCanvas: NSView {
     // MARK: - Context menu
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let t = currentTransform() else { return nil }
         let p = convert(event.locationInWindow, from: nil)
-        for d in displays.reversed() where t.viewRect(forGlobal: effectiveBounds(d)).contains(p) {
+        if let d = display(at: p) {
             let menu = NSMenu()
             menu.addItem(withTitle: d.name, action: nil, keyEquivalent: "")
             menu.addItem(.separator())
@@ -666,59 +743,48 @@ final class ArrangementCanvas: NSView {
         NSColor.windowBackgroundColor.setFill()
         bounds.fill()
 
-        guard let t = currentTransform() else {
+        let layout = schematic()
+        let rects = layout.rects
+        guard let t = physTransform(rects) else {
             drawCenteredMessage("No displays detected")
             return
         }
 
         for d in displays {
-            drawTile(for: d, in: t.viewRect(forGlobal: effectiveBounds(d)))
+            if let r = rects[d.id] { drawTile(for: d, in: t.viewRect(forGlobal: r)) }
         }
-        drawReferenceBars(t)
-        let markers = activeMarkers()
+        drawReferenceBars(layout.bars, t: t)
+        let markers = activeMarkers(rects)
         for d in displays {
-            drawAnchors(for: d, in: t.viewRect(forGlobal: effectiveBounds(d)), active: markers[d.id])
+            if let r = rects[d.id] { drawAnchors(for: d, in: t.viewRect(forGlobal: r), active: markers[d.id]) }
         }
         drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution")
     }
 
-    /// Reference bars at each seam, mirroring the on-glass overlay: a bar on each
-    /// side of the seam in the *facing* display's color, length = 10cm (anchored
-    /// to the main screen) capped to the overlap — so the size comparison shows
-    /// in the mini-map too.
-    private func drawReferenceBars(_ t: Transform) {
-        let eff = effectiveSnapshots()
-        let junctions = DisplayGraph.junctions(eff)
-        guard !junctions.isEmpty else { return }
-        let byID = Dictionary(uniqueKeysWithValues: eff.map { ($0.id, $0) })
-        let refPPT = eff.first(where: { $0.isMain })?.pointsPerInch
-            ?? eff.compactMap { $0.pointsPerInch }.first ?? 100
-        let refPoints = CGFloat(10.0 / 2.54 * refPPT)
+    /// Reference bars at each seam, from the shared `SchematicLayout`: a bar on
+    /// each side of the seam in the *facing* display's color, length = 10cm
+    /// (anchored to the main screen) capped to the overlap. The on-glass overlay
+    /// renders the same `SeamBar`s, so the mini-map and the glass agree.
+    private func drawReferenceBars(_ bars: [SeamBar], t: Transform) {
+        guard !bars.isEmpty else { return }
         let thickness: CGFloat = 5
 
-        // Each screen renders the same point-length, so its physical size scales
-        // as mainPPT / thatScreen'sPPT — mirror that in the map.
-        func barLen(_ ppt: Double?, capPoints: CGFloat) -> CGFloat {
-            let physical = refPoints * CGFloat(refPPT / (ppt ?? refPPT))
-            return min(physical, capPoints) * t.scale
-        }
-
-        for j in junctions {
-            guard let a = byID[j.aID], let b = byID[j.bID] else { continue }
-            let overlap = j.isVertical
-                ? min(a.bounds.maxY, b.bounds.maxY) - max(a.bounds.minY, b.bounds.minY)
-                : min(a.bounds.maxX, b.bounds.maxX) - max(a.bounds.minX, b.bounds.minX)
-            let cap = overlap * 0.9
-            let lenA = barLen(a.pointsPerInch, capPoints: cap) // a's side, facing color b
-            let lenB = barLen(b.pointsPerInch, capPoints: cap) // b's side, facing color a
-            let c = t.viewPoint(CGPoint(x: j.isVertical ? j.line : j.midpoint,
-                                        y: j.isVertical ? j.midpoint : j.line))
-            if j.isVertical {
-                drawBar(NSRect(x: c.x - thickness, y: c.y - lenA / 2, width: thickness, height: lenA), colorFor[j.bID])
-                drawBar(NSRect(x: c.x, y: c.y - lenB / 2, width: thickness, height: lenB), colorFor[j.aID])
+        for bar in bars {
+            // The window's physical length on each screen (same point size, so the
+            // physical lengths differ by density — the size change the bar shows).
+            // Each bar sits at its own clamped (on-screen) position along the seam.
+            let lenA = bar.physLenInchesA * t.scale // a's side, facing color b
+            let lenB = bar.physLenInchesB * t.scale // b's side, facing color a
+            if bar.isVertical {
+                let cA = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongA))
+                let cB = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongB))
+                drawBar(NSRect(x: cA.x - thickness, y: cA.y - lenA / 2, width: thickness, height: lenA), colorFor[bar.bID])
+                drawBar(NSRect(x: cB.x, y: cB.y - lenB / 2, width: thickness, height: lenB), colorFor[bar.aID])
             } else {
-                drawBar(NSRect(x: c.x - lenA / 2, y: c.y - thickness, width: lenA, height: thickness), colorFor[j.bID])
-                drawBar(NSRect(x: c.x - lenB / 2, y: c.y, width: lenB, height: thickness), colorFor[j.aID])
+                let cA = t.viewPoint(CGPoint(x: bar.physAlongA, y: bar.physLine))
+                let cB = t.viewPoint(CGPoint(x: bar.physAlongB, y: bar.physLine))
+                drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y - thickness, width: lenA, height: thickness), colorFor[bar.bID])
+                drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y, width: lenB, height: thickness), colorFor[bar.aID])
             }
         }
     }
@@ -744,8 +810,8 @@ final class ArrangementCanvas: NSView {
     }
 
     private func drawLabel(for display: DisplaySnapshot, in rect: NSRect) {
-        var lines: [(String, NSFont)] = []
-        lines.append((display.name + (display.isMain ? "  ●" : ""), .boldSystemFont(ofSize: 12)))
+        var lines: [(String, NSFont, NSColor)] = []
+        lines.append((display.name + (display.isMain ? "  ●" : ""), .boldSystemFont(ofSize: 12), .labelColor))
 
         // Effective resolution, live during a zoom and italic while uncommitted.
         let eb = effectiveBounds(display)
@@ -758,18 +824,24 @@ final class ArrangementCanvas: NSView {
         let resFont: NSFont = pending != nil
             ? NSFontManager.shared.convert(.systemFont(ofSize: 10), toHaveTrait: .italicFontMask)
             : .systemFont(ofSize: 10)
-        lines.append((resText, resFont))
+        lines.append((resText, resFont, .labelColor))
 
-        if let ppi = display.ppi {
-            let suffix = display.physicalSizeIsCalibrated
-                ? String(format: " (calibrated %.0f\")", display.diagonalInches) : ""
-            lines.append((String(format: "%.0f ppi%@", ppi, suffix), .systemFont(ofSize: 10)))
+        // EDID is trustworthy for the built-in or once calibrated; otherwise
+        // prompt to calibrate (coworking monitors often report bogus sizes).
+        let trusted = display.physicalSizeIsCalibrated || display.isBuiltin
+        if let ppi = display.ppi, trusted {
+            let cal = display.physicalSizeIsCalibrated ? " (calibrated)" : ""
+            lines.append((String(format: "%.0f ppi · %.1f″%@", ppi, display.diagonalInches, cal),
+                          .systemFont(ofSize: 10), .labelColor))
+        } else if let ppi = display.ppi {
+            lines.append((String(format: "%.0f ppi · calibrate screen size?", ppi), .systemFont(ofSize: 10), .labelColor))
         } else {
-            lines.append(("ppi: unknown (needs calibration)", .systemFont(ofSize: 10)))
+            lines.append(("calibrate screen size?", .systemFont(ofSize: 10), .labelColor))
         }
+
         var y = rect.minY + 8
-        for (text, font) in lines {
-            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.labelColor]
+        for (text, font, color) in lines {
+            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             let size = (text as NSString).size(withAttributes: attrs)
             guard y + size.height <= rect.maxY - 4 else { break }
             (text as NSString).draw(at: CGPoint(x: rect.minX + 8, y: y), withAttributes: attrs)
@@ -847,23 +919,25 @@ final class ArrangementCanvas: NSView {
         return p
     }
 
-    /// Which anchor (and arrow direction) is active on each of the two aligned
-    /// displays. The aligned anchor sits on the edge facing the other display.
-    private func activeMarkers() -> [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)] {
-        guard let selID = selectedID, let s = displays.first(where: { $0.id == selID }) else { return [:] }
-        let sR = effectiveBounds(s)
+    /// Markers for the active alignment. They read the same stored anchor pair the
+    /// physical layout was placed by (`vAnchorPair`/`hAnchorPair` use it too), so
+    /// the arrows always land on the anchors the tiles were docked on. Facing side
+    /// (which edge the arrow sits on) comes from the rendered rects.
+    private func activeMarkers(_ rects: [CGDirectDisplayID: CGRect])
+        -> [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)] {
+        guard let selID = selectedID, let sR = rects[selID] else { return [:] }
 
-        if let a = activeV, let o = displays.first(where: { $0.id == a.otherID }) {
-            let oRight = effectiveBounds(o).midX > sR.midX
-            let sp = vPos(facingRight: oRight, level: a.selfA)
-            let op = vPos(facingRight: !oRight, level: a.otherA)
+        if let a = activeV, let oR = rects[a.otherID] { // vertical seam (side by side)
+            let selLeft = sR.midX < oR.midX
+            let sp = vPos(facingRight: selLeft, level: a.selfA)
+            let op = vPos(facingRight: !selLeft, level: a.otherA)
             return [selID: (sp, dirV(sp, corner: a.selfA != .center, partner: a.otherA)),
                     a.otherID: (op, dirV(op, corner: a.otherA != .center, partner: a.selfA))]
         }
-        if let a = activeH, let o = displays.first(where: { $0.id == a.otherID }) {
-            let oBelow = effectiveBounds(o).midY > sR.midY
-            let sp = hPos(facingBelow: oBelow, level: a.selfA)
-            let op = hPos(facingBelow: !oBelow, level: a.otherA)
+        if let a = activeH, let oR = rects[a.otherID] { // horizontal seam (stacked)
+            let selAbove = sR.midY < oR.midY
+            let sp = hPos(facingBelow: selAbove, level: a.selfA)
+            let op = hPos(facingBelow: !selAbove, level: a.otherA)
             return [selID: (sp, dirH(sp, corner: a.selfA != .center, partner: a.otherA)),
                     a.otherID: (op, dirH(op, corner: a.otherA != .center, partner: a.selfA))]
         }
