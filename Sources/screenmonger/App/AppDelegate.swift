@@ -27,12 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let calibrationController = CalibrationController()
     private var revertButton: NSButton!
 
-    // Live-drag / revert state.
+    // Live-manipulation / revert state.
     private var isLiveDragging = false
-    private var preDragOrigins: [CGDirectDisplayID: CGPoint] = [:]
-    private var preDragMainID: CGDirectDisplayID?
     private var revertOrigins: [CGDirectDisplayID: CGPoint]?
-    private var wasOverlayVisible = false
+    private var overlayAutoShown = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
@@ -62,6 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      action: #selector(toggleOverlays(_:)), keyEquivalent: "b")
         menu.addItem(overlayMenuItem)
         menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r")
+        let extItem = NSMenuItem(title: "Extended Built-in Resolutions",
+                                 action: #selector(toggleExtendedBuiltin(_:)), keyEquivalent: "")
+        menu.addItem(extItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit screenmonger", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
@@ -99,8 +100,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         canvas.onCommit = { [weak self] origins in
             self?.commitArrangement(origins)
         }
-        canvas.onDragUpdate = { [weak self] origins in
-            self?.dragUpdate(origins)
+        canvas.onPreview = { [weak self] snapshots in
+            self?.preview(snapshots)
         }
         canvas.onSetMain = { [weak self] id in
             self?.setMainDisplay(id)
@@ -174,6 +175,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Switch a display's resolution, then confirm-or-revert. The revert really
     /// matters here: a bad mode can leave a screen black.
     private func setMode(_ id: CGDirectDisplayID, _ mode: CGDisplayMode) {
+        isLiveDragging = false
+        if overlayAutoShown {
+            overlay.fadeOut()
+            overlayAutoShown = false
+        }
         let previous = CGDisplayCopyDisplayMode(id)
         guard DisplayManager.applyMode(mode, to: id) else {
             refresh()
@@ -211,65 +217,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Arrangement commit
 
-    /// Preview a placement during a drag — *without* touching the real displays
-    /// (a CG reconfigure per slot is far too slow). We move only our own things:
-    /// the canvas tiles and the reference-bar overlay, fed a prospective layout.
-    /// The real reconfigure happens once on drop. Reference bars auto-appear at
-    /// the start of a drag.
-    private func dragUpdate(_ origins: [CGDirectDisplayID: CGPoint]) {
-        if !isLiveDragging {
-            isLiveDragging = true
-            let snap = DisplayManager.snapshot()
-            preDragOrigins = originMap(of: snap)
-            preDragMainID = snap.first(where: { $0.isMain })?.id
-            wasOverlayVisible = overlay.isVisible
-        }
-        let prospective = prospectiveSnapshot(origins)
+    /// Preview a prospective layout (drag / nudge / align / zoom) on the on-glass
+    /// reference bars, without reconfiguring hardware. The bars auto-appear while
+    /// the manipulation is in progress and are restored on commit.
+    private func preview(_ snapshots: [DisplaySnapshot]) {
+        isLiveDragging = true
         if overlay.isVisible {
-            overlay.update(with: prospective)
+            overlay.update(with: snapshots)
         } else {
-            overlay.show(with: prospective)
+            overlay.show(with: snapshots)
+            overlayAutoShown = true
         }
     }
 
-    /// Finalize a drag: now apply the layout to the real displays, once. A drag
-    /// never changes the main display (it's pinned), so no modal here.
+    /// Finalize a manipulation (drag or keyboard): apply to the real displays
+    /// once, pinning the current main so it never changes. Surfaces a Revert
+    /// button. Works for both mouse and keyboard because neither reconfigures
+    /// hardware until here, so the live snapshot is still the "before" state.
     private func commitArrangement(_ origins: [CGDirectDisplayID: CGPoint]) {
-        let beforeOrigins = preDragOrigins
+        let snap = DisplayManager.snapshot()
+        let before = originMap(of: snap)
+        let mainID = snap.first(where: { $0.isMain })?.id
         isLiveDragging = false
 
-        guard DisplayManager.applyOrigins(pinningMain(origins), permanent: true) else {
+        guard DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true) else {
             refresh()
             return
         }
-        // Restore the overlay to its pre-drag visibility.
-        if !wasOverlayVisible {
-            overlay.hide()
-            overlayMenuItem.state = .off
+        if overlayAutoShown {
+            overlay.fadeOut()
+            overlayAutoShown = false
         }
         refresh()
 
-        if originsEqual(originMap(of: DisplayManager.snapshot()), beforeOrigins) {
-            hideRevert() // dragged back to where it started
+        if originsEqual(originMap(of: DisplayManager.snapshot()), before) {
+            hideRevert()
         } else {
-            showRevert(to: beforeOrigins)
+            showRevert(to: before)
         }
     }
 
-    /// The real snapshot with origins replaced by the (main-pinned) drag layout,
-    /// for previewing without reconfiguring hardware.
-    private func prospectiveSnapshot(_ origins: [CGDirectDisplayID: CGPoint]) -> [DisplaySnapshot] {
-        let pinned = pinningMain(origins)
-        return DisplayManager.snapshot().map { d in
-            pinned[d.id].map { d.movedTo(origin: $0) } ?? d
-        }
-    }
-
-    /// Translate an arrangement so the current main display stays at global
-    /// (0,0) — CoreGraphics keys the main display off (0,0), so this guarantees
-    /// the main display never changes during a rearrange.
-    private func pinningMain(_ origins: [CGDirectDisplayID: CGPoint]) -> [CGDirectDisplayID: CGPoint] {
-        guard let mainID = preDragMainID, let offset = origins[mainID] else { return origins }
+    /// Translate an arrangement so `mainID` stays at global (0,0) — CoreGraphics
+    /// keys the main display off (0,0), so this guarantees main never changes.
+    private func pin(_ origins: [CGDirectDisplayID: CGPoint], mainID: CGDirectDisplayID?) -> [CGDirectDisplayID: CGPoint] {
+        guard let mainID, let offset = origins[mainID] else { return origins }
         return origins.mapValues { CGPoint(x: $0.x - offset.x, y: $0.y - offset.y) }
     }
 
@@ -335,7 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let displays = DisplayManager.snapshot()
         // Mid-drag, the canvas owns its working state; don't clobber it. The
         // overlay still updates so the reference bars track live.
-        if !isLiveDragging { canvas.update(with: displays) }
+        if !isLiveDragging { canvas.update(with: displays, colors: DisplayGraph.colors(displays)) }
         overlay.update(with: displays)
     }
 
@@ -344,8 +335,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sender.state = overlay.isVisible ? .on : .off
     }
 
+    @objc func toggleExtendedBuiltin(_ sender: NSMenuItem) {
+        canvas.extendedBuiltinModes.toggle()
+        sender.state = canvas.extendedBuiltinModes ? .on : .off
+        refresh()
+    }
+
     @objc func showWindow() {
         window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(canvas)
         NSApp.activate(ignoringOtherApps: true)
     }
 }

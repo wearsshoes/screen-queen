@@ -1,13 +1,14 @@
 import AppKit
 
 /// Manages the transparent, click-through overlay window on each display that
-/// renders the reference boxes. Windows are created lazily and torn down when
-/// the overlays are hidden or a display disconnects.
+/// renders the reference bars. Windows are created lazily and torn down (or
+/// faded out) when the overlays are hidden or a display disconnects.
 @MainActor
 final class OverlayController {
 
     private var windows: [CGDirectDisplayID: NSWindow] = [:]
     private(set) var isVisible = false
+    private var fadeToken = 0
 
     func toggle(with displays: [DisplaySnapshot]) {
         if isVisible { hide() } else { show(with: displays) }
@@ -15,16 +16,41 @@ final class OverlayController {
 
     func show(with displays: [DisplaySnapshot]) {
         isVisible = true
+        fadeToken &+= 1 // cancel any in-flight fade
+        for window in windows.values { window.alphaValue = 1 }
         update(with: displays)
     }
 
     func hide() {
         isVisible = false
+        fadeToken &+= 1
         for window in windows.values { window.orderOut(nil) }
         windows.removeAll()
     }
 
-    /// Rebuild overlay content from a fresh snapshot. No-op while hidden.
+    /// Fade the bars out with an ease-in-out (S-curve) over `duration` seconds,
+    /// e.g. after the user releases the manipulation keys.
+    func fadeOut(duration: TimeInterval = 2) {
+        guard isVisible else { return }
+        isVisible = false
+        fadeToken &+= 1
+        let token = fadeToken
+        let wins = Array(windows.values)
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            wins.forEach { $0.animator().alphaValue = 0 }
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.fadeToken == token else { return } // re-shown mid-fade
+                for w in wins { w.orderOut(nil); w.alphaValue = 1 }
+                self.windows.removeAll()
+            }
+        })
+    }
+
+    /// Rebuild overlay content. `displays` may be a prospective layout (drag /
+    /// nudge / align / zoom preview). No-op while hidden.
     func update(with displays: [DisplaySnapshot]) {
         guard isVisible else { return }
 
@@ -33,13 +59,15 @@ final class OverlayController {
         let byID = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
         let screens = screenMap()
 
-        // Anchor the reference element to 10 cm on the reference (main) screen,
-        // then draw that same point-length on every screen so the per-screen
-        // physical lengths reveal how a dragged window changes size.
-        let referenceCM = 10.0
-        let refPPT = displays.first(where: { $0.isMain })?.pointsPerInch
-            ?? displays.compactMap { $0.pointsPerInch }.first ?? 100
-        let referenceLengthPoints = CGFloat(referenceCM / 2.54 * refPPT)
+        // The reference element is 10 cm on the *real* main screen. During a zoom
+        // preview the real screen is still at its current resolution, so each
+        // display's bar is scaled by realWidth/prospectiveWidth to render the
+        // prospective physical size at the real pixel density.
+        let real = DisplayManager.snapshot()
+        let realWidths = Dictionary(uniqueKeysWithValues: real.map { ($0.id, $0.bounds.width) })
+        let realMainPPT = real.first(where: { $0.isMain })?.pointsPerInch
+            ?? real.compactMap { $0.pointsPerInch }.first ?? 100
+        let referenceLengthPoints = CGFloat(10.0 / 2.54 * realMainPPT)
 
         var live: Set<CGDirectDisplayID> = []
         for d in displays {
@@ -49,11 +77,13 @@ final class OverlayController {
             let window = windows[d.id] ?? makeWindow()
             windows[d.id] = window
             window.setFrame(screen.frame, display: false)
+            window.alphaValue = 1
 
             if let view = window.contentView as? OverlayView {
                 view.frame = CGRect(origin: .zero, size: screen.frame.size)
                 view.configure(me: d, byID: byID, junctions: junctions, colors: colors,
-                               referenceLengthPoints: referenceLengthPoints)
+                               referenceLengthPoints: referenceLengthPoints,
+                               realWidths: realWidths)
             }
             window.orderFrontRegardless()
         }

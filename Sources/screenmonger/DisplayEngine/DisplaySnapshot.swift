@@ -74,16 +74,19 @@ struct DisplaySnapshot: Identifiable, Equatable {
     /// some panels; vendor+model still disambiguates most coworking setups.
     var fingerprint: String { "\(vendor)-\(model)-\(serial)" }
 
-    /// A copy repositioned to `origin` — used to build a *prospective* layout for
-    /// previewing a drag without actually reconfiguring the displays.
-    func movedTo(origin: CGPoint) -> DisplaySnapshot {
+    /// A copy with new `bounds` — for building a *prospective* layout (drag or
+    /// resolution preview) without actually reconfiguring the displays.
+    func with(bounds: CGRect) -> DisplaySnapshot {
         DisplaySnapshot(
-            id: id, name: name,
-            bounds: CGRect(origin: origin, size: bounds.size),
+            id: id, name: name, bounds: bounds,
             pixelSize: pixelSize, physicalSizeMM: physicalSizeMM,
             physicalSizeIsCalibrated: physicalSizeIsCalibrated,
             isMain: isMain, isBuiltin: isBuiltin,
             vendor: vendor, model: model, serial: serial, refreshHz: refreshHz
         )
+    }
+
+    func movedTo(origin: CGPoint) -> DisplaySnapshot {
+        with(bounds: CGRect(origin: origin, size: bounds.size))
     }
 }

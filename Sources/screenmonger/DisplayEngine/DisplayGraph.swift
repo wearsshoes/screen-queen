@@ -69,23 +69,14 @@ enum DisplayGraph {
         return result
     }
 
-    /// Assign each display a palette color such that adjacent displays differ.
-    /// Greedy over a stable id order — plenty for a handful of monitors.
+    /// Assign each display a distinct palette color, keyed to a stable id order.
+    /// Distinct-by-index (rather than minimal graph coloring) keeps colors stable
+    /// while dragging and guarantees neighbors always differ for any realistic
+    /// monitor count.
     static func colors(_ displays: [DisplaySnapshot]) -> [CGDirectDisplayID: NSColor] {
-        var adjacency: [CGDirectDisplayID: Set<CGDirectDisplayID>] = [:]
-        for j in junctions(displays) {
-            adjacency[j.aID, default: []].insert(j.bID)
-            adjacency[j.bID, default: []].insert(j.aID)
-        }
-
-        var colorIndex: [CGDirectDisplayID: Int] = [:]
         var assigned: [CGDirectDisplayID: NSColor] = [:]
-        for d in displays.sorted(by: { $0.id < $1.id }) {
-            let used = Set((adjacency[d.id] ?? []).compactMap { colorIndex[$0] })
-            var c = 0
-            while used.contains(c) { c += 1 }
-            colorIndex[d.id] = c
-            assigned[d.id] = palette[c % palette.count]
+        for (i, d) in displays.sorted(by: { $0.id < $1.id }).enumerated() {
+            assigned[d.id] = palette[i % palette.count]
         }
         return assigned
     }

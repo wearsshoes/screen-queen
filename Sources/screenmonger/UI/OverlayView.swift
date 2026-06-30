@@ -23,6 +23,7 @@ final class OverlayView: NSView {
     /// Reference element length, in points (anchored to 10 cm on the reference
     /// screen by the controller), capped per seam to fit the overlap.
     private var referenceLengthPoints: CGFloat = 160
+    private var realWidths: [CGDirectDisplayID: CGFloat] = [:]
     private let barThickness: CGFloat = 22
 
     override var isFlipped: Bool { true }
@@ -31,12 +32,14 @@ final class OverlayView: NSView {
                    byID: [CGDirectDisplayID: DisplaySnapshot],
                    junctions: [Junction],
                    colors: [CGDirectDisplayID: NSColor],
-                   referenceLengthPoints: CGFloat) {
+                   referenceLengthPoints: CGFloat,
+                   realWidths: [CGDirectDisplayID: CGFloat]) {
         self.me = me
         self.byID = byID
         self.junctions = junctions
         self.colors = colors
         self.referenceLengthPoints = referenceLengthPoints
+        self.realWidths = realWidths
         needsDisplay = true
     }
 
@@ -59,8 +62,11 @@ final class OverlayView: NSView {
             // clearest to/from indication across the seam.
             let facingColor = colors[facingID] ?? .systemGray
 
-            // Same reference length (points) on both screens, capped to overlap.
-            let length = min(referenceLengthPoints, overlapPoints(me, facing) * 0.9)
+            // The bar renders the reference element's physical size on *this*
+            // screen. During a zoom preview the real screen is unchanged, so scale
+            // by realWidth/prospectiveWidth to show the prospective physical size.
+            let factor = (realWidths[me.id] ?? me.bounds.width) / me.bounds.width
+            let length = min(referenceLengthPoints * factor, overlapPoints(me, facing) * 0.9)
 
             let rect: NSRect
             if j.isVertical {
