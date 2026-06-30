@@ -11,6 +11,9 @@ final class ArrangementCanvas: NSView {
     /// Called on drop with the desired global origin for every display.
     var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)?
 
+    /// Called when the user picks "Set as Main Display" from a tile's context menu.
+    var onSetMain: ((CGDirectDisplayID) -> Void)?
+
     private var displays: [DisplaySnapshot] = []
 
     /// Per-display origin overrides applied during a drag (global points).
@@ -19,6 +22,8 @@ final class ArrangementCanvas: NSView {
     private var draggedID: CGDirectDisplayID?
     private var dragStartMouse: CGPoint = .zero
     private var dragStartOrigin: CGPoint = .zero
+    /// Whether the active drag has actually relocated the tile (a bare click won't).
+    private var dragMoved = false
 
     private let outerPadding: CGFloat = 32
     private let tileCornerRadius: CGFloat = 8
@@ -82,6 +87,7 @@ final class ArrangementCanvas: NSView {
             draggedID = d.id
             dragStartMouse = p
             dragStartOrigin = effectiveBounds(d).origin
+            dragMoved = false
             needsDisplay = true
             return
         }
@@ -102,15 +108,44 @@ final class ArrangementCanvas: NSView {
         // Show the resolved (gap-free, non-overlapping) placement live, not the
         // raw cursor position — this is where the display would actually land.
         let others = displays.filter { $0.id != id }.map(effectiveBounds)
-        workingOrigins[id] = resolve(size: dragged.bounds.size, freeOrigin: freeOrigin, against: others)
+        let resolved = resolve(size: dragged.bounds.size, freeOrigin: freeOrigin, against: others)
+        workingOrigins[id] = resolved
+        if abs(resolved.x - dragStartOrigin.x) > 0.5 || abs(resolved.y - dragStartOrigin.y) > 0.5 {
+            dragMoved = true
+        }
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer { draggedID = nil }
+        defer { draggedID = nil; dragMoved = false }
         guard draggedID != nil else { return }
+        // A click without a real move shouldn't reconfigure anything.
+        guard dragMoved else { needsDisplay = true; return }
         let origins = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, effectiveBounds($0).origin) })
         onCommit?(origins)
+    }
+
+    // MARK: - Context menu
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let t = currentTransform() else { return nil }
+        let p = convert(event.locationInWindow, from: nil)
+        for d in displays.reversed() where t.viewRect(forGlobal: effectiveBounds(d)).contains(p) {
+            let menu = NSMenu()
+            let item = NSMenuItem(title: "Set as Main Display",
+                                  action: #selector(setMainFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = NSNumber(value: d.id)
+            item.isEnabled = !d.isMain
+            menu.addItem(item)
+            return menu
+        }
+        return nil
+    }
+
+    @objc private func setMainFromMenu(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? NSNumber else { return }
+        onSetMain?(number.uint32Value)
     }
 
     /// Resolve a free cursor position into the nearest *valid* placement: the
@@ -163,7 +198,7 @@ final class ArrangementCanvas: NSView {
         }
 
         for d in displays {
-            drawTile(for: d, in: t.viewRect(forGlobal: effectiveBounds(d)), dragging: d.id == draggedID)
+            drawTile(for: d, in: t.viewRect(forGlobal: effectiveBounds(d)), dragging: d.id == draggedID && dragMoved)
         }
         drawFooter("Drag a display to rearrange")
     }

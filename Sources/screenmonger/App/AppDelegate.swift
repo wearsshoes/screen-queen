@@ -69,6 +69,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         canvas.onCommit = { [weak self] origins in
             self?.commitArrangement(origins)
         }
+        canvas.onSetMain = { [weak self] id in
+            self?.setMainDisplay(id)
+        }
+    }
+
+    /// Make `id` the main display by shifting the whole arrangement so that
+    /// display sits at the global origin (0,0) — CoreGraphics treats the display
+    /// at (0,0) as main. Goes through the same apply + confirm + revert flow.
+    private func setMainDisplay(_ id: CGDirectDisplayID) {
+        let snapshot = DisplayManager.snapshot()
+        guard let target = snapshot.first(where: { $0.id == id }), !target.isMain else { return }
+        let dx = -target.bounds.origin.x
+        let dy = -target.bounds.origin.y
+        let origins = Dictionary(uniqueKeysWithValues: snapshot.map {
+            ($0.id, CGPoint(x: $0.bounds.origin.x + dx, y: $0.bounds.origin.y + dy))
+        })
+        commitArrangement(origins)
     }
 
     // MARK: - Arrangement commit
