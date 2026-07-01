@@ -1,18 +1,11 @@
 import AppKit
 
-/// Draws, on one real display's glass, that display's colored outline plus — at
-/// each seam — a single reference bar in the display's own color, hugging the
-/// seam and centered on the overlap midpoint.
-///
-/// Same UI idea as the calibration tool: each screen shows one bar representing
-/// the same reference element (a fixed point size). Because pixels are square,
-/// that bar's physical length is `referencePoints / pointsPerInch`, so comparing
-/// the two bars *across the seam* tells you directly whether a window keeps its
-/// size when dragged across — equal physical lengths ⇒ seamless.
-///
-/// The view is flipped (top-left origin) so it shares CoreGraphics' global
-/// coordinate convention: a global point maps to local by subtracting this
-/// display's origin, since the overlay window exactly covers the screen.
+/// Draws, on one real display's glass, that display's colored outline plus a
+/// reference bar at each seam (in the facing display's color). Both screens show
+/// the same window at its fixed point size, so comparing the two bars' *physical*
+/// lengths across the seam shows whether a window keeps its size crossing over —
+/// equal lengths ⇒ seamless. The view is flipped (top-left origin) to match the
+/// screen-local coordinates the bars carry.
 final class OverlayView: NSView {
 
     private var me: DisplaySnapshot?
@@ -39,7 +32,6 @@ final class OverlayView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let me else { return }
-        let origin = me.bounds.origin
         let selfColor = colors[me.id] ?? .systemGray
 
         // Screen outline in this display's color.
@@ -57,21 +49,20 @@ final class OverlayView: NSView {
             // clearest to/from indication across the seam.
             let facingColor = colors[facingID] ?? .systemGray
 
-            // The bar is the window's point size — the same on both screens (only
-            // its physical size differs by density). During a zoom preview the real
-            // screen is unchanged, so scale by realWidth/prospectiveWidth.
+            // The window's point size — the same on both screens (its physical size
+            // differs by density). During a zoom preview the real screen is unchanged,
+            // so scale by realWidth/prospectiveWidth.
             let factor = (realWidths[me.id] ?? me.bounds.width) / me.bounds.width
             let length = bar.windowPoints * factor
 
-            // The bar's position along the seam comes from the shared layout in
-            // this display's global point coords (continuous), mapped to local.
+            // The bar's along-seam position is a point offset from this screen's own
+            // leading edge (frame-independent), scaled for a zoom preview.
+            let along = (weAreA ? bar.localAlongA : bar.localAlongB) * factor
             let rect: NSRect
             if bar.isVertical {
-                let along = (weAreA ? bar.pointAlongA : bar.pointAlongB) - origin.y
                 let x = weAreA ? bounds.width - barThickness : 0 // a = left display
                 rect = NSRect(x: x, y: along - length / 2, width: barThickness, height: length)
             } else {
-                let along = (weAreA ? bar.pointAlongA : bar.pointAlongB) - origin.x
                 let y = weAreA ? bounds.height - barThickness : 0 // a = top display
                 rect = NSRect(x: along - length / 2, y: y, width: length, height: barThickness)
             }

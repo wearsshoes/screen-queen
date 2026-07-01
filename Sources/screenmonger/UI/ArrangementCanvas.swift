@@ -109,19 +109,23 @@ final class ArrangementCanvas: NSView {
     /// Effective point size (live during a zoom preview).
     private func pointSize(_ d: DisplaySnapshot) -> CGSize { pendingSize[d.id] ?? d.bounds.size }
 
-    /// Displays with the effective point size applied (physical size unchanged).
-    private func effDisplays() -> [DisplaySnapshot] {
+    /// Displays with the effective point *size* applied (physical size unchanged),
+    /// keeping their committed origins. Enough for `toPoints`, which ignores origins.
+    private func sizedDisplays() -> [DisplaySnapshot] {
         displays.map { $0.with(bounds: CGRect(origin: $0.bounds.origin, size: pointSize($0))) }
     }
 
     private func currentRects() -> [CGDirectDisplayID: CGRect] { plane }
     /// The reference bars for the current plane (shared with the on-glass overlay).
-    func currentBars() -> [SeamBar] { SchematicLayout.seamBars(effDisplays(), rects: plane) }
+    /// Bar coordinates are screen-local, so the committed origins in `sizedDisplays()`
+    /// don't matter — only the plane rects and point sizes.
+    func currentBars() -> [SeamBar] { SchematicLayout.seamBars(sizedDisplays(), rects: plane) }
 
-    /// Convert the plane to a point arrangement and commit.
+    /// Convert the plane to a point arrangement and commit. `toPoints` reads only the
+    /// displays' sizes and the plane, so the sized (un-reprojected) list is enough.
     private func commitPlane() {
         guard !plane.isEmpty else { return }
-        onCommit?(SchematicLayout.toPoints(rects: plane, displays: effDisplays()))
+        onCommit?(SchematicLayout.toPoints(rects: plane, displays: sizedDisplays()))
     }
 
     /// Push the plane's bars to the on-glass overlay so it tracks the manipulation.
@@ -294,7 +298,7 @@ final class ArrangementCanvas: NSView {
             let mode = pendingMode
             // A resolution change leaves the physical plane untouched; commit the point
             // arrangement that reproduces it at the new size, preserving alignment.
-            let origins = SchematicLayout.toPoints(rects: plane, displays: effDisplays())
+            let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
             pendingMode = nil; pendingSize.removeAll()
             if let mode { onSetResolution?(mode.id, mode.mode, origins) }
         }
@@ -596,9 +600,9 @@ final class ArrangementCanvas: NSView {
         drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution")
     }
 
-    /// Reference bars at each seam, from the shared `SchematicLayout`: a window
-    /// 100% of the smaller screen's edge shown on each side in the facing color, at
-    /// its own physical size (differs by density), each clamped to stay on-screen.
+    /// Reference bars at each seam, from the shared `SchematicLayout`: the reference
+    /// window shown on each side in the facing color, at its own physical size (which
+    /// differs by density — the size jump a window makes crossing the seam).
     private func drawReferenceBars(_ bars: [SeamBar], t: Transform) {
         let thickness: CGFloat = 5
         for bar in bars {
