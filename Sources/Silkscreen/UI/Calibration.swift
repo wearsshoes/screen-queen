@@ -47,7 +47,7 @@ final class CalibrationController {
 
     private var refWindow: NSWindow?
     private var targetWindow: NSWindow?
-    private var controlsBar: BarView?
+    private var panel: CalibrationPanel?
     private var target: DisplaySnapshot?
 
     private var refPPT: Double = 0             // trusted reference PPI (source of truth)
@@ -83,19 +83,26 @@ final class CalibrationController {
         refLengthPoints = overlapPoints
         targetLengthPoints = overlapPoints
 
-        // Reference bar (trusted screen): resizable, no controls.
-        let refView = BarView(length: overlapPoints, color: .systemGreen, anchor: refAnchor, controls: false)
+        // Both bars wear the same QuickTime-trimmer look; a small label tells them
+        // apart. Reference bar (trusted screen): a pure resize affordance, no controls.
+        let refView = BarView(length: overlapPoints, anchor: refAnchor, role: "Reference")
         refView.onResize = { [weak self] len in self?.refLengthPoints = len; self?.updateReadout() }
         refWindow = makeWindow(screen: refScreen, view: refView, interactive: true)
 
-        // Target bar (target screen): resizable, hosts the readout + Save/Cancel.
-        let calView = BarView(length: overlapPoints, color: .systemOrange, anchor: targetAnchor, controls: true)
+        // Target bar (target screen): also a pure resize affordance. The controls now
+        // live in a floating panel, keeping the overlay clean.
+        let calView = BarView(length: overlapPoints, anchor: targetAnchor, role: "This display")
         calView.onResize = { [weak self] len in self?.targetLengthPoints = len; self?.updateReadout() }
-        calView.onSave = { [weak self] in self?.save() }
-        calView.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
-        controlsBar = calView
         targetWindow = makeWindow(screen: targetScreen, view: calView, interactive: true)
-        targetWindow?.makeKeyAndOrderFront(nil)
+
+        // A native floating panel on the target screen holds the instruction, the live
+        // inferred-size readout, and Save/Cancel — instead of controls floating on the dim.
+        let panel = CalibrationPanel(displayName: target.name)
+        panel.onSave = { [weak self] in self?.save() }
+        panel.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
+        panel.present(on: targetScreen, near: targetAnchor)
+        self.panel = panel
+
         NSApp.activate(ignoringOtherApps: true)
         updateReadout()
     }
@@ -103,7 +110,7 @@ final class CalibrationController {
     func cancel() {
         refWindow?.orderOut(nil); refWindow = nil
         targetWindow?.orderOut(nil); targetWindow = nil
-        controlsBar = nil
+        panel?.orderOut(nil); panel = nil
         target = nil
     }
 
@@ -121,8 +128,7 @@ final class CalibrationController {
             ? (Double(target.bounds.width) * Double(target.bounds.width)
                + Double(target.bounds.height) * Double(target.bounds.height)).squareRoot() / ppt
             : 0
-        controlsBar?.setReadout(String(format: "%@ — drag either bar so they're the same real length, then Save · inferred ≈ %.1f″",
-                                       target.name, diag))
+        panel?.setInferredDiagonal(diag)
     }
 
     private func save() {
@@ -182,179 +188,351 @@ final class KeyableBorderlessWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-/// Rect for a bar of the given length, hugging an optional seam placement (or a
-/// horizontal bar centered in `bounds` when there's no seam).
-private func barRect(length: CGFloat, anchor: BarPlacement?, in bounds: NSRect) -> NSRect {
-    let t = barThickness
-    guard let a = anchor else {
-        return NSRect(x: bounds.midX - length / 2, y: bounds.midY - t / 2, width: length, height: t)
-    }
-    switch a.edge {
-    case .right:  return NSRect(x: bounds.maxX - t, y: a.along - length / 2, width: t, height: length)
-    case .left:   return NSRect(x: bounds.minX,     y: a.along - length / 2, width: t, height: length)
-    case .top:    return NSRect(x: a.along - length / 2, y: bounds.maxY - t, width: length, height: t)
-    case .bottom: return NSRect(x: a.along - length / 2, y: bounds.minY,     width: length, height: t)
-    }
-}
-
-/// A resizable bar hugging the seam: drag along the seam to change its length
-/// (symmetric about the overlap midpoint). Reports its live length so the
-/// controller can compare the two bars and infer the target's PPI; the `controls`
-/// bar also hosts the readout + Save/Cancel.
-private final class BarView: NSView {
-    var onResize: ((CGFloat) -> Void)?
+/// The native control surface for match calibration: a small floating HUD panel
+/// with a quiet instruction, a prominent live inferred-diagonal readout, and
+/// Save/Cancel — instead of bare buttons floating on the dimmed overlay.
+@MainActor
+final class CalibrationPanel: NSPanel {
     var onSave: (() -> Void)?
     var onCancel: (() -> Void)?
 
-    private var length: CGFloat
-    private let color: NSColor
-    private let anchor: BarPlacement?
-    private var readout: NSTextField?
+    private let valueLabel = NSTextField(labelWithString: "—")
+    private let displayName: String
 
-    init(length: CGFloat, color: NSColor, anchor: BarPlacement?, controls: Bool) {
-        self.length = length; self.color = color; self.anchor = anchor
+    init(displayName: String) {
+        self.displayName = displayName
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 320, height: 214),
+                   styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered, defer: false)
+        isFloatingPanel = true
+        hidesOnDeactivate = false
+        becomesKeyOnlyIfNeeded = false
+        isMovableByWindowBackground = true
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        // Above the shielding-level overlay windows so the panel stays reachable.
+        level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        isReleasedWhenClosed = false
+        buildContent()
+    }
+
+    override var canBecomeKey: Bool { true }
+
+    private func buildContent() {
+        let title = NSTextField(labelWithString: displayName)
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.textColor = .labelColor
+        title.alignment = .center
+
+        let instruction = NSTextField(wrappingLabelWithString:
+            "Drag the bars until they look the same real size.")
+        instruction.font = .systemFont(ofSize: 12)
+        instruction.textColor = .secondaryLabelColor
+        instruction.alignment = .center
+        instruction.preferredMaxLayoutWidth = 260
+
+        let caption = NSTextField(labelWithString: "INFERRED DIAGONAL")
+        caption.font = .systemFont(ofSize: 10, weight: .semibold)
+        caption.textColor = .tertiaryLabelColor
+        caption.alignment = .center
+
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: 34, weight: .semibold)
+        valueLabel.textColor = .labelColor
+        valueLabel.alignment = .center
+
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
+        cancel.controlSize = .large; cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
+        let save = NSButton(title: "Save", target: self, action: #selector(saveTapped))
+        save.controlSize = .large; save.bezelStyle = .rounded; save.keyEquivalent = "\r"
+        // The modern prominent (accent-filled) default button.
+        save.bezelColor = .controlAccentColor
+
+        let buttons = NSStackView(views: [cancel, save])
+        buttons.orientation = .horizontal
+        buttons.spacing = 10
+        buttons.distribution = .fillEqually
+
+        let stack = NSStackView(views: [title, instruction, caption, valueLabel, buttons])
+        stack.orientation = .vertical
+        stack.spacing = 10
+        stack.alignment = .centerX
+        stack.setCustomSpacing(16, after: instruction)
+        stack.setCustomSpacing(2, after: caption)
+        stack.setCustomSpacing(18, after: valueLabel)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        // A modern rounded translucent card (popover material), not the dated HUD frame.
+        let card = NSVisualEffectView()
+        card.material = .popover
+        card.blendingMode = .behindWindow
+        card.state = .active
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 16
+        card.layer?.cornerCurve = .continuous
+        card.layer?.masksToBounds = true
+        card.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 22),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -22),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 20),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -20),
+            buttons.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            buttons.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
+        ])
+        contentView = card
+    }
+
+    /// Show the panel on `screen`, near the target bar (`anchor`) but inset toward the
+    /// screen's center so it doesn't cover the bar. Falls back to top-center when the
+    /// bar isn't anchored to a seam.
+    fileprivate func present(on screen: NSScreen, near anchor: BarPlacement?) {
+        let vis = screen.visibleFrame
+        let gap: CGFloat = 40
+        var origin = NSPoint(x: vis.midX - frame.width / 2, y: vis.maxY - frame.height - 60)
+
+        if let a = anchor {
+            // `a.along` is the bar's center in the screen's local y-up frame; convert to
+            // global. The bar hugs `a.edge` (inset by `barEdgeInset`); place the panel
+            // just inward of it, aligned to the bar's midpoint.
+            let f = screen.frame
+            switch a.edge {
+            case .right:
+                let barX = f.maxX - barEdgeInset - BarView.thickness
+                origin = NSPoint(x: barX - frame.width - gap, y: f.minY + a.along - frame.height / 2)
+            case .left:
+                let barX = f.minX + barEdgeInset + BarView.thickness
+                origin = NSPoint(x: barX + gap, y: f.minY + a.along - frame.height / 2)
+            case .top:
+                let barY = f.maxY - barEdgeInset - BarView.thickness
+                origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY - frame.height - gap)
+            case .bottom:
+                let barY = f.minY + barEdgeInset + BarView.thickness
+                origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY + gap)
+            }
+        }
+
+        // Keep the panel fully on the visible screen.
+        origin.x = min(max(origin.x, vis.minX + 12), vis.maxX - frame.width - 12)
+        origin.y = min(max(origin.y, vis.minY + 12), vis.maxY - frame.height - 12)
+        setFrameOrigin(origin)
+        makeKeyAndOrderFront(nil)
+    }
+
+    /// Update the prominent readout with the currently inferred diagonal in inches.
+    func setInferredDiagonal(_ inches: Double) {
+        valueLabel.stringValue = inches > 0 ? String(format: "%.1f″", inches) : "—"
+    }
+
+    @objc private func saveTapped() { onSave?() }
+    @objc private func cancelTapped() { onCancel?() }
+}
+
+/// Distance the bar is inset from the screen edge it hugs, so it reads as a floating
+/// control rather than something glued to the bezel.
+private let barEdgeInset: CGFloat = 22
+
+/// Rect for a bar of the given length, hugging an optional seam placement (or a
+/// horizontal bar centered in `bounds` when there's no seam). `offset` slides the
+/// bar's center along the seam from its anchor; `thickness` sets its cross size.
+private func barRect(length: CGFloat, offset: CGFloat, thickness t: CGFloat,
+                     anchor: BarPlacement?, in bounds: NSRect) -> NSRect {
+    guard let a = anchor else {
+        return NSRect(x: bounds.midX - length / 2, y: bounds.midY - t / 2, width: length, height: t)
+    }
+    let along = a.along + offset
+    let inset = barEdgeInset
+    switch a.edge {
+    case .right:  return NSRect(x: bounds.maxX - t - inset, y: along - length / 2, width: t, height: length)
+    case .left:   return NSRect(x: bounds.minX + inset,     y: along - length / 2, width: t, height: length)
+    case .top:    return NSRect(x: along - length / 2, y: bounds.maxY - t - inset, width: length, height: t)
+    case .bottom: return NSRect(x: along - length / 2, y: bounds.minY + inset,     width: length, height: t)
+    }
+}
+
+/// A rounded orange bar hugging the seam, inset from the edge. Three circular
+/// draggers — one at each end (resize, symmetric about the bar's center) and one at
+/// the midpoint (slide the whole bar along the seam) — each with a perpendicular
+/// guide line through it so the two bars can be sighted across the gap. Reports its
+/// live length so the controller can infer the target's PPI. Purely an affordance —
+/// the readout and Save/Cancel live in the floating panel.
+private final class BarView: NSView {
+    var onResize: ((CGFloat) -> Void)?
+
+    private var length: CGFloat
+    private var offset: CGFloat = 0        // slide of the bar's center along the seam
+    private let anchor: BarPlacement?
+    private let role: String
+    private let roleLabel = NSTextField(labelWithString: "")
+
+    private static let orange = NSColor.systemOrange
+    /// Bar cross-thickness (thinner than before so it reads as a slim rounded bar).
+    static let thickness: CGFloat = 14
+    /// Radius of the circular draggers.
+    private static let knob: CGFloat = 12
+    /// How far the guide line extends past its dragger, on each side.
+    private static let guideReach: CGFloat = 30
+
+    init(length: CGFloat, anchor: BarPlacement?, role: String) {
+        self.length = length; self.anchor = anchor; self.role = role
         super.init(frame: .zero)
-        if controls { setupControls() }
+        roleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        roleLabel.textColor = .white
+        roleLabel.stringValue = role
+        roleLabel.isBezeled = false; roleLabel.drawsBackground = false; roleLabel.isEditable = false
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
+        shadow.shadowBlurRadius = 3; shadow.shadowOffset = NSSize(width: 0, height: -1)
+        roleLabel.shadow = shadow
+        addSubview(roleLabel)
     }
     required init?(coder: NSCoder) { fatalError() }
 
     private var lengthIsVertical: Bool { anchor?.lengthIsVertical ?? false }
 
-    private func center() -> CGFloat {
+    /// The bar's anchored center along the seam (before `offset`).
+    private func anchorAlong() -> CGFloat {
         if let a = anchor { return a.along }
         return lengthIsVertical ? bounds.midY : bounds.midX
     }
 
-    /// Set the readout text; the controller computes it from both bars' lengths.
-    func setReadout(_ text: String) { readout?.stringValue = text }
-
-    // MARK: Controls
-
-    private func setupControls() {
-        let save = NSButton(title: "Save", target: self, action: #selector(saveTapped))
-        save.bezelStyle = .rounded; save.keyEquivalent = "\r"
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
-        cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
-
-        let label = NSTextField(labelWithString: "")
-        label.font = .boldSystemFont(ofSize: 14)
-        label.textColor = .systemOrange
-        label.alignment = .center
-        readout = label
-
-        for v in [save, cancel, label] {
-            v.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(v)
-        }
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 40),
-            save.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -60),
-            save.trailingAnchor.constraint(equalTo: centerXAnchor, constant: -8),
-            cancel.centerYAnchor.constraint(equalTo: save.centerYAnchor),
-            cancel.leadingAnchor.constraint(equalTo: centerXAnchor, constant: 8),
-        ])
+    private func rect() -> NSRect {
+        barRect(length: length, offset: offset, thickness: Self.thickness, anchor: anchor, in: bounds)
     }
 
-    // MARK: Mouse — drag along the seam to resize (symmetric about the midpoint)
+    /// Centers of the three draggers: [endA, midpoint, endB], along the bar's axis.
+    private func knobCenters(_ r: NSRect) -> [CGPoint] {
+        if lengthIsVertical {
+            return [CGPoint(x: r.midX, y: r.minY), CGPoint(x: r.midX, y: r.midY), CGPoint(x: r.midX, y: r.maxY)]
+        }
+        return [CGPoint(x: r.minX, y: r.midY), CGPoint(x: r.midX, y: r.midY), CGPoint(x: r.maxX, y: r.midY)]
+    }
 
-    private var dragging = false
+    // MARK: Mouse — end knobs resize; the midpoint knob slides the whole bar
+
+    private enum Grab { case none, resize, move }
+    private var grab: Grab = .none
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        // Start a drag only from on/near the bar or its handles — so clicks elsewhere
-        // don't yank the bar to the cursor.
-        dragging = nearBar(p)
-        if dragging { resize(to: p) }
+        let c = knobCenters(rect())
+        let hit = Self.knob + 6
+        if hypot(p.x - c[1].x, p.y - c[1].y) <= hit {
+            grab = .move
+        } else if hypot(p.x - c[0].x, p.y - c[0].y) <= hit || hypot(p.x - c[2].x, p.y - c[2].y) <= hit {
+            grab = .resize
+        } else {
+            grab = .none
+        }
+        if grab != .none { apply(p) }
     }
     override func mouseDragged(with event: NSEvent) {
-        guard dragging else { return }
-        resize(to: convert(event.locationInWindow, from: nil))
+        guard grab != .none else { return }
+        apply(convert(event.locationInWindow, from: nil))
     }
-    override func mouseUp(with event: NSEvent) { dragging = false }
+    override func mouseUp(with event: NSEvent) { grab = .none }
 
-    /// Whether `p` is within the grabbable zone: the bar plus a margin inward from
-    /// each end (where the handles sit), across the bar's thickness.
-    private func nearBar(_ p: CGPoint) -> Bool {
-        let rect = barRect(length: length, anchor: anchor, in: bounds).insetBy(dx: -Self.handleRadius, dy: -Self.handleRadius)
-        return rect.contains(p)
-    }
-
-    private func resize(to p: CGPoint) {
+    private func apply(_ p: CGPoint) {
         let coord = lengthIsVertical ? p.y : p.x
-        let maxLen = lengthIsVertical ? bounds.height : bounds.width
-        length = min(maxLen, max(20, 2 * abs(coord - center())))
+        let maxAlong = lengthIsVertical ? bounds.height : bounds.width
+        let barCenter = anchorAlong() + offset
+        switch grab {
+        case .resize:
+            // Symmetric about the bar's current center. Cap so both ends stay on screen.
+            let half = min(abs(coord - barCenter),
+                           min(barCenter, maxAlong - barCenter))
+            length = max(Self.knob * 3, 2 * half)
+        case .move:
+            // Slide the whole bar; keep both ends on screen.
+            let clamped = min(maxAlong - length / 2, max(length / 2, coord))
+            offset = clamped - anchorAlong()
+        case .none:
+            break
+        }
         onResize?(length)
         needsDisplay = true
     }
 
-    @objc private func saveTapped() { onSave?() }
-    @objc private func cancelTapped() { onCancel?() }
+    // MARK: Cursor
+
+    override func resetCursorRects() {
+        let resize: NSCursor = lengthIsVertical ? .resizeUpDown : .resizeLeftRight
+        let c = knobCenters(rect())
+        let box = Self.knob + 6
+        func square(_ p: CGPoint) -> NSRect { NSRect(x: p.x - box, y: p.y - box, width: 2 * box, height: 2 * box) }
+        addCursorRect(square(c[0]), cursor: resize)
+        addCursorRect(square(c[2]), cursor: resize)
+        addCursorRect(square(c[1]), cursor: .openHand)
+    }
 
     // MARK: Draw
 
     override func draw(_ dirtyRect: NSRect) {
-        // Faint dim on both screens so the thin guidelines stay legible over content.
-        NSColor.black.withAlphaComponent(0.18).setFill(); bounds.fill()
+        // A soft scrim on both screens so the orange control reads cleanly over content.
+        NSColor.black.withAlphaComponent(0.12).setFill(); bounds.fill()
 
-        let rect = barRect(length: length, anchor: anchor, in: bounds)
+        let r = rect()
+        let centers = knobCenters(r)
 
-        drawCrosshairs(rect)
-
-        color.withAlphaComponent(0.85).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
-
-        for c in handleCenters(rect) { drawHandle(at: c) }
+        drawGuides(centers)
+        drawBar(r)
+        for c in centers { drawKnob(at: c) }
+        layoutRoleLabel(r)
     }
 
-    /// A grab handle inset from each end of the bar, so the draggable spot is obvious
-    /// and reachable even when the bar spans the whole screen (ends in the corners).
-    private static let handleInset: CGFloat = 26
-    private static let handleRadius: CGFloat = 13
-
-    private func handleCenters(_ rect: NSRect) -> [CGPoint] {
-        let inset = min(Self.handleInset, (lengthIsVertical ? rect.height : rect.width) / 2 - 2)
-        if lengthIsVertical {
-            return [CGPoint(x: rect.midX, y: rect.minY + inset), CGPoint(x: rect.midX, y: rect.maxY - inset)]
-        }
-        return [CGPoint(x: rect.minX + inset, y: rect.midY), CGPoint(x: rect.maxX - inset, y: rect.midY)]
+    /// The bar itself: a fully-rounded (capsule) orange bar, slightly translucent.
+    private func drawBar(_ r: NSRect) {
+        let radius = Self.thickness / 2
+        let path = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
+        Self.orange.withAlphaComponent(0.9).setFill(); path.fill()
     }
 
-    private func drawHandle(at c: CGPoint) {
-        let r = Self.handleRadius
+    /// A white circle ringed in orange at each dragger position.
+    private func drawKnob(at c: CGPoint) {
+        let r = Self.knob
         let circle = NSBezierPath(ovalIn: NSRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-        NSColor.white.withAlphaComponent(0.95).setFill(); circle.fill()
-        color.setStroke(); circle.lineWidth = 2; circle.stroke()
-        // Grip dots so it reads as a handle.
-        color.setFill()
-        for d: CGFloat in [-4, 0, 4] {
-            let dot = lengthIsVertical
-                ? NSRect(x: c.x + d - 1, y: c.y - 1, width: 2, height: 2)
-                : NSRect(x: c.x - 1, y: c.y + d - 1, width: 2, height: 2)
-            NSBezierPath(ovalIn: dot).fill()
-        }
+        NSColor.white.setFill(); circle.fill()
+        Self.orange.setStroke(); circle.lineWidth = 3; circle.stroke()
     }
 
-    /// Three full-screen lines perpendicular to the seam — through the bar's two ends
-    /// and its midpoint — so each can be sighted straight across the gap onto the
-    /// other screen's lines. Drawn as a 1px black core outlined in red for visibility.
-    private func drawCrosshairs(_ rect: NSRect) {
+    /// A short guide line through each dragger, perpendicular to the bar, so the two
+    /// bars can be lined up across the gap.
+    private func drawGuides(_ centers: [CGPoint]) {
+        let g = Self.guideReach
         let path = NSBezierPath()
-        // Nudge lines 1px inside the screen edge so a full-length bar's end lines
-        // aren't clipped to an invisible hairline.
         func clamp(_ v: CGFloat, _ hi: CGFloat) -> CGFloat { min(max(v, 1), hi - 1) }
-        if lengthIsVertical {                       // bar runs vertically; lines are horizontal
-            for y in [rect.minY, rect.midY, rect.maxY] {
-                let y = clamp(y, bounds.maxY)
-                path.move(to: CGPoint(x: 0, y: y)); path.line(to: CGPoint(x: bounds.maxX, y: y))
-            }
-        } else {                                    // bar runs horizontally; lines are vertical
-            for x in [rect.minX, rect.midX, rect.maxX] {
-                let x = clamp(x, bounds.maxX)
-                path.move(to: CGPoint(x: x, y: 0)); path.line(to: CGPoint(x: x, y: bounds.maxY))
+        for c in centers {
+            if lengthIsVertical {                   // bar vertical; guide is horizontal
+                let y = clamp(c.y, bounds.maxY)
+                let x0 = max(0, c.x - Self.thickness / 2 - g)
+                let x1 = min(bounds.maxX, c.x + Self.thickness / 2 + g)
+                path.move(to: CGPoint(x: x0, y: y)); path.line(to: CGPoint(x: x1, y: y))
+            } else {                                // bar horizontal; guide is vertical
+                let x = clamp(c.x, bounds.maxX)
+                let y0 = max(0, c.y - Self.thickness / 2 - g)
+                let y1 = min(bounds.maxY, c.y + Self.thickness / 2 + g)
+                path.move(to: CGPoint(x: x, y: y0)); path.line(to: CGPoint(x: x, y: y1))
             }
         }
-        NSColor.red.setStroke(); path.lineWidth = 3; path.stroke()      // red outline
-        NSColor.black.setStroke(); path.lineWidth = 1; path.stroke()    // black core
+        Self.orange.withAlphaComponent(0.7).setStroke(); path.lineWidth = 1.5; path.stroke()
+    }
+
+    /// The role label ("Reference" / "This display") tucked just outside the bar,
+    /// so the two identical-looking bars can be told apart.
+    private func layoutRoleLabel(_ r: NSRect) {
+        roleLabel.sizeToFit()
+        let s = roleLabel.frame.size
+        let pad = Self.guideReach + 10
+        let origin: CGPoint
+        switch anchor?.edge {
+        case .right:  origin = CGPoint(x: r.minX - s.width - pad, y: r.midY - s.height / 2)
+        case .left:   origin = CGPoint(x: r.maxX + pad,           y: r.midY - s.height / 2)
+        case .top:    origin = CGPoint(x: r.midX - s.width / 2,   y: r.minY - s.height - pad)
+        case .bottom: origin = CGPoint(x: r.midX - s.width / 2,   y: r.maxY + pad)
+        case .none:   origin = CGPoint(x: r.midX - s.width / 2,   y: r.maxY + pad)
+        }
+        roleLabel.frame = NSRect(origin: origin, size: s)
     }
 }

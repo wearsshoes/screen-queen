@@ -21,6 +21,9 @@ final class DebugWindow {
                          backing: .buffered, defer: false)
         w.title = "Silkscreen — Debug"
         w.isReleasedWhenClosed = false
+        // The arranger sits at the shielding level; lift the debug window above it so it
+        // isn't hidden behind the overlay.
+        w.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
 
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true

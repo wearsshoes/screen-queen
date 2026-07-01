@@ -23,6 +23,10 @@ extension ArrangementCanvas {
         window?.makeKeyAndOrderFront(nil)   // focus this screen's arranger
         window?.makeFirstResponder(self)
         let p = convert(event.locationInWindow, from: nil)
+        // Clicking a mirror card's un-mirror button returns that display to the plane.
+        if let id = unmirrorButtonRects.first(where: { $0.value.contains(p) })?.key {
+            onUnmirror?(id); return
+        }
         // Grabbing the main tile's menu-bar strip starts a "move main" drag.
         if mainMenuBarViewRect()?.contains(p) == true { draggingMenuBar = p; needsDisplay = true; return }
         // Grabbing the selected tile's resolution slider starts a zoom drag (takes
@@ -37,6 +41,8 @@ extension ArrangementCanvas {
         guard let d = display(at: p), plane[d.id] != nil else { return }
         draggedID = d.id
         selectedID = d.id
+        // Option-drag mirrors: dropping onto another tile mirrors this display onto it.
+        optionMirrorDrag = event.modifierFlags.contains(.option) && planeDisplays.count > 1
         state.draggingDisplayID = d.id   // brighten the grabbed display's screen from click
         dragStartMouse = p
         dragTransform = transform(plane)      // freeze so the cursor mapping is stable
@@ -50,6 +56,9 @@ extension ArrangementCanvas {
         let p = convert(event.locationInWindow, from: nil)
         if draggingMenuBar != nil { draggingMenuBar = p; needsDisplay = true; return }
         if draggingResSlider != nil { resSliderDrag(to: p); return }
+        // Option-mirror drag: don't move the plane; just track the cursor for the drop
+        // target and highlight the tile under it (drawn like the menu-bar drop hint).
+        if optionMirrorDrag { mirrorDragPoint = p; dragMoved = true; needsDisplay = true; return }
         guard let id = draggedID, let dragged = displays.first(where: { $0.id == id }),
               let t = dragTransform ?? transform(plane) else { return }
         // The tile tracks the cursor 1:1: view delta ÷ scale = physical delta.
@@ -76,7 +85,7 @@ extension ArrangementCanvas {
 
     override func mouseUp(with event: NSEvent) {
         defer { draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil
-                draggingResSlider = nil
+                draggingResSlider = nil; optionMirrorDrag = false; mirrorDragPoint = nil
                 state.draggingDisplayID = nil; state.notify() }
         // Released the resolution slider: apply the previewed mode.
         if draggingResSlider != nil {
@@ -88,6 +97,15 @@ extension ArrangementCanvas {
         if let p = draggingMenuBar {
             needsDisplay = true
             if let d = display(at: p), !d.isMain { onSetMain?(d.id) }
+            return
+        }
+        // Option-mirror drop: if released over a *different* plane tile, mirror the
+        // dragged display (slave) onto that tile (master).
+        if optionMirrorDrag, let slave = draggedID {
+            mirrorDragPoint = nil
+            if let target = display(at: convert(event.locationInWindow, from: nil)),
+               target.id != slave { onSetMirror?(slave, target.id) }
+            needsDisplay = true
             return
         }
         guard draggedID != nil else { return }
@@ -552,7 +570,23 @@ extension ArrangementCanvas {
             for m in filtered { tallest[m.pixelWidth] = max(tallest[m.pixelWidth] ?? 0, m.pixelHeight) }
             filtered = filtered.filter { $0.pixelHeight == tallest[$0.pixelWidth] }
         }
-        return filtered.isEmpty ? all : filtered
+        guard !filtered.isEmpty else { return all }
+
+        // The full clean-2× ladder runs from absurdly tiny (640×360) to native, but
+        // macOS System Settings only surfaces a handful of "looks like" sizes at the
+        // crisp (large) end. Match that: take the top of the ladder, so the slider/menu
+        // don't step through the useless small extremes (the "Show Extended Resolutions"
+        // toggle still reveals the full list). The window is *stable* — anchored at the
+        // native end, not the moving current mode — so the menu and slider always agree.
+        let sorted = filtered.sorted { $0.pointWidth * $0.pointHeight < $1.pointWidth * $1.pointHeight }
+        var lo = max(0, sorted.count - 5)   // macOS surfaces ~5 crisp "looks like" sizes
+        // Always include the current mode, even if it's been set below the crisp band,
+        // so the slider knob and the menu checkmark land on a real entry.
+        if let cur = CGDisplayCopyDisplayMode(d.id),
+           let curIdx = sorted.firstIndex(where: { ModeCatalog.sameMode(cur, $0.cgMode) }) {
+            lo = min(lo, curIdx)
+        }
+        return Array(sorted[lo...])
     }
 
     /// Whether `d` is a notched built-in display (its screen reserves a top safe area).
@@ -580,14 +614,14 @@ extension ArrangementCanvas {
         // calibratable — offer no size overrides for it.
         if !d.isBuiltin {
             menu.addItem(.separator())
+            let calItem = NSMenuItem(title: "Input Size…", action: #selector(calibrateFromMenu(_:)), keyEquivalent: "")
+            calItem.target = self; calItem.representedObject = NSNumber(value: d.id)
+            menu.addItem(calItem)
             if displays.count > 1 {
-                let matchItem = NSMenuItem(title: "Calibrate by Matching…", action: #selector(calibrateVisualFromMenu(_:)), keyEquivalent: "")
+                let matchItem = NSMenuItem(title: "Manual Calibration…", action: #selector(calibrateVisualFromMenu(_:)), keyEquivalent: "")
                 matchItem.target = self; matchItem.representedObject = NSNumber(value: d.id)
                 menu.addItem(matchItem)
             }
-            let calItem = NSMenuItem(title: "Calibrate by Diagonal…", action: #selector(calibrateFromMenu(_:)), keyEquivalent: "")
-            calItem.target = self; calItem.representedObject = NSNumber(value: d.id)
-            menu.addItem(calItem)
             if d.physicalSizeIsCalibrated {
                 let resetItem = NSMenuItem(title: "Reset Size to EDID", action: #selector(resetCalibrationFromMenu(_:)), keyEquivalent: "")
                 resetItem.target = self; resetItem.representedObject = NSNumber(value: d.id)

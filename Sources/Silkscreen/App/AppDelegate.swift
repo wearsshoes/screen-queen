@@ -176,11 +176,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
-        // The arranger sits at the shielding level; lift the alert above it so it isn't
-        // hidden behind the overlay.
-        alert.window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
 
         NSApp.activate(ignoringOtherApps: true)
+        // `runModal()` orders the alert front at its own level, which the arranger
+        // overlay can still cover. Bump it above the shielding level once the modal
+        // loop has presented the window (next runloop tick).
+        DispatchQueue.main.async {
+            alert.window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
+            alert.window.orderFrontRegardless()
+        }
         guard alert.runModal() == .alertFirstButtonReturn,
               let inches = Double(field.stringValue), inches > 1 else { return }
 

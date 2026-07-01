@@ -102,6 +102,8 @@ final class ArrangementCanvas: NSView {
     var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)? { state.onCommit }
     var onSetMain: ((CGDirectDisplayID) -> Void)? { state.onSetMain }
     var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)? { state.onSetResolution }
+    var onSetMirror: ((CGDirectDisplayID, CGDirectDisplayID) -> Void)? { state.onSetMirror }
+    var onUnmirror: ((CGDirectDisplayID) -> Void)? { state.onUnmirror }
     var onCalibrate: ((CGDirectDisplayID) -> Void)? { state.onCalibrate }
     var onCalibrateVisual: ((CGDirectDisplayID) -> Void)? { state.onCalibrateVisual }
     var onResetCalibration: ((CGDirectDisplayID) -> Void)? { state.onResetCalibration }
@@ -117,8 +119,16 @@ final class ArrangementCanvas: NSView {
     // Dragging the main display's menu-bar strip to move main to another tile.
     var draggingMenuBar: CGPoint?         // current cursor point while dragging
 
+    // True while Option-dragging a tile: dropping onto another tile mirrors onto it.
+    var optionMirrorDrag = false
+    var mirrorDragPoint: CGPoint?         // cursor while Option-mirror dragging (drop target)
+
     // Dragging the selected tile's resolution slider (id + its track, view coords).
     var draggingResSlider: (id: CGDirectDisplayID, track: NSRect)?
+    // The slider track from this canvas's most recent draw (its Y comes from the label
+    // stack layout), used to hit-test grabs. View-local, so it's per-canvas not shared.
+    var lastSliderTrack: NSRect?
+    var lastSliderTrackID: CGDirectDisplayID?
 
     // Keyboard continuous-move (nudge) state.
     var heldDirections: Set<MoveDirection> = []
@@ -141,6 +151,13 @@ final class ArrangementCanvas: NSView {
     let outerPadding: CGFloat = 32
     let tileCornerRadius: CGFloat = 8
 
+    /// Width of the right-hand mirror column overlay (0 when nothing is mirrored).
+    var mirrorColumnWidth: CGFloat { mirroredDisplays.isEmpty ? 0 : 360 }
+
+    /// The un-mirror button rects from the most recent draw, per mirrored display id,
+    /// for click hit-testing (view-local, so per-canvas).
+    var unmirrorButtonRects: [CGDirectDisplayID: NSRect] = [:]
+
     /// Cached native pixel aspect per display (see `nativeAspect`). Fixed per physical
     /// panel, so a stale entry for a disconnected id is harmless.
     var nativeAspectCache: [CGDirectDisplayID: Double?] = [:]
@@ -159,6 +176,8 @@ final class ArrangementCanvas: NSView {
     func currentBars() -> [SeamBar] { state.currentBars() }
     func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] { state.seamColors(bars) }
     func predictedDockDisplay() -> CGDirectDisplayID? { state.predictedDockDisplay() }
+    var mirroredDisplays: [DisplaySnapshot] { state.mirroredDisplays }
+    var planeDisplays: [DisplaySnapshot] { state.planeDisplays }
 
     /// Commit the plane, then broadcast so every canvas redraws.
     func commitPlane() { state.commit() }
@@ -193,6 +212,8 @@ final class ArrangementCanvas: NSView {
             ?? displays.first(where: { $0.isMain }).flatMap { rects[$0.id] } ?? union
         let focus = CGPoint(x: focusRect.midX, y: focusRect.midY)
 
+        // The mirror column overlays on the right; the plane stays centered in the full
+        // bounds (not offset by the column), so mirroring doesn't shift the arrangement.
         let availW = bounds.width - outerPadding * 2, availH = bounds.height - outerPadding * 2
 
         // Target zoom: three of the physically-largest display fit across the view,

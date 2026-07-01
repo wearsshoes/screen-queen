@@ -72,7 +72,11 @@ final class ArrangementWindows {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+        // Sit just below the system menu bar so the arranger covers the desktop and
+        // app windows, but the menu bar — and our status-bar icon — stay visible and
+        // clickable on top. (The calibration panel / alerts sit above the arranger via
+        // the shielding level.)
+        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) - 1)
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         window.isReleasedWhenClosed = false
 

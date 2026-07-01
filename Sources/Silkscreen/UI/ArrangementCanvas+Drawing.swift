@@ -33,7 +33,7 @@ extension ArrangementCanvas {
         // Selection: a soft drop shadow behind the selected tile, drawn before the tiles
         // so the shadow reads under it (the tile lifts off the plane, macOS-style).
         if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
-        for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!)) }
+        for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!), scale: t.scale) }
         // Predicted Dock: a strip hugging the Dock edge of the screen it'll land on.
         if let dockID = predictedDockDisplay(), let r = rects[dockID] {
             drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
@@ -43,6 +43,7 @@ extension ArrangementCanvas {
         for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
         drawEdgeBars(bars, seamColor: seamColor)   // full-screen reference bars hugging this screen's real edges
         drawScreenMarkers(activeMarkers(rects))   // alignment notches/arrows at this screen's real edges
+        drawMirrorColumn()                        // mirrored displays live in the right column
         drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution")
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
@@ -52,6 +53,18 @@ extension ArrangementCanvas {
                 NSBezierPath(roundedRect: vr, xRadius: tileCornerRadius, yRadius: tileCornerRadius).fill()
             }
             drawMenuBar(in: NSRect(x: p.x - 40, y: p.y - 8, width: 80, height: 16))
+        }
+        // Option-mirror drag: highlight the tile the dragged display would mirror onto.
+        if let p = mirrorDragPoint, let over = display(at: p), over.id != draggedID, let r = rects[over.id] {
+            let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
+            NSColor.controlAccentColor.withAlphaComponent(0.35).setFill()
+            let path = NSBezierPath(roundedRect: vr, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
+            path.fill()
+            NSColor.controlAccentColor.setStroke(); path.lineWidth = 2; path.stroke()
+            let hint = "Mirror here"
+            let a: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.white]
+            let hs = (hint as NSString).size(withAttributes: a)
+            (hint as NSString).draw(at: CGPoint(x: vr.midX - hs.width / 2, y: vr.midY - hs.height / 2), withAttributes: a)
         }
     }
 
@@ -177,6 +190,17 @@ extension ArrangementCanvas {
     /// A mini Dock hugging the predicted Dock edge of a tile: three app squircles, a
     /// divider line, and a fourth squircle (Trash) — the macOS Dock in miniature, so
     /// it's clear which screen the Dock lands on. Laid out along the Dock's axis.
+    /// Depth (perpendicular to the Dock axis) a bottom Dock strip occupies within a
+    /// tile — icon + tray + edge margin — so the resolution slider can sit above it.
+    /// Mirrors the geometry in `drawDockIndicator`.
+    func dockStripDepth(in tile: NSRect) -> CGFloat {
+        let inset = tile.insetBy(dx: 1.5, dy: 1.5)
+        let icon = min(max(inset.height * 0.10, 7), 15)
+        let tray = icon * 0.34
+        let margin = icon * 0.5
+        return margin + icon + tray * 2 + 4   // + a little breathing room
+    }
+
     private func drawDockIndicator(in tile: NSRect, edge: DockPredictor.Edge) {
         let inset = tile.insetBy(dx: 1.5, dy: 1.5)
         let horizontal = (edge == .bottom)            // bottom Dock runs left↔right
@@ -232,7 +256,78 @@ extension ArrangementCanvas {
         squircle(square(at: a))                                     // 4th icon (Trash)
     }
 
-    private func drawTile(for display: DisplaySnapshot, in rect: NSRect) {
+    /// The right-hand mirror column: one compact card per mirrored display, showing its
+    /// name, resolution, and which display it mirrors — no zoom slider — plus a small
+    /// un-mirror button that returns it to the plane.
+    private func drawMirrorColumn() {
+        unmirrorButtonRects.removeAll()
+        let mirrored = mirroredDisplays
+        guard !mirrored.isEmpty else { return }
+        let colW = mirrorColumnWidth
+        let colX = bounds.width - colW
+        let pad: CGFloat = 18
+        let cardW = colW - pad * 2       // fixed width; height follows each screen's aspect
+        let gap: CGFloat = 16
+        var y = outerPadding
+
+        let hAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        ("Mirrored" as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
+        y += 26
+
+        for d in mirrored {
+            // The card is a scaled rectangle of the real screen: fixed width, height from
+            // its aspect ratio (clamped so a very wide screen's card still fits the text).
+            let sz0 = pointSize(d)
+            let aspect = sz0.height > 0 ? sz0.width / sz0.height : 16.0 / 9
+            let cardH = min(max(cardW / max(aspect, 0.1), 120), 260)
+            let card = NSRect(x: colX + pad, y: y, width: cardW, height: cardH)
+            NSColor(white: 0.72, alpha: 0.85).setFill()
+            NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
+
+            let inner = card.insetBy(dx: 18, dy: 16)
+            var ty = inner.minY
+            func line(_ s: String, _ font: NSFont, _ color: NSColor) {
+                let a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+                (s as NSString).draw(at: CGPoint(x: inner.minX, y: ty), withAttributes: a)
+                ty += (s as NSString).size(withAttributes: a).height + 5
+            }
+            line(d.name, .boldSystemFont(ofSize: 20), .labelColor)
+            // The mirrored display's own stats — resolution (HiDPI-tagged), diagonal, PPI —
+            // like a plane tile, so the card isn't only "what it mirrors".
+            let sz = pointSize(d)
+            let pixelW = Int(d.pixelSize.width)
+            let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
+            line("\(Int(sz.width))×\(Int(sz.height))\(hidpi)", .systemFont(ofSize: 15), .labelColor)
+            let effPPI = d.diagonalInches > 0 && sz.width > 0
+                ? Double(sz.width) / (Double(d.physicalSizeMM.width) / 25.4) : nil
+            let diag = d.diagonalInches > 0 ? String(format: "%.0f″ · ", d.diagonalInches) : ""
+            if let effPPI {
+                line(diag + String(format: "%.0f ppi", effPPI), .systemFont(ofSize: 15), .secondaryLabelColor)
+            } else if !diag.isEmpty {
+                line(String(diag.dropLast(3)), .systemFont(ofSize: 15), .secondaryLabelColor)
+            }
+            let masterName = displays.first { $0.id == d.mirrorMaster }?.name ?? "another display"
+            line("⤷ mirrors \(masterName)", .systemFont(ofSize: 15), .secondaryLabelColor)
+
+            // Un-mirror button (top-right ✕).
+            let bx = NSRect(x: card.maxX - 34, y: card.minY + 10, width: 24, height: 24)
+            NSColor(white: 0.4, alpha: 0.9).setFill()
+            NSBezierPath(ovalIn: bx).fill()
+            let x: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: NSColor.white,
+            ]
+            let xs = ("✕" as NSString).size(withAttributes: x)
+            ("✕" as NSString).draw(at: CGPoint(x: bx.midX - xs.width / 2, y: bx.midY - xs.height / 2), withAttributes: x)
+            unmirrorButtonRects[d.id] = bx
+
+            y += cardH + gap
+        }
+    }
+
+    private func drawTile(for display: DisplaySnapshot, in rect: NSRect, scale: CGFloat) {
         // Monitors are neutral now — color lives on the seams (the bars), not the tiles.
         // A light gray reads as a "screen" against the darker backdrop; the selected tile
         // takes a light wash of the *system accent* and lifts via `drawSelectedShadow`.
@@ -245,8 +340,8 @@ extension ArrangementCanvas {
         color.setFill(); path.fill()
         color.setStroke(); path.lineWidth = 1.5; path.stroke()
         drawBoxing(for: display, in: inset, color: color)
-        // The label stacks name → (slider on the selected tile) → stats, centered.
-        drawLabel(for: display, in: inset, selected: selected)
+        // Centered name/resolution/ppi, with the pinned resolution slider on the selected tile.
+        drawLabel(for: display, in: inset, selected: selected, viewScale: scale, tileColor: color)
         // The main display carries a menu-bar strip (drag it to another tile to move main).
         if display.isMain, draggingMenuBar == nil { drawMenuBar(in: menuBarRect(inTile: inset)) }
     }
@@ -314,7 +409,7 @@ extension ArrangementCanvas {
         NSColor.white.withAlphaComponent(0.6).setFill(); clip.fill()
     }
 
-    private func drawLabel(for display: DisplaySnapshot, in rect: NSRect, selected: Bool) {
+    private func drawLabel(for display: DisplaySnapshot, in rect: NSRect, selected: Bool, viewScale: CGFloat, tileColor: NSColor) {
         let sz = pointSize(display)
         let pending = pendingMode?.id == display.id ? pendingMode?.mode : nil
         let pixelW = pending?.pixelWidth ?? Int(display.pixelSize.width)
@@ -323,9 +418,18 @@ extension ArrangementCanvas {
         let effPPI = display.diagonalInches > 0 && sz.width > 0
             ? Double(sz.width) / (Double(display.physicalSizeMM.width) / 25.4) : nil
 
-        // Text size proportional to how big it appears on the screen: higher PPI →
-        // physically smaller → smaller tile text. Normalized around ~110 ppi, +25%.
-        let fontScale = CGFloat(max(0.5, min(4.0, 110.0 / (effPPI ?? 110)))) * 1.25
+        // The label is a *true-size preview* of UI at the selected resolution: a base
+        // font of N points occupies (N / pointsPerInch) inches on the real panel, which
+        // maps into the mini-map as `× viewScale` (view px per inch). So the faithful
+        // on-tile font scale is `viewScale / pointsPerInch` — sliding the resolution
+        // grows/shrinks the text just as macOS will (lower res → fewer ppi → bigger), and
+        // the same real element reads the same physical size across every tile. At real
+        // mini-map zooms that's a few px (UI text really is tiny at this scale), so a
+        // constant gain `k` lifts it to a legible range *without distorting the ratios*
+        // between screens; a floor catches the dense/zoomed-out extremes.
+        let previewGain: CGFloat = 5.25   // 1.5× the base legibility gain
+        let previewScale = effPPI.map { viewScale / CGFloat($0) * previewGain } ?? (rect.height / 100)
+        let fontScale = max(0.525, previewScale)
         func f(_ size: CGFloat, bold: Bool = false, italic: Bool = false) -> NSFont {
             let base = bold ? NSFont.boldSystemFont(ofSize: size * fontScale) : .systemFont(ofSize: size * fontScale)
             return italic ? NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask) : base
@@ -337,51 +441,44 @@ extension ArrangementCanvas {
         let primary = selected ? (accent.blended(withFraction: 0.55, of: .black) ?? accent) : .labelColor
         let secondary = selected ? (accent.blended(withFraction: 0.30, of: .black) ?? accent) : .secondaryLabelColor
 
-        // The stack, top → bottom: name, then (on the selected tile) the resolution
-        // slider, then the stats lines. A `.slider` item reserves a fixed-height band
-        // that `drawResSlider` fills, so the slider lands in the tile's vertical center
-        // with the name above it and the stats below.
-        enum Item { case text(String, NSFont, NSColor); case slider(CGFloat) }
-        var items: [Item] = []
-        items.append(.text(display.name, f(16, bold: true), primary))
-        if selected, resSliderPosition(for: display) != nil { items.append(.slider(resSliderBandHeight)) }
-
-        // Resolution "W×H" (points) with HiDPI tagged on; italic while a zoom mode is
-        // uncommitted.
+        // The text lines (name, resolution, diagonal·ppi). These *scale* with the tile
+        // to preview resolution, so they must not shove the slider around.
+        var lines: [(String, NSFont, NSColor)] = []
+        lines.append((display.name, f(16, bold: true), primary))
         let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
-        items.append(.text("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13, italic: pending != nil), primary))
-
-        // Diagonal inches then effective PPI.
+        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13), primary))
         let diag = display.diagonalInches > 0 ? String(format: "%.0f″ · ", display.diagonalInches) : ""
         if let effPPI {
-            items.append(.text(diag + String(format: "%.0f ppi", effPPI), f(13), secondary))
+            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), secondary))
         } else {
-            items.append(.text(diag + "calibrate?", f(13), secondary))
+            lines.append((diag + "calibrate?", f(13), secondary))
         }
 
-        // Measure each item's height, then center the whole stack vertically.
-        func height(_ item: Item) -> CGFloat {
-            switch item {
-            case .text(let s, let font, _): return (s as NSString).size(withAttributes: [.font: font]).height
-            case .slider(let h): return h
-            }
-        }
+        // Text is centered in the *whole* tile. The slider is pinned to a fixed spot near
+        // the tile bottom (clear of a bottom Dock strip) — it never moves as the text
+        // zooms. If large text reaches the slider, the slider is drawn *last*, on top, over
+        // an opaque plate that masks the text beneath it.
         let gap: CGFloat = 3
-        let total = items.reduce(0) { $0 + height($1) } + gap * CGFloat(items.count - 1)
+        let sizes = lines.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]) }
+        let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(lines.count - 1)
         var y = rect.midY - total / 2
-        for item in items {
-            let h = height(item)
-            switch item {
-            case .text(let text, let font, let color):
-                let s = (text as NSString).size(withAttributes: [.font: font])
-                if s.width <= rect.width - 8 {
-                    (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: y),
-                                            withAttributes: [.font: font, .foregroundColor: color])
-                }
-            case .slider:
-                drawResSlider(for: display, in: rect, centerY: y + h / 2)
+        for (i, (text, font, color)) in lines.enumerated() {
+            let s = sizes[i]
+            if s.width <= rect.width - 8 {
+                (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: y),
+                                        withAttributes: [.font: font, .foregroundColor: color])
             }
-            y += h + gap
+            y += s.height + gap
+        }
+
+        // Slider on top (only on the selected tile), pinned near the bottom.
+        if selected, resSliderPosition(for: display) != nil {
+            let band = resSliderBandHeight(tileWidth: rect.width)
+            // Keep clear of a bottom Dock strip on the predicted-Dock tile.
+            let dockBottom = predictedDockDisplay() == display.id && DockPredictor.edge() == .bottom
+            let bottomMargin: CGFloat = 8 + (dockBottom ? dockStripDepth(in: rect) : 0)
+            let sliderCenterY = rect.maxY - band / 2 - bottomMargin
+            drawResSlider(for: display, in: rect, centerY: sliderCenterY, tileColor: tileColor)
         }
     }
 
