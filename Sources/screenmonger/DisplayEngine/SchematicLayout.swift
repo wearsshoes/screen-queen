@@ -215,38 +215,58 @@ enum SchematicLayout {
             .sorted { $0.0 < $1.0 }
     }
 
+    // MARK: - Seam detection
+
+    /// A shared edge between two rects `a` and `b` (global coords, CG y-down):
+    /// its orientation and the overlapping interval `[lo, hi]` along it. `a` is the
+    /// left/top rect, `b` the right/bottom. Used by both the arranger's reference
+    /// bars and the calibration tool so they agree on where a seam is.
+    struct Seam {
+        let vertical: Bool     // true: a|b side by side; false: a stacked over b
+        let line: CGFloat      // the seam coordinate (a.maxX or a.maxY)
+        let lo: CGFloat, hi: CGFloat   // overlap interval along the seam
+
+        /// The overlap center as an offset from `r`'s leading edge along the seam
+        /// axis (its own local frame) — top for a vertical seam, left for a
+        /// horizontal one. No global-origin arithmetic, so callers can place a bar
+        /// on either screen without coordinate flips.
+        func localCenter(on r: CGRect) -> CGFloat {
+            let mid = (lo + hi) / 2
+            return vertical ? mid - r.minY : mid - r.minX
+        }
+    }
+
+    /// The seam shared by `a` and `b`, or nil if they aren't edge-adjacent.
+    static func seam(_ a: CGRect, _ b: CGRect, tol: CGFloat = 2) -> Seam? {
+        if abs(a.maxX - b.minX) <= tol || abs(b.maxX - a.minX) <= tol {
+            let aLeft = abs(a.maxX - b.minX) <= tol
+            let l = aLeft ? a : b, r = aLeft ? b : a
+            let lo = max(l.minY, r.minY), hi = min(l.maxY, r.maxY)
+            if hi - lo > tol { return Seam(vertical: true, line: l.maxX, lo: lo, hi: hi) }
+        }
+        if abs(a.maxY - b.minY) <= tol || abs(b.maxY - a.minY) <= tol {
+            let aTop = abs(a.maxY - b.minY) <= tol
+            let t = aTop ? a : b, bot = aTop ? b : a
+            let lo = max(t.minX, bot.minX), hi = min(t.maxX, bot.maxX)
+            if hi - lo > tol { return Seam(vertical: false, line: t.maxY, lo: lo, hi: hi) }
+        }
+        return nil
+    }
+
     // MARK: - Reference bars
 
     static func seamBars(_ displays: [DisplaySnapshot],
                          rects: [CGDirectDisplayID: CGRect]) -> [SeamBar] {
-        let tol: CGFloat = 1.5
         var out: [SeamBar] = []
         for i in 0..<displays.count {
             for j in (i + 1)..<displays.count {
-                guard let ri = rects[displays[i].id], let rj = rects[displays[j].id] else { continue }
-
-                // Vertical seam: one display's right edge meets the other's left.
-                if abs(ri.maxX - rj.minX) <= tol || abs(rj.maxX - ri.minX) <= tol {
-                    let leftIsI = abs(ri.maxX - rj.minX) <= tol
-                    let aI = leftIsI ? i : j, bI = leftIsI ? j : i
-                    let A = rects[displays[aI].id]!, B = rects[displays[bI].id]!
-                    let lo = max(A.minY, B.minY), hi = min(A.maxY, B.maxY)
-                    if hi - lo > tol {
-                        out.append(makeBar(displays, aI, bI, A, B, vertical: true,
-                                           line: A.maxX, lo: lo, hi: hi))
-                    }
-                }
-                // Horizontal seam: one display's bottom edge meets the other's top.
-                if abs(ri.maxY - rj.minY) <= tol || abs(rj.maxY - ri.minY) <= tol {
-                    let topIsI = abs(ri.maxY - rj.minY) <= tol
-                    let aI = topIsI ? i : j, bI = topIsI ? j : i
-                    let A = rects[displays[aI].id]!, B = rects[displays[bI].id]!
-                    let lo = max(A.minX, B.minX), hi = min(A.maxX, B.maxX)
-                    if hi - lo > tol {
-                        out.append(makeBar(displays, aI, bI, A, B, vertical: false,
-                                           line: A.maxY, lo: lo, hi: hi))
-                    }
-                }
+                guard let ri = rects[displays[i].id], let rj = rects[displays[j].id],
+                      let s = seam(ri, rj) else { continue }
+                // `seam` orders a = left/top; match i/j to that side.
+                let iIsA = s.vertical ? abs(ri.maxX - s.line) < 1 : abs(ri.maxY - s.line) < 1
+                let aI = iIsA ? i : j, bI = iIsA ? j : i
+                out.append(makeBar(displays, aI, bI, rects[displays[aI].id]!, rects[displays[bI].id]!,
+                                   vertical: s.vertical, line: s.line, lo: s.lo, hi: s.hi))
             }
         }
         return out

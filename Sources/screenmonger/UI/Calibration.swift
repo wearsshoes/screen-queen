@@ -1,15 +1,31 @@
 import AppKit
 
-/// Where a calibration bar sits relative to the seam it should hug, expressed in
-/// the local (y-up) coordinates of the screen it's drawn on.
-fileprivate struct SeamAnchor {
-    enum Edge { case left, right, top, bottom } // which edge of this view the bar abuts
+/// Where a calibration bar sits on the screen it's drawn on: which edge it abuts
+/// and its center offset from that screen's leading edge along the seam axis.
+/// Derived from `SchematicLayout.Seam` so calibration and the arranger place bars
+/// the same way, with no per-screen coordinate flips.
+private struct BarPlacement {
+    enum Edge { case left, right, top, bottom }
     let edge: Edge
-    let along: CGFloat   // center position along the seam: a y for left/right, an x for top/bottom
+    let along: CGFloat          // center along the seam, in this screen's local frame (y-up)
 
-    /// The bar runs parallel to the seam, so its length axis is vertical for a
-    /// vertical seam (left/right edges) and horizontal for a horizontal seam.
+    /// A vertical seam (left/right edge) runs the bar vertically; horizontal runs it across.
     var lengthIsVertical: Bool { edge == .left || edge == .right }
+
+    /// The bar's placement on the screen `frame` sharing seam `s` with a neighbor,
+    /// where `selfIsA` picks this screen's side of the seam (a = left/top).
+    /// AppKit is y-up; `SchematicLayout` (CG) is y-down, so the vertical-seam center
+    /// is flipped within the screen height.
+    init(seam s: SchematicLayout.Seam, screen frame: CGRect, selfIsA: Bool) {
+        let along = s.localCenter(on: frame)
+        if s.vertical {
+            edge = selfIsA ? .right : .left
+            self.along = frame.height - along     // CG y-down → AppKit y-up
+        } else {
+            edge = selfIsA ? .bottom : .top        // a is on top (CG maxY == b.minY)
+            self.along = along
+        }
+    }
 }
 
 private let barThickness: CGFloat = 28
@@ -17,24 +33,26 @@ private let barThickness: CGFloat = 28
 /// Visual "match the bars" calibration. Because pixels are square, PPI is the
 /// same in both axes, so a single length suffices — no need for a 2D box.
 ///
-/// A known-physical-length bar is shown on a trusted reference display (the
-/// built-in, whose EDID we believe); a resizable bar is shown on the target.
-/// The user matches their lengths, and we infer the target's points-per-inch:
+/// Two resizable bars hug the shared seam, one per display, starting at the full
+/// shared edge. The user drags either until they look the same real length. The
+/// reference display is trusted (its EDID PPI), so its bar's physical length
+/// (points ÷ refPPI) is known; at a match the target's bar is that same length, so:
 ///
-///   pointsPerInch_target = matchedLengthInPoints / referenceInches
+///   pointsPerInch_target = targetBarPoints / (refBarPoints / refPPI)
 ///
-/// Both bars run parallel to the shared seam, centered on the overlap midpoint,
-/// so they sit directly across the gap for an easy side-by-side comparison.
+/// Starting both at the full seam overlap makes the bars as long as possible, so
+/// the user's matching error is a smaller fraction of the length.
 @MainActor
 final class CalibrationController {
 
-    /// Physical length of the reference bar, in inches. Defaults to 10 cm but is
-    /// capped to the seam overlap so the bar never spills past the shared edge.
-    private var referenceInches: Double = 10.0 / 2.54
-
     private var refWindow: NSWindow?
     private var targetWindow: NSWindow?
+    private var controlsBar: BarView?
     private var target: DisplaySnapshot?
+
+    private var refPPT: Double = 0             // trusted reference PPI (source of truth)
+    private var refLengthPoints: CGFloat = 0   // live reference bar length
+    private var targetLengthPoints: CGFloat = 0 // live target bar length
 
     /// Called after a save or cancel so the owner can refresh.
     var onComplete: (() -> Void)?
@@ -48,49 +66,68 @@ final class CalibrationController {
         }
         cancel()
         self.target = target
+        self.refPPT = refPPT
 
-        // Hug the seam if the two displays are adjacent; otherwise center.
-        let refAnchor = seamAnchor(selfBounds: reference.bounds, otherBounds: target.bounds)
-        let targetAnchor = seamAnchor(selfBounds: target.bounds, otherBounds: reference.bounds)
+        // Detect the shared seam once; both bars hug it (or center if not adjacent),
+        // placed via the shared descriptor so there's no per-screen coordinate flip.
+        let seam = SchematicLayout.seam(reference.bounds, target.bounds)
+        let refIsA = seam.map { referenceIsA($0, reference.bounds) } ?? true
+        let refAnchor = seam.map { BarPlacement(seam: $0, screen: reference.bounds, selfIsA: refIsA) }
+        let targetAnchor = seam.map { BarPlacement(seam: $0, screen: target.bounds, selfIsA: !refIsA) }
 
-        // Cap the reference length to fit within the seam overlap (on the
-        // reference screen), so the bar stays inside the shared edge.
-        let defaultInches = 10.0 / 2.54
-        referenceInches = defaultInches
-        if let overlap = seamOverlapPoints(reference.bounds, target.bounds) {
-            let overlapInches = Double(overlap) / refPPT
-            referenceInches = min(defaultInches, max(0.5, overlapInches * 0.9))
-        }
+        // Both bars are windows crossing the seam. They start at the full shared edge
+        // (the overlap, in each screen's own points), as long as possible for accurate
+        // matching; the user drags either to make them physically equal. The overlap is
+        // the same point count on both screens; only its physical size differs.
+        let overlapPoints = seam.map { $0.hi - $0.lo } ?? CGFloat(10.0 / 2.54 * refPPT)
+        refLengthPoints = overlapPoints
+        targetLengthPoints = overlapPoints
 
-        // Reference bar: a fixed physical length rendered on the trusted screen.
-        let refLength = CGFloat(referenceInches * refPPT)
-        let refView = BarView(length: refLength, color: .systemGreen, anchor: refAnchor,
-                              caption: String(format: "Reference: %.1f cm", referenceInches * 2.54))
-        refWindow = makeWindow(screen: refScreen, view: refView, interactive: false)
+        // Reference bar (trusted screen): resizable, no controls.
+        let refView = BarView(length: overlapPoints, color: .systemGreen, anchor: refAnchor, controls: false)
+        refView.onResize = { [weak self] len in self?.refLengthPoints = len; self?.updateReadout() }
+        refWindow = makeWindow(screen: refScreen, view: refView, interactive: true)
 
-        // Target bar: resizable; starts near the (untrusted) EDID guess.
-        let startLength = CGFloat((target.pointsPerInch ?? 100) * referenceInches)
-        let calView = CalibrationView(length: startLength,
-                                      referenceInches: referenceInches,
-                                      targetPointSize: target.bounds.size,
-                                      displayName: target.name,
-                                      anchor: targetAnchor)
-        calView.onSave = { [weak self] length in self?.save(length: length) }
+        // Target bar (target screen): resizable, hosts the readout + Save/Cancel.
+        let calView = BarView(length: overlapPoints, color: .systemOrange, anchor: targetAnchor, controls: true)
+        calView.onResize = { [weak self] len in self?.targetLengthPoints = len; self?.updateReadout() }
+        calView.onSave = { [weak self] in self?.save() }
         calView.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
+        controlsBar = calView
         targetWindow = makeWindow(screen: targetScreen, view: calView, interactive: true)
         targetWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        updateReadout()
     }
 
     func cancel() {
         refWindow?.orderOut(nil); refWindow = nil
         targetWindow?.orderOut(nil); targetWindow = nil
+        controlsBar = nil
         target = nil
     }
 
-    private func save(length: CGFloat) {
-        guard let target, length > 0 else { cancel(); onComplete?(); return }
-        let ppt = Double(length) / referenceInches
+    /// The target PPI implied by the two current bar lengths: the reference bar's
+    /// known physical length (points ÷ trusted PPI) equals the target bar's.
+    private func inferredTargetPPI() -> Double {
+        let refInches = Double(refLengthPoints) / refPPT
+        return refInches > 0 ? Double(targetLengthPoints) / refInches : 0
+    }
+
+    private func updateReadout() {
+        guard let target else { return }
+        let ppt = inferredTargetPPI()
+        let diag = ppt > 0
+            ? (Double(target.bounds.width) * Double(target.bounds.width)
+               + Double(target.bounds.height) * Double(target.bounds.height)).squareRoot() / ppt
+            : 0
+        controlsBar?.setReadout(String(format: "%@ — drag either bar so they're the same real length, then Save · inferred ≈ %.1f″",
+                                       target.name, diag))
+    }
+
+    private func save() {
+        let ppt = inferredTargetPPI()
+        guard let target, ppt > 0 else { cancel(); onComplete?(); return }
         let inchesW = Double(target.bounds.width) / ppt
         let inchesH = Double(target.bounds.height) / ppt
         CalibrationStore.setOverride(CGSize(width: inchesW * 25.4, height: inchesH * 25.4),
@@ -101,54 +138,10 @@ final class CalibrationController {
 
     // MARK: - Geometry
 
-    /// Anchor for a bar drawn on `selfBounds` hugging the seam it shares with
-    /// `otherBounds`. Returns nil when the two displays aren't adjacent.
-    /// Coordinates are in the self-screen's local y-up space.
-    private func seamAnchor(selfBounds A: CGRect, otherBounds B: CGRect) -> SeamAnchor? {
-        let tol: CGFloat = 2
-
-        // Vertical seam (side by side).
-        if abs(A.maxX - B.minX) <= tol {          // self is left → abut right edge
-            let top = max(A.minY, B.minY), bot = min(A.maxY, B.maxY)
-            if bot - top > tol {
-                return SeamAnchor(edge: .right, along: A.height - ((top + bot) / 2 - A.minY))
-            }
-        }
-        if abs(B.maxX - A.minX) <= tol {          // self is right → abut left edge
-            let top = max(A.minY, B.minY), bot = min(A.maxY, B.maxY)
-            if bot - top > tol {
-                return SeamAnchor(edge: .left, along: A.height - ((top + bot) / 2 - A.minY))
-            }
-        }
-        // Horizontal seam (stacked). CG is y-down, so A.maxY == B.minY ⇒ A is on top.
-        if abs(A.maxY - B.minY) <= tol {          // self is top → abut bottom edge (y-up = 0)
-            let l = max(A.minX, B.minX), r = min(A.maxX, B.maxX)
-            if r - l > tol {
-                return SeamAnchor(edge: .bottom, along: (l + r) / 2 - A.minX)
-            }
-        }
-        if abs(B.maxY - A.minY) <= tol {          // self is bottom → abut top edge (y-up = height)
-            let l = max(A.minX, B.minX), r = min(A.maxX, B.maxX)
-            if r - l > tol {
-                return SeamAnchor(edge: .top, along: (l + r) / 2 - A.minX)
-            }
-        }
-        return nil
-    }
-
-    /// Length (in global points) of the overlap segment shared by two adjacent
-    /// displays, or nil if they aren't adjacent.
-    private func seamOverlapPoints(_ A: CGRect, _ B: CGRect) -> CGFloat? {
-        let tol: CGFloat = 2
-        if abs(A.maxX - B.minX) <= tol || abs(B.maxX - A.minX) <= tol {
-            let o = min(A.maxY, B.maxY) - max(A.minY, B.minY)
-            return o > tol ? o : nil
-        }
-        if abs(A.maxY - B.minY) <= tol || abs(B.maxY - A.minY) <= tol {
-            let o = min(A.maxX, B.maxX) - max(A.minX, B.minX)
-            return o > tol ? o : nil
-        }
-        return nil
+    /// Whether `bounds` is on the a-side of `seam` (left for a vertical seam, top
+    /// for a horizontal one), matching `Seam`'s a = left/top convention.
+    private func referenceIsA(_ seam: SchematicLayout.Seam, _ bounds: CGRect) -> Bool {
+        seam.vertical ? abs(bounds.maxX - seam.line) < 1 : abs(bounds.maxY - seam.line) < 1
     }
 
     // MARK: - Window/screen helpers
@@ -162,7 +155,8 @@ final class CalibrationController {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.level = .floating
+        // Above the menu bar so a bar hugging the top edge is still grabbable.
+        window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
         window.ignoresMouseEvents = !interactive
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
@@ -188,9 +182,9 @@ final class KeyableBorderlessWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-/// Rect for a bar of the given length, hugging an optional seam anchor (or a
-/// horizontal bar centered in `bounds` when there's no anchor).
-private func barRect(length: CGFloat, anchor: SeamAnchor?, in bounds: NSRect) -> NSRect {
+/// Rect for a bar of the given length, hugging an optional seam placement (or a
+/// horizontal bar centered in `bounds` when there's no seam).
+private func barRect(length: CGFloat, anchor: BarPlacement?, in bounds: NSRect) -> NSRect {
     let t = barThickness
     guard let a = anchor else {
         return NSRect(x: bounds.midX - length / 2, y: bounds.midY - t / 2, width: length, height: t)
@@ -203,56 +197,24 @@ private func barRect(length: CGFloat, anchor: SeamAnchor?, in bounds: NSRect) ->
     }
 }
 
-/// A static bar of a fixed point length, with a caption.
+/// A resizable bar hugging the seam: drag along the seam to change its length
+/// (symmetric about the overlap midpoint). Reports its live length so the
+/// controller can compare the two bars and infer the target's PPI; the `controls`
+/// bar also hosts the readout + Save/Cancel.
 private final class BarView: NSView {
-    private let length: CGFloat
-    private let color: NSColor
-    private let anchor: SeamAnchor?
-    private let caption: String
-
-    init(length: CGFloat, color: NSColor, anchor: SeamAnchor?, caption: String) {
-        self.length = length; self.color = color; self.anchor = anchor; self.caption = caption
-        super.init(frame: .zero)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let rect = barRect(length: length, anchor: anchor, in: bounds)
-        color.withAlphaComponent(0.85).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
-
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.boldSystemFont(ofSize: 14), .foregroundColor: color
-        ]
-        let size = (caption as NSString).size(withAttributes: attrs)
-        let y = min(rect.maxY + 8, bounds.maxY - size.height - 4)
-        (caption as NSString).draw(at: CGPoint(x: rect.midX - size.width / 2, y: y), withAttributes: attrs)
-    }
-}
-
-/// Interactive resizable bar anchored to the seam; drag along the seam to change
-/// its length (centered on the overlap midpoint). Shows the live inferred diagonal.
-private final class CalibrationView: NSView {
-    var onSave: ((CGFloat) -> Void)?
+    var onResize: ((CGFloat) -> Void)?
+    var onSave: (() -> Void)?
     var onCancel: (() -> Void)?
 
     private var length: CGFloat
-    private let referenceInches: Double
-    private let targetPointSize: CGSize
-    private let displayName: String
-    private let anchor: SeamAnchor?
+    private let color: NSColor
+    private let anchor: BarPlacement?
+    private var readout: NSTextField?
 
-    private var readout: NSTextField!
-
-    init(length: CGFloat, referenceInches: Double, targetPointSize: CGSize,
-         displayName: String, anchor: SeamAnchor?) {
-        self.length = length
-        self.referenceInches = referenceInches
-        self.targetPointSize = targetPointSize
-        self.displayName = displayName
-        self.anchor = anchor
+    init(length: CGFloat, color: NSColor, anchor: BarPlacement?, controls: Bool) {
+        self.length = length; self.color = color; self.anchor = anchor
         super.init(frame: .zero)
-        setupControls()
+        if controls { setupControls() }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -263,6 +225,9 @@ private final class CalibrationView: NSView {
         return lengthIsVertical ? bounds.midY : bounds.midX
     }
 
+    /// Set the readout text; the controller computes it from both bars' lengths.
+    func setReadout(_ text: String) { readout?.stringValue = text }
+
     // MARK: Controls
 
     private func setupControls() {
@@ -271,72 +236,125 @@ private final class CalibrationView: NSView {
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
         cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
 
-        readout = NSTextField(labelWithString: "")
-        readout.font = .boldSystemFont(ofSize: 14)
-        readout.textColor = .systemOrange
-        readout.alignment = .center
+        let label = NSTextField(labelWithString: "")
+        label.font = .boldSystemFont(ofSize: 14)
+        label.textColor = .systemOrange
+        label.alignment = .center
+        readout = label
 
-        for v in [save, cancel, readout!] {
+        for v in [save, cancel, label] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
         NSLayoutConstraint.activate([
-            readout.centerXAnchor.constraint(equalTo: centerXAnchor),
-            readout.topAnchor.constraint(equalTo: topAnchor, constant: 40),
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 40),
             save.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -60),
             save.trailingAnchor.constraint(equalTo: centerXAnchor, constant: -8),
             cancel.centerYAnchor.constraint(equalTo: save.centerYAnchor),
             cancel.leadingAnchor.constraint(equalTo: centerXAnchor, constant: 8),
         ])
-        updateReadout()
-    }
-
-    private func updateReadout() {
-        let ppt = Double(length) / referenceInches
-        let diag = ppt > 0
-            ? (Double(targetPointSize.width) * Double(targetPointSize.width)
-               + Double(targetPointSize.height) * Double(targetPointSize.height)).squareRoot() / ppt
-            : 0
-        readout.stringValue = String(format: "%@ — drag the bar to match the green one, then Save · inferred ≈ %.1f″",
-                                     displayName, diag)
     }
 
     // MARK: Mouse — drag along the seam to resize (symmetric about the midpoint)
 
-    override func mouseDown(with event: NSEvent) { resize(to: convert(event.locationInWindow, from: nil)) }
-    override func mouseDragged(with event: NSEvent) { resize(to: convert(event.locationInWindow, from: nil)) }
+    private var dragging = false
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        // Start a drag only from on/near the bar or its handles — so clicks elsewhere
+        // don't yank the bar to the cursor.
+        dragging = nearBar(p)
+        if dragging { resize(to: p) }
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard dragging else { return }
+        resize(to: convert(event.locationInWindow, from: nil))
+    }
+    override func mouseUp(with event: NSEvent) { dragging = false }
+
+    /// Whether `p` is within the grabbable zone: the bar plus a margin inward from
+    /// each end (where the handles sit), across the bar's thickness.
+    private func nearBar(_ p: CGPoint) -> Bool {
+        let rect = barRect(length: length, anchor: anchor, in: bounds).insetBy(dx: -Self.handleRadius, dy: -Self.handleRadius)
+        return rect.contains(p)
+    }
 
     private func resize(to p: CGPoint) {
         let coord = lengthIsVertical ? p.y : p.x
         let maxLen = lengthIsVertical ? bounds.height : bounds.width
         length = min(maxLen, max(20, 2 * abs(coord - center())))
-        updateReadout()
+        onResize?(length)
         needsDisplay = true
     }
 
-    @objc private func saveTapped() { onSave?(length) }
+    @objc private func saveTapped() { onSave?() }
     @objc private func cancelTapped() { onCancel?() }
 
     // MARK: Draw
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.18).setFill()
-        bounds.fill()
+        // Faint dim on both screens so the thin guidelines stay legible over content.
+        NSColor.black.withAlphaComponent(0.18).setFill(); bounds.fill()
 
         let rect = barRect(length: length, anchor: anchor, in: bounds)
-        NSColor.systemOrange.withAlphaComponent(0.85).setFill()
+
+        drawCrosshairs(rect)
+
+        color.withAlphaComponent(0.85).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
 
-        // End caps as drag hints.
-        NSColor.white.setStroke()
-        let cap = NSBezierPath()
+        for c in handleCenters(rect) { drawHandle(at: c) }
+    }
+
+    /// A grab handle inset from each end of the bar, so the draggable spot is obvious
+    /// and reachable even when the bar spans the whole screen (ends in the corners).
+    private static let handleInset: CGFloat = 26
+    private static let handleRadius: CGFloat = 13
+
+    private func handleCenters(_ rect: NSRect) -> [CGPoint] {
+        let inset = min(Self.handleInset, (lengthIsVertical ? rect.height : rect.width) / 2 - 2)
         if lengthIsVertical {
-            cap.move(to: CGPoint(x: rect.minX + 6, y: rect.minY)); cap.line(to: CGPoint(x: rect.maxX - 6, y: rect.minY))
-            cap.move(to: CGPoint(x: rect.minX + 6, y: rect.maxY)); cap.line(to: CGPoint(x: rect.maxX - 6, y: rect.maxY))
-        } else {
-            cap.move(to: CGPoint(x: rect.minX, y: rect.minY + 6)); cap.line(to: CGPoint(x: rect.minX, y: rect.maxY - 6))
-            cap.move(to: CGPoint(x: rect.maxX, y: rect.minY + 6)); cap.line(to: CGPoint(x: rect.maxX, y: rect.maxY - 6))
+            return [CGPoint(x: rect.midX, y: rect.minY + inset), CGPoint(x: rect.midX, y: rect.maxY - inset)]
         }
-        cap.lineWidth = 2; cap.stroke()
+        return [CGPoint(x: rect.minX + inset, y: rect.midY), CGPoint(x: rect.maxX - inset, y: rect.midY)]
+    }
+
+    private func drawHandle(at c: CGPoint) {
+        let r = Self.handleRadius
+        let circle = NSBezierPath(ovalIn: NSRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+        NSColor.white.withAlphaComponent(0.95).setFill(); circle.fill()
+        color.setStroke(); circle.lineWidth = 2; circle.stroke()
+        // Grip dots so it reads as a handle.
+        color.setFill()
+        for d: CGFloat in [-4, 0, 4] {
+            let dot = lengthIsVertical
+                ? NSRect(x: c.x + d - 1, y: c.y - 1, width: 2, height: 2)
+                : NSRect(x: c.x - 1, y: c.y + d - 1, width: 2, height: 2)
+            NSBezierPath(ovalIn: dot).fill()
+        }
+    }
+
+    /// Three full-screen lines perpendicular to the seam — through the bar's two ends
+    /// and its midpoint — so each can be sighted straight across the gap onto the
+    /// other screen's lines. Drawn as a 1px black core outlined in red for visibility.
+    private func drawCrosshairs(_ rect: NSRect) {
+        let path = NSBezierPath()
+        // Nudge lines 1px inside the screen edge so a full-length bar's end lines
+        // aren't clipped to an invisible hairline.
+        func clamp(_ v: CGFloat, _ hi: CGFloat) -> CGFloat { min(max(v, 1), hi - 1) }
+        if lengthIsVertical {                       // bar runs vertically; lines are horizontal
+            for y in [rect.minY, rect.midY, rect.maxY] {
+                let y = clamp(y, bounds.maxY)
+                path.move(to: CGPoint(x: 0, y: y)); path.line(to: CGPoint(x: bounds.maxX, y: y))
+            }
+        } else {                                    // bar runs horizontally; lines are vertical
+            for x in [rect.minX, rect.midX, rect.maxX] {
+                let x = clamp(x, bounds.maxX)
+                path.move(to: CGPoint(x: x, y: 0)); path.line(to: CGPoint(x: x, y: bounds.maxY))
+            }
+        }
+        NSColor.red.setStroke(); path.lineWidth = 3; path.stroke()      // red outline
+        NSColor.black.setStroke(); path.lineWidth = 1; path.stroke()    // black core
     }
 }
