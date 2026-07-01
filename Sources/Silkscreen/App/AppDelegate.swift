@@ -129,6 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.onCommit = { [weak self] origins in self?.commitArrangement(origins) }
         s.onSetMain = { [weak self] id in self?.setMainDisplay(id) }
         s.onSetResolution = { [weak self] id, mode, origins in self?.setResolution(id, mode, origins) }
+        s.onSetMirror = { [weak self] slave, master in self?.setMirror(slave: slave, master: master) }
+        s.onUnmirror = { [weak self] id in self?.unmirror(id) }
         s.onCalibrate = { [weak self] id in self?.calibrate(id) }
         s.onCalibrateVisual = { [weak self] id in self?.calibrateVisual(id) }
         s.onResetCalibration = { [weak self] id in self?.resetCalibration(id) }
@@ -174,6 +176,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
+        // The arranger sits at the shielding level; lift the alert above it so it isn't
+        // hidden behind the overlay.
+        alert.window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
 
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn,
@@ -267,6 +272,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let before = originMap(of: snapshot)
         applyRevertable(apply: { DisplayManager.applyOrigins(origins, permanent: true) },
                         revert: { DisplayManager.applyOrigins(before, permanent: true) })
+    }
+
+    /// Mirror `slave` onto `master`, then re-snapshot so the slave moves to the mirror
+    /// column. Mirroring can blank/relayout screens, so offer the keep/revert.
+    private func setMirror(slave: CGDirectDisplayID, master: CGDirectDisplayID) {
+        isLiveDragging = false
+        applyRevertable(apply: { DisplayManager.setMirror(slave: slave, master: master) },
+                        revert: { DisplayManager.unmirror(slave) })
+    }
+
+    /// Stop `id` mirroring; it returns to the plane on the next snapshot.
+    private func unmirror(_ id: CGDirectDisplayID) {
+        let snap = DisplayManager.snapshot()
+        guard let master = snap.first(where: { $0.id == id })?.mirrorMaster else { return }
+        isLiveDragging = false
+        applyRevertable(apply: { DisplayManager.unmirror(id) },
+                        revert: { DisplayManager.setMirror(slave: id, master: master) })
     }
 
     // MARK: - Arrangement commit

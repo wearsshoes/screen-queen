@@ -22,10 +22,19 @@ enum DisplayManager {
         guard CGGetActiveDisplayList(count, &rawIDs, &count) == .success else {
             return []
         }
+        // Mirrored slaves drop off the *active* list, so also pull the *online* list and
+        // union them in — otherwise a mirrored display would vanish from the arranger
+        // instead of showing in the mirror column.
+        var onCount: UInt32 = 0
+        CGGetOnlineDisplayList(0, nil, &onCount)
+        var onlineIDs = [CGDirectDisplayID](repeating: 0, count: Int(onCount))
+        CGGetOnlineDisplayList(onCount, &onlineIDs, &onCount)
         // Mid-hotplug the list can transiently repeat an id or list mirror members;
-        // dedupe so nothing downstream (id-keyed dicts) traps on a duplicate.
+        // dedupe so nothing downstream (id-keyed dicts) traps on a duplicate. Include an
+        // online display only if it's a mirrored slave (a live master is already active).
         var seenIDs = Set<CGDirectDisplayID>()
-        let ids = rawIDs.filter { seenIDs.insert($0).inserted }
+        let ids = (rawIDs + onlineIDs.filter { CGDisplayMirrorsDisplay($0) != kCGNullDirectDisplay })
+            .filter { seenIDs.insert($0).inserted }
 
         let names = screenNamesByDisplayID()
 
@@ -51,15 +60,31 @@ enum DisplayManager {
             let override = isBuiltin ? nil : CalibrationStore.override(for: base)
             let physMM = override ?? CGDisplayScreenSize(id)
 
+            // The master this display mirrors (kCGNullDirectDisplay ⇒ not a slave).
+            let master = CGDisplayMirrorsDisplay(id)
+            let mirrorMaster = master == kCGNullDirectDisplay ? nil : master
+
+            // A mirrored slave drops out of NSScreen.screens, so its localized name is
+            // missing. When we *do* have the real name, remember it (keyed by fingerprint)
+            // so we can recall it while mirrored; otherwise recall, then fall back.
+            let name: String
+            if let live = names[id] {
+                NameStore.remember(live, for: base)
+                name = live
+            } else {
+                name = NameStore.name(for: base) ?? (isBuiltin ? "Built-in Display" : Moniker.nickname(for: base))
+            }
+
             return DisplaySnapshot(
                 id: id,
-                name: names[id] ?? "Display \(id)",
+                name: name,
                 bounds: bounds,
                 pixelSize: pixelSize,
                 physicalSizeMM: physMM,
                 physicalSizeIsCalibrated: override != nil,
                 isMain: CGDisplayIsMain(id) != 0,
                 isBuiltin: isBuiltin,
+                mirrorMaster: mirrorMaster,
                 vendor: vendor,
                 model: model,
                 serial: serial,
@@ -122,6 +147,31 @@ enum DisplayManager {
         }
         let err = CGConfigureDisplayWithDisplayMode(config, id, mode, nil)
         if err != .success {
+            CGCancelDisplayConfiguration(config)
+            return false
+        }
+        return CGCompleteDisplayConfiguration(config, .permanently) == .success
+    }
+
+    /// Mirror `slave` onto `master` (slave shows the master's image), atomically.
+    /// Returns false (and rolls back) on failure.
+    @discardableResult
+    static func setMirror(slave: CGDirectDisplayID, master: CGDirectDisplayID) -> Bool {
+        configureMirror(slave, of: master)
+    }
+
+    /// Stop `id` mirroring (return it to its own image / the plane).
+    @discardableResult
+    static func unmirror(_ id: CGDirectDisplayID) -> Bool {
+        configureMirror(id, of: kCGNullDirectDisplay)
+    }
+
+    private static func configureMirror(_ slave: CGDirectDisplayID, of master: CGDirectDisplayID) -> Bool {
+        var configRef: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&configRef) == .success, let config = configRef else {
+            return false
+        }
+        if CGConfigureDisplayMirrorOfDisplay(config, slave, master) != .success {
             CGCancelDisplayConfiguration(config)
             return false
         }

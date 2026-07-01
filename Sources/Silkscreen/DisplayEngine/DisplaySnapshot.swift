@@ -39,6 +39,14 @@ struct DisplaySnapshot: Identifiable, Equatable {
     let isMain: Bool
     let isBuiltin: Bool
 
+    /// The display this one mirrors (its mirror-set master), or nil when it isn't a
+    /// mirrored slave. A mirrored slave shows the master's image; in the arranger it
+    /// leaves the physical plane and lives in the mirror column instead.
+    var mirrorMaster: CGDirectDisplayID? = nil
+
+    /// Whether this display is a mirrored slave (mirrors another display).
+    var isMirrored: Bool { mirrorMaster != nil }
+
     let vendor: UInt32
     let model: UInt32
     let serial: UInt32
@@ -95,6 +103,7 @@ struct DisplaySnapshot: Identifiable, Equatable {
             pixelSize: pixelSize, physicalSizeMM: physicalSizeMM,
             physicalSizeIsCalibrated: physicalSizeIsCalibrated,
             isMain: isMain, isBuiltin: isBuiltin,
+            mirrorMaster: mirrorMaster,
             vendor: vendor, model: model, serial: serial,
             fingerprintSuffix: fingerprintSuffix, refreshHz: refreshHz
         )

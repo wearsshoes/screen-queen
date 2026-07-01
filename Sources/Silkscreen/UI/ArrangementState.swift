@@ -12,6 +12,10 @@ final class ArrangementState {
     /// Set the main display (dragging the menu-bar strip onto another tile).
     var onSetMain: ((CGDirectDisplayID) -> Void)?
     var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)?
+    /// Mirror `slave` onto `master` (Option-drag one tile onto another).
+    var onSetMirror: ((_ slave: CGDirectDisplayID, _ master: CGDirectDisplayID) -> Void)?
+    /// Stop `id` mirroring (the column's un-mirror button).
+    var onUnmirror: ((CGDirectDisplayID) -> Void)?
     var onCalibrate: ((CGDirectDisplayID) -> Void)?
     var onCalibrateVisual: ((CGDirectDisplayID) -> Void)?
     var onResetCalibration: ((CGDirectDisplayID) -> Void)?
@@ -79,16 +83,22 @@ final class ArrangementState {
 
     // MARK: - Interpret / commit
 
+    /// Displays laid out on the physical plane (everything that isn't a mirrored slave).
+    var planeDisplays: [DisplaySnapshot] { displays.filter { !$0.isMirrored } }
+    /// Mirrored slaves — they leave the plane and live in the mirror column.
+    var mirroredDisplays: [DisplaySnapshot] { displays.filter(\.isMirrored) }
+
     func update(with displays: [DisplaySnapshot], force: Bool = false) {
         self.displays = displays
-        if force || !planeMatches(displays) { plane = SchematicLayout.toPlane(displays) }
+        let plane = displays.filter { !$0.isMirrored }
+        if force || !planeMatches(plane) { self.plane = SchematicLayout.toPlane(plane) }
         pendingSize.removeAll()
         pendingMode = nil
         if let sel = selectedID, !displays.contains(where: { $0.id == sel }) {
             selectedID = nil; activeV = nil; activeH = nil
         }
         if selectedID == nil {
-            selectedID = displays.first(where: { $0.isMain })?.id ?? displays.first?.id
+            selectedID = planeDisplays.first(where: { $0.isMain })?.id ?? planeDisplays.first?.id
         }
     }
 
@@ -118,10 +128,11 @@ final class ArrangementState {
     /// Effective point size (live during a zoom preview).
     func pointSize(_ d: DisplaySnapshot) -> CGSize { pendingSize[d.id] ?? d.bounds.size }
 
-    /// Displays with the effective point size applied (committed origins are fine —
-    /// `toPoints`/`seamBars` ignore origins).
+    /// Plane displays with the effective point size applied (committed origins are fine
+    /// — `toPoints`/`seamBars` ignore origins). Mirrored slaves are excluded: they have
+    /// no seam and don't participate in the point arrangement.
     func sizedDisplays() -> [DisplaySnapshot] {
-        displays.map { $0.with(bounds: CGRect(origin: $0.bounds.origin, size: pointSize($0))) }
+        planeDisplays.map { $0.with(bounds: CGRect(origin: $0.bounds.origin, size: pointSize($0))) }
     }
 
     func currentBars() -> [SeamBar] { SchematicLayout.seamBars(sizedDisplays(), rects: plane) }
@@ -129,13 +140,17 @@ final class ArrangementState {
     /// The display macOS will put the Dock on for the arrangement currently on the plane
     /// (predicted from the reconstructed point layout, so it updates live while dragging).
     func predictedDockDisplay() -> CGDirectDisplayID? {
-        let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
+        // Origins come from the (possibly previewed) point sizes; the rects must use the
+        // *same* sizes, or a resolution preview leaves origins and sizes inconsistent and
+        // the Dock is predicted onto the wrong display.
+        let sized = sizedDisplays()
+        let origins = SchematicLayout.toPoints(rects: plane, displays: sized)
         var pointRects: [CGDirectDisplayID: CGRect] = [:]
-        for d in displays {
+        for d in sized {
             let o = origins[d.id] ?? d.bounds.origin
             pointRects[d.id] = CGRect(origin: o, size: d.bounds.size)
         }
-        let mainID = displays.first { $0.isMain }?.id
+        let mainID = sized.first { $0.isMain }?.id
         return DockPredictor.dockDisplay(pointRects: pointRects, mainID: mainID, edge: DockPredictor.edge())
     }
 
