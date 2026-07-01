@@ -39,6 +39,9 @@ final class ArrangementState {
 
     var extendedBuiltinModes = false
 
+    /// True while ⌘⇧ is held: every canvas ghosts the possible alignment destinations.
+    var showAlignGhosts = false
+
     /// A pending revert for the last main/resolution change (nil ⇒ none). Applied by
     /// Undo once the plane-edit stack is exhausted; set by the AppDelegate.
     var pendingRevert: (() -> Void)?

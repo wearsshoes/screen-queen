@@ -44,8 +44,7 @@ extension ArrangementCanvas {
         // The tile tracks the cursor 1:1: view delta ÷ scale = physical delta.
         let free = CGPoint(x: dragStartPhys.x + (p.x - dragStartMouse.x) / t.scale,
                            y: dragStartPhys.y + (p.y - dragStartMouse.y) / t.scale)
-        let snap = !event.modifierFlags.contains(.shift) // Shift cancels docking/snapping
-        let resolved = dockAndSnap(dragged, free: free, scale: t.scale, snap: snap)
+        let resolved = dockAndSnap(dragged, free: free, scale: t.scale, snap: true)
         guard resolved != plane[id]?.origin else { return }
         if !dragMoved { state.pushUndo() }   // snapshot before the drag's first move
         plane[id] = CGRect(origin: resolved, size: SchematicLayout.physSize(dragged))
@@ -154,6 +153,10 @@ extension ArrangementCanvas {
 
     override func flagsChanged(with event: NSEvent) {
         let f = event.modifierFlags
+        // Ghost the possible ⌘⇧ alignment destinations while ⌘⇧ is held — on every
+        // display, so broadcast the shared flag.
+        let ghosts = f.contains(.command) && f.contains(.shift) && selectedID != nil
+        if ghosts != showAlignGhosts { showAlignGhosts = ghosts; emitPreview() }
         if alignPending, !(f.contains(.command) && f.contains(.shift)) {
             alignPending = false
             emitPreview()
@@ -213,7 +216,7 @@ extension ArrangementCanvas {
         guard let id = selectedID, !heldDirections.isEmpty,
               let sel = displays.first(where: { $0.id == id }) else { stopMoveTimer(); return }
         let now = CACurrentMediaTime(), dt = CGFloat(now - lastTick); lastTick = now
-        let rate: CGFloat = NSEvent.modifierFlags.contains(.shift) ? 3.0 : 0.75 // inches / sec
+        let rate: CGFloat = NSEvent.modifierFlags.contains(.shift) ? 6.0 : 1.5 // inches / sec
         var dx: CGFloat = 0, dy: CGFloat = 0
         if heldDirections.contains(.left) { dx -= 1 }
         if heldDirections.contains(.right) { dx += 1 }
@@ -221,10 +224,10 @@ extension ArrangementCanvas {
         if heldDirections.contains(.down) { dy += 1 }
         nudgeAccum.x += dx * rate * dt
         nudgeAccum.y += dy * rate * dt
-        // Autosolve (dock, no alignment magnet).
+        // Dock + magnet to an anchor; the magnet sets activeV/H so the snapping
+        // triangles show while nudging.
         plane[id] = CGRect(origin: dockAndSnap(sel, free: nudgeAccum, scale: transform(plane)?.scale ?? 1, snap: true),
                            size: SchematicLayout.physSize(sel))
-        activeV = nil; activeH = nil
         needsDisplay = true
         emitPreview()
     }
@@ -280,48 +283,61 @@ extension ArrangementCanvas {
     private func stepAlignment(_ dir: MoveDirection) {
         guard let id = selectedID else { return }
         state.pushUndo()   // snapshot before each alignment step
-        guard let join = currentJoin(id) else {
+        guard currentJoin(id) != nil else {
             // Not docked yet: dock to the nearest neighbor (a join for the next press).
             if let sel = displays.first(where: { $0.id == id }) {
                 plane[id] = CGRect(origin: dockAndSnap(sel, free: plane[id]?.origin ?? .zero,
                                                        scale: transform(plane)?.scale ?? 1, snap: true),
                                    size: SchematicLayout.physSize(sel))
             }
+            emitPreview()
             return
         }
-        if join.vertical {
-            if dir.isVertical { cycleAlign(id, other: join.otherID, vertical: true, increasing: dir == .down) }
-            else if dir == (join.aPositive ? .left : .right) { redock(id, around: join.otherID, seamVertical: true) }
-        } else {
-            if !dir.isVertical { cycleAlign(id, other: join.otherID, vertical: false, increasing: dir == .right) }
-            else if dir == (join.aPositive ? .up : .down) { redock(id, around: join.otherID, seamVertical: false) }
+        guard let o = plannedOrigin(id, dir) else { return }
+        plane[id] = CGRect(origin: o, size: plane[id]!.size)
+        setActive(id)
+        emitPreview()
+    }
+
+    /// Where the selected tile would go for `dir`, without applying it. Pure, so the
+    /// ⌘⇧ ghost preview can show each valid arrow's destination. nil ⇒ no-op.
+    ///
+    /// The arrow along the current seam cycles the seven anchors (wrapping around the
+    /// corner onto the perpendicular edge at an end); the arrow across the seam flips
+    /// the tile to the neighbor's edge in that direction. So the presses walk the tile
+    /// around the neighbor like a clock.
+    private func plannedOrigin(_ id: CGDirectDisplayID, _ dir: MoveDirection) -> CGPoint? {
+        guard let join = currentJoin(id) else { return nil }
+        if join.vertical {   // seam is vertical → along = up/down, across = left/right
+            return dir.isVertical ? cycleOrigin(id, other: join.otherID, vertical: true, increasing: dir == .down)
+                                  : flipOrigin(id, around: join.otherID, dir: dir)
+        } else {             // seam is horizontal → along = left/right, across = up/down
+            return !dir.isVertical ? cycleOrigin(id, other: join.otherID, vertical: false, increasing: dir == .right)
+                                   : flipOrigin(id, around: join.otherID, dir: dir)
         }
     }
 
-    /// Step through the seven physical alignment anchors along the seam (already in
-    /// visual order), stopping at the extremes. Only the along-seam coordinate
-    /// changes; the perpendicular stays flush.
-    private func cycleAlign(_ id: CGDirectDisplayID, other oid: CGDirectDisplayID, vertical: Bool, increasing: Bool) {
-        guard var r = plane[id], let oR = plane[oid] else { return }
+    /// Origin one anchor along the seam; at an extreme, wraps around the corner.
+    private func cycleOrigin(_ id: CGDirectDisplayID, other oid: CGDirectDisplayID, vertical: Bool, increasing: Bool) -> CGPoint? {
+        guard let r = plane[id], let oR = plane[oid] else { return nil }
         let step = increasing ? 1 : -1
         if vertical {
             let snaps = SchematicLayout.physSnapsV(childHeight: r.height, parent: oR)
             let cur = activeV?.otherID == oid
                 ? (snaps.firstIndex { $0.selfAnchor == activeV!.selfA && $0.otherAnchor == activeV!.otherA } ?? nearestIndex(snaps.map(\.along), r.minY))
                 : nearestIndex(snaps.map(\.along), r.minY)
-            let t = snaps[max(0, min(snaps.count - 1, cur + step))]
-            r.origin.y = t.along; plane[id] = r
-            activeV = (t.selfAnchor, t.otherAnchor, oid); activeH = nil
+            let next = cur + step
+            if next < 0 || next >= snaps.count { return wrapOrigin(id, around: oid, fromVerticalSeam: true, increasing: increasing) }
+            return CGPoint(x: r.minX, y: snaps[next].along)
         } else {
             let snaps = SchematicLayout.physSnapsH(childWidth: r.width, parent: oR)
             let cur = activeH?.otherID == oid
                 ? (snaps.firstIndex { $0.selfAnchor == activeH!.selfA && $0.otherAnchor == activeH!.otherA } ?? nearestIndex(snaps.map(\.along), r.minX))
                 : nearestIndex(snaps.map(\.along), r.minX)
-            let t = snaps[max(0, min(snaps.count - 1, cur + step))]
-            r.origin.x = t.along; plane[id] = r
-            activeH = (t.selfAnchor, t.otherAnchor, oid); activeV = nil
+            let next = cur + step
+            if next < 0 || next >= snaps.count { return wrapOrigin(id, around: oid, fromVerticalSeam: false, increasing: increasing) }
+            return CGPoint(x: snaps[next].along, y: r.minY)
         }
-        emitPreview()
     }
 
     private func nearestIndex(_ values: [CGFloat], _ current: CGFloat) -> Int {
@@ -330,21 +346,57 @@ extension ArrangementCanvas {
         return bestI
     }
 
-    /// Re-dock onto the nearer perpendicular edge of the neighbor (centered), so
-    /// alignment can "turn the corner".
-    private func redock(_ id: CGDirectDisplayID, around oid: CGDirectDisplayID, seamVertical: Bool) {
-        guard var r = plane[id], let O = plane[oid] else { return }
-        if seamVertical {
-            r.origin.x = O.midX - r.width / 2
-            r.origin.y = (r.midY <= O.midY) ? (O.minY - r.height) : O.maxY
-            activeH = (.center, .center, oid); activeV = nil
-        } else {
-            r.origin.y = O.midY - r.height / 2
-            r.origin.x = (r.midX <= O.midX) ? (O.minX - r.width) : O.maxX
-            activeV = (.center, .center, oid); activeH = nil
+    /// Origin on the neighbor's edge in the pressed direction, same along-anchor —
+    /// nil if already on that side (no toggle-back). Up→above, Down→below, etc.
+    private func flipOrigin(_ id: CGDirectDisplayID, around oid: CGDirectDisplayID, dir: MoveDirection) -> CGPoint? {
+        guard let r = plane[id], let O = plane[oid] else { return nil }
+        switch dir {
+        case .left  where r.minX > O.minX: return CGPoint(x: O.minX - r.width, y: r.minY)
+        case .right where r.maxX < O.maxX: return CGPoint(x: O.maxX, y: r.minY)
+        case .up    where r.minY > O.minY: return CGPoint(x: r.minX, y: O.minY - r.height)
+        case .down  where r.maxY < O.maxY: return CGPoint(x: r.minX, y: O.maxY)
+        default: return nil   // already on that side
         }
-        plane[id] = r
-        emitPreview()
+    }
+
+    /// Origin after wrapping onto the perpendicular edge (turning the corner), snapped
+    /// to the corner anchor it wrapped past.
+    private func wrapOrigin(_ id: CGDirectDisplayID, around oid: CGDirectDisplayID, fromVerticalSeam: Bool, increasing: Bool) -> CGPoint? {
+        guard let r = plane[id], let O = plane[oid] else { return nil }
+        if fromVerticalSeam {
+            let onRight = abs(r.minX - O.maxX) < 0.1
+            let y = increasing ? O.maxY : O.minY - r.height        // below / above O
+            let snaps = SchematicLayout.physSnapsH(childWidth: r.width, parent: O)
+            return CGPoint(x: (onRight ? snaps.last! : snaps.first!).along, y: y)
+        } else {
+            let below = abs(r.minY - O.maxY) < 0.1
+            let x = increasing ? O.maxX : O.minX - r.width         // right / left of O
+            let snaps = SchematicLayout.physSnapsV(childHeight: r.height, parent: O)
+            return CGPoint(x: x, y: (below ? snaps.last! : snaps.first!).along)
+        }
+    }
+
+    /// Recompute the active-anchor marker for the tile's current join.
+    private func setActive(_ id: CGDirectDisplayID) {
+        guard let r = plane[id], let join = currentJoin(id), let oR = plane[join.otherID] else { return }
+        if join.vertical {
+            let snaps = SchematicLayout.physSnapsV(childHeight: r.height, parent: oR)
+            let i = nearestIndex(snaps.map(\.along), r.minY)
+            activeV = (snaps[i].selfAnchor, snaps[i].otherAnchor, join.otherID); activeH = nil
+        } else {
+            let snaps = SchematicLayout.physSnapsH(childWidth: r.width, parent: oR)
+            let i = nearestIndex(snaps.map(\.along), r.minX)
+            activeH = (snaps[i].selfAnchor, snaps[i].otherAnchor, join.otherID); activeV = nil
+        }
+    }
+
+    /// The valid ⌘⇧ arrow destinations (grey-ghosted while ⌘⇧ is held) for the
+    /// selected tile: each arrow's move direction and the physical rect it lands on
+    /// (skipping no-ops).
+    func alignGhosts() -> [(dir: MoveDirection, rect: CGRect)] {
+        guard let id = selectedID, let size = plane[id]?.size, currentJoin(id) != nil else { return [] }
+        return [MoveDirection.up, .down, .left, .right]
+            .compactMap { d in plannedOrigin(id, d).map { (d, CGRect(origin: $0, size: size)) } }
     }
 
     // MARK: - Resolution

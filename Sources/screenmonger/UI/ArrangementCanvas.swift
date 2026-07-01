@@ -129,6 +129,8 @@ final class ArrangementCanvas: NSView {
     // Resolution preview flag (commits the pending mode when ⌘ is released).
     var zoomPending = false
 
+    var showAlignGhosts: Bool { get { state.showAlignGhosts } set { state.showAlignGhosts = newValue } }
+
     /// The display this canvas's window sits on — its tile is centered in the view.
     /// nil ⇒ center the main display (single-window fallback).
     var centerID: CGDirectDisplayID?

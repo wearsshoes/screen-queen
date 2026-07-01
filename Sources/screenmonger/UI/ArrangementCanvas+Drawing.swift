@@ -17,6 +17,7 @@ extension ArrangementCanvas {
             return
         }
         let bars = currentBars()
+        if showAlignGhosts { drawAlignGhosts(t: t) }   // under the tiles
         for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!)) }
         drawReferenceBars(bars, t: t)
         let markers = activeMarkers(rects)
@@ -301,6 +302,69 @@ extension ArrangementCanvas {
         let area = NSRect(x: bounds.minX + 40, y: bounds.minY + 40 + notch,
                           width: bounds.width - 80, height: bounds.height - 80 - notch)
         drawArrow(at: active.pos.point(in: area), dir: active.dir, scale: 3)
+    }
+
+    /// Grey ghosts of where each valid ⌘⇧ arrow would move the selected tile, with a
+    /// direction arrow. Drawn under the real tiles. The arrow sits at the ghost's
+    /// center, or the center of its overlap with the current tile, or (if that overlap
+    /// is too small) just outside the current tile in the move direction.
+    private func drawAlignGhosts(t: Transform) {
+        guard let selID = selectedID, let cur = plane[selID] else { return }
+        let curView = t.viewRect(cur)
+        for (dir, rect) in alignGhosts() {
+            let g = t.viewRect(rect)
+            let box = g.insetBy(dx: 1.5, dy: 1.5)
+            NSColor.gray.withAlphaComponent(0.35).setFill()
+            let path = NSBezierPath(roundedRect: box, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
+            path.fill()
+            NSColor.white.withAlphaComponent(0.5).setStroke()   // lighter outline
+            path.lineWidth = 1; path.stroke()
+
+            // The overlap is covered by the current tile (drawn on top), so aim the
+            // arrow at the ghost's *exposed* strip (ghost minus the current tile),
+            // biased toward the ghost. If that strip is too thin, nudge just outside.
+            let overlap = g.intersection(curView)
+            let at: CGPoint
+            if overlap.isNull || overlap.width <= 0 || overlap.height <= 0 {
+                at = CGPoint(x: g.midX, y: g.midY)               // no overlap → ghost center
+            } else {
+                let exposedX = max(g.maxX - curView.maxX, 0) >= max(curView.minX - g.minX, 0)
+                    ? (g.maxX + curView.maxX) / 2 : (g.minX + curView.minX) / 2
+                let exposedY = max(g.maxY - curView.maxY, 0) >= max(curView.minY - g.minY, 0)
+                    ? (g.maxY + curView.maxY) / 2 : (g.minY + curView.minY) / 2
+                // Move along whichever axis the ghost is actually offset.
+                if abs(g.midX - curView.midX) >= abs(g.midY - curView.midY) {
+                    at = CGPoint(x: exposedX, y: g.midY)
+                } else {
+                    at = CGPoint(x: g.midX, y: exposedY)
+                }
+            }
+            let travel: CGVector   // flipped view: up = -y
+            switch dir {
+            case .left:  travel = CGVector(dx: -1, dy: 0)
+            case .right: travel = CGVector(dx: 1, dy: 0)
+            case .up:    travel = CGVector(dx: 0, dy: -1)
+            case .down:  travel = CGVector(dx: 0, dy: 1)
+            }
+            drawDirectionArrow(centeredAt: at, pointing: travel, length: 34)
+        }
+    }
+
+    /// A clean "→"-style arrow (line shaft + open chevron head) pointing along `dir`,
+    /// centered at `p`.
+    private func drawDirectionArrow(centeredAt p: CGPoint, pointing dir: CGVector, length: CGFloat) {
+        let n = unit(dir)
+        let tail = CGPoint(x: p.x - n.dx * length / 2, y: p.y - n.dy * length / 2)
+        let tip  = CGPoint(x: p.x + n.dx * length / 2, y: p.y + n.dy * length / 2)
+        let perp = CGVector(dx: -n.dy, dy: n.dx)
+        let head: CGFloat = 9
+        let path = NSBezierPath()
+        path.move(to: tail); path.line(to: tip)                                  // shaft
+        path.move(to: CGPoint(x: tip.x - n.dx * head + perp.dx * head, y: tip.y - n.dy * head + perp.dy * head))
+        path.line(to: tip)                                                       // chevron
+        path.line(to: CGPoint(x: tip.x - n.dx * head - perp.dx * head, y: tip.y - n.dy * head - perp.dy * head))
+        path.lineWidth = 3; path.lineCapStyle = .round; path.lineJoinStyle = .round
+        NSColor.white.setStroke(); path.stroke()
     }
 
     /// Markers for the active alignment, read from the stored anchor pair; the
