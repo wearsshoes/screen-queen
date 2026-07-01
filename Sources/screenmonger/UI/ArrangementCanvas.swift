@@ -535,19 +535,23 @@ final class ArrangementCanvas: NSView {
         menu.addItem(mainItem)
 
         menu.addItem(resolutionMenuItem(for: d))
-        menu.addItem(.separator())
-        if displays.count > 1 {
-            let matchItem = NSMenuItem(title: "Calibrate by Matching…", action: #selector(calibrateVisualFromMenu(_:)), keyEquivalent: "")
-            matchItem.target = self; matchItem.representedObject = NSNumber(value: d.id)
-            menu.addItem(matchItem)
-        }
-        let calItem = NSMenuItem(title: "Calibrate by Diagonal…", action: #selector(calibrateFromMenu(_:)), keyEquivalent: "")
-        calItem.target = self; calItem.representedObject = NSNumber(value: d.id)
-        menu.addItem(calItem)
-        if d.physicalSizeIsCalibrated {
-            let resetItem = NSMenuItem(title: "Reset Size to EDID", action: #selector(resetCalibrationFromMenu(_:)), keyEquivalent: "")
-            resetItem.target = self; resetItem.representedObject = NSNumber(value: d.id)
-            menu.addItem(resetItem)
+        // The built-in display's EDID physical size is authoritative, so it's not
+        // calibratable — offer no size overrides for it.
+        if !d.isBuiltin {
+            menu.addItem(.separator())
+            if displays.count > 1 {
+                let matchItem = NSMenuItem(title: "Calibrate by Matching…", action: #selector(calibrateVisualFromMenu(_:)), keyEquivalent: "")
+                matchItem.target = self; matchItem.representedObject = NSNumber(value: d.id)
+                menu.addItem(matchItem)
+            }
+            let calItem = NSMenuItem(title: "Calibrate by Diagonal…", action: #selector(calibrateFromMenu(_:)), keyEquivalent: "")
+            calItem.target = self; calItem.representedObject = NSNumber(value: d.id)
+            menu.addItem(calItem)
+            if d.physicalSizeIsCalibrated {
+                let resetItem = NSMenuItem(title: "Reset Size to EDID", action: #selector(resetCalibrationFromMenu(_:)), keyEquivalent: "")
+                resetItem.target = self; resetItem.representedObject = NSNumber(value: d.id)
+                menu.addItem(resetItem)
+            }
         }
         return menu
     }

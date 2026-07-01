@@ -38,8 +38,11 @@ enum DisplayManager {
             let serial = CGDisplaySerialNumber(id)
             let fingerprint = "\(vendor)-\(model)-\(serial)"
 
-            // Prefer a manual calibration over EDID, which some monitors fake.
-            let override = CalibrationStore.override(for: fingerprint)
+            // Prefer a manual calibration over EDID, which some monitors fake — but
+            // the built-in's EDID is authoritative, so it always uses EDID (ignoring
+            // any stale override from before it was made non-calibratable).
+            let isBuiltin = CGDisplayIsBuiltin(id) != 0
+            let override = isBuiltin ? nil : CalibrationStore.override(for: fingerprint)
             let physMM = override ?? CGDisplayScreenSize(id)
 
             return DisplaySnapshot(
@@ -50,7 +53,7 @@ enum DisplayManager {
                 physicalSizeMM: physMM,
                 physicalSizeIsCalibrated: override != nil,
                 isMain: CGDisplayIsMain(id) != 0,
-                isBuiltin: CGDisplayIsBuiltin(id) != 0,
+                isBuiltin: isBuiltin,
                 vendor: vendor,
                 model: model,
                 serial: serial,

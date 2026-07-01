@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Visual match-the-boxes calibration against a trusted reference display.
     private func calibrateVisual(_ id: CGDirectDisplayID) {
         let displays = DisplayManager.snapshot()
-        guard let target = displays.first(where: { $0.id == id }) else { return }
+        guard let target = displays.first(where: { $0.id == id }), !target.isBuiltin else { return }
         let candidates = displays.filter { $0.id != id && $0.pointsPerInch != nil }
         let reference = candidates.first(where: { $0.isBuiltin })
             ?? candidates.first(where: { $0.physicalSizeIsCalibrated })
@@ -143,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Prompt for the display's true diagonal size (EDID can't be trusted) and
     /// store an override keyed to that physical monitor.
     private func calibrate(_ id: CGDirectDisplayID) {
-        guard let d = DisplayManager.snapshot().first(where: { $0.id == id }) else { return }
+        guard let d = DisplayManager.snapshot().first(where: { $0.id == id }), !d.isBuiltin else { return }
 
         let alert = NSAlert()
         alert.messageText = "Calibrate \(d.name)"
