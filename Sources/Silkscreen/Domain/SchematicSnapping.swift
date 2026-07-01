@@ -1,13 +1,13 @@
-import AppKit
+import CoreGraphics
 
 /// Pure plane-space snapping and keyboard-alignment geometry: given the current plane
 /// (physical-inch rects, y-down, domain-native) and the active anchor markers, compute
 /// where a dragged or nudged tile should land — and which markers result.
 ///
-/// Like `SchematicGeometry`, this type is transform-free and canvas-free: it takes plane
-/// rects in and returns plane origins out, with the active-marker side effect turned into
-/// a return value. The canvas is the only place that reads/writes state; here it's all
-/// inputs and outputs, so the logic is testable in isolation.
+/// Transform-free and canvas-free: it takes plane rects in and returns plane origins out,
+/// with the active-marker side effect turned into a return value. The canvas is the only
+/// place that reads/writes state; here it's all inputs and outputs, so the logic is
+/// testable in isolation.
 enum SchematicSnapping {
 
     /// The two active-anchor markers, matching `ArrangementState`'s storage shape so call

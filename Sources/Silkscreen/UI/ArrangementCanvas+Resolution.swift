@@ -1,9 +1,9 @@
 import AppKit
 
-/// Resolution / display-mode handling: the ⌘± single-display steps, the ⌘⇧± global
-/// proportional zoom, and the mode list the slider and menu both index into. Previews
-/// go through `state.pendingModes`/`pendingSize` (physical size unchanged, so the plane
-/// and alignment stay put); the pending set commits as one revertable step.
+/// Resolution / display-mode *interaction*: the ⌘± single-display steps, the ⌘⇧± global
+/// proportional zoom, and previewing/committing pending modes. The pure ladder math (which
+/// modes to offer, ordering, default, PPI) lives in `ResolutionLadder`; the thin wrappers
+/// here supply the live system facts (catalog modes, notch, current mode, pending state).
 extension ArrangementCanvas {
 
     /// Step the selected display's resolution: preview via `pendingSize` (physical
@@ -19,21 +19,13 @@ extension ArrangementCanvas {
         switch ch {
         case "=", "+": target = idx.map { $0 - 1 >= 0 ? modes[$0 - 1] : modes.first } ?? modes.first
         case "-", "_": target = idx.map { $0 + 1 < modes.count ? modes[$0 + 1] : modes.last } ?? modes.last
-        case "0": target = defaultMode(modes)
+        case "0": target = ResolutionLadder.defaultMode(modes)
         default: break
         }
         guard let t = target else { return }
 
         previewMode(t, on: id)
         zoomPending = true
-    }
-
-    /// PPI of `mode` on `d` (points per physical inch — the density that governs how big
-    /// UI looks), or nil when the physical size is unknown.
-    private func modePPI(_ mode: DisplayMode, on d: DisplaySnapshot) -> Double? {
-        let inches = Double(d.physicalSizeMM.width) / 25.4
-        guard inches > 0.1 else { return nil }
-        return Double(mode.pointWidth) / inches
     }
 
     /// Global (⌘⇧ +/−/0) resolution zoom, keeping displays roughly proportional in PPI.
@@ -52,7 +44,8 @@ extension ArrangementCanvas {
             globalZoomStartPPI.removeAll()
             for d in displays where !d.isMirrored {
                 let modes = sortedModes(for: d)
-                if let idx = currentModeIndex(for: d, in: modes), let ppi = modePPI(modes[idx], on: d) {
+                if let idx = currentModeIndex(for: d, in: modes),
+                   let ppi = ResolutionLadder.ppi(modes[idx], physicalWidthMM: d.physicalSizeMM.width) {
                     globalZoomStartPPI[d.id] = ppi
                 }
             }
@@ -68,11 +61,13 @@ extension ArrangementCanvas {
 
         // Resolve the target mode each display would take at the new level.
         func targetMode(for d: DisplaySnapshot, modes: [DisplayMode]) -> DisplayMode {
-            if ch == "0", let def = defaultMode(modes) { return def }
+            if ch == "0", let def = ResolutionLadder.defaultMode(modes) { return def }
             if let start = globalZoomStartPPI[d.id] {
                 let target = start * globalZoomLevel
                 return modes.min(by: {
-                    abs((modePPI($0, on: d) ?? 0) - target) < abs((modePPI($1, on: d) ?? 0) - target)
+                    let a = ResolutionLadder.ppi($0, physicalWidthMM: d.physicalSizeMM.width) ?? 0
+                    let b = ResolutionLadder.ppi($1, physicalWidthMM: d.physicalSizeMM.width) ?? 0
+                    return abs(a - target) < abs(b - target)
                 }) ?? modes[modes.count / 2]
             }
             // No PPI (uncalibrated): fall back to a plain detent step from the current mode.
@@ -109,16 +104,25 @@ extension ArrangementCanvas {
         zoomPending = true
     }
 
-    /// Sorted resolution modes (small → large point area) for `d`, the ordering the
-    /// slider and the ⌘±/0 keys both index into.
+    /// Sorted resolution modes (small → large point area) for `d` — the live-system wrapper
+    /// around `ResolutionLadder`, supplying the catalog modes, notch flag, and current mode.
     func sortedModes(for d: DisplaySnapshot) -> [DisplayMode] {
-        modesList(for: d).sorted { $0.pointWidth * $0.pointHeight < $1.pointWidth * $1.pointHeight }
+        ResolutionLadder.sortedModes(all: ModeCatalog.menuModes(for: d.id), isBuiltin: d.isBuiltin,
+                                     notched: isNotched(d), extended: extendedBuiltinModes,
+                                     current: CGDisplayCopyDisplayMode(d.id))
     }
 
     /// Index of `d`'s current (or pending) mode within `sortedModes`, if present.
     func currentModeIndex(for d: DisplaySnapshot, in modes: [DisplayMode]) -> Int? {
-        let cur = state.pendingMode(for: d.id) ?? CGDisplayCopyDisplayMode(d.id)
-        return modes.firstIndex { cur != nil && ModeCatalog.sameMode(cur!, $0.cgMode) }
+        ResolutionLadder.currentIndex(in: modes, matching: state.pendingMode(for: d.id) ?? CGDisplayCopyDisplayMode(d.id))
+    }
+
+    /// The modes to *list* for `d` (menu order isn't sorted-by-area; the menu uses this
+    /// directly). Live-system wrapper around `ResolutionLadder.modesList`.
+    func modesList(for d: DisplaySnapshot) -> [DisplayMode] {
+        ResolutionLadder.modesList(all: ModeCatalog.menuModes(for: d.id), isBuiltin: d.isBuiltin,
+                                   notched: isNotched(d), extended: extendedBuiltinModes,
+                                   current: CGDisplayCopyDisplayMode(d.id))
     }
 
     /// Preview `mode` on `id` (physical size unchanged, so the plane and alignment are
@@ -145,48 +149,11 @@ extension ArrangementCanvas {
         onSetResolutions?(modes, origins)
     }
 
-    func modesList(for d: DisplaySnapshot) -> [DisplayMode] {
-        let all = ModeCatalog.menuModes(for: d.id)
-        guard d.isBuiltin, !extendedBuiltinModes else { return all }
-
-        // Standard = clean 2× Retina modes.
-        var filtered = all.filter { $0.pixelWidth == 2 * $0.pointWidth }
-        // On a notched display also hide the "notchless" (letterboxed, shorter)
-        // variants: for each width the notched mode is the tallest, so drop anything
-        // shorter than the tallest at that width.
-        if isNotched(d) {
-            var tallest: [Int: Int] = [:]
-            for m in filtered { tallest[m.pixelWidth] = max(tallest[m.pixelWidth] ?? 0, m.pixelHeight) }
-            filtered = filtered.filter { $0.pixelHeight == tallest[$0.pixelWidth] }
-        }
-        guard !filtered.isEmpty else { return all }
-
-        // The full clean-2× ladder runs from absurdly tiny (640×360) to native, but
-        // macOS System Settings only surfaces a handful of "looks like" sizes at the
-        // crisp (large) end. Match that: take the top of the ladder, so the slider/menu
-        // don't step through the useless small extremes (the "Show Extended Resolutions"
-        // toggle still reveals the full list). The window is *stable* — anchored at the
-        // native end, not the moving current mode — so the menu and slider always agree.
-        let sorted = filtered.sorted { $0.pointWidth * $0.pointHeight < $1.pointWidth * $1.pointHeight }
-        var lo = max(0, sorted.count - 5)   // macOS surfaces ~5 crisp "looks like" sizes
-        // Always include the current mode, even if it's been set below the crisp band,
-        // so the slider knob and the menu checkmark land on a real entry.
-        if let cur = CGDisplayCopyDisplayMode(d.id),
-           let curIdx = sorted.firstIndex(where: { ModeCatalog.sameMode(cur, $0.cgMode) }) {
-            lo = min(lo, curIdx)
-        }
-        return Array(sorted[lo...])
-    }
-
-    /// Whether `d` is a notched built-in display (its screen reserves a top safe area).
+    /// Whether `d` is a notched built-in display (its screen reserves a top safe area) —
+    /// a live `NSScreen` query, kept in the UI layer so `ResolutionLadder` stays pure.
     private func isNotched(_ d: DisplaySnapshot) -> Bool {
         let key = NSDeviceDescriptionKey("NSScreenNumber")
         let screen = NSScreen.screens.first { ($0.deviceDescription[key] as? NSNumber)?.uint32Value == d.id }
         return (screen?.safeAreaInsets.top ?? 0) > 0
-    }
-
-    private func defaultMode(_ modes: [DisplayMode]) -> DisplayMode? {
-        let retina = modes.filter { abs($0.pixelWidth - 2 * $0.pointWidth) <= 1 }
-        return (retina.isEmpty ? modes : retina).max { $0.pixelWidth * $0.pixelHeight < $1.pixelWidth * $1.pixelHeight }
     }
 }

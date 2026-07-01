@@ -233,7 +233,8 @@ extension ArrangementCanvas {
         shadow.shadowBlurRadius = 8
         shadow.shadowOffset = NSSize(width: 0, height: -3)   // y-up view: -y casts the shadow downward
         shadow.set()
-        let path = SchematicGeometry.tilePath(tileRect.insetBy(dx: 1.5, dy: 1.5), cornerRadius: tileCornerRadius)
+        let path = NSBezierPath(roundedRect: tileRect.insetBy(dx: 1.5, dy: 1.5),
+                                xRadius: tileCornerRadius, yRadius: tileCornerRadius)
         NSColor.black.setFill()
         path.fill()
         NSGraphicsContext.restoreGraphicsState()
@@ -317,7 +318,7 @@ extension ArrangementCanvas {
             ? NSColor.controlAccentColor.blended(withFraction: 0.78, of: .white) ?? .white
             : NSColor(white: 0.72, alpha: 0.85)
         let inset = rect.insetBy(dx: 1.5, dy: 1.5)
-        let path = SchematicGeometry.tilePath(inset, cornerRadius: tileCornerRadius)
+        let path = NSBezierPath(roundedRect: inset, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
         color.setFill(); path.fill()
         color.setStroke(); path.lineWidth = 1.5; path.stroke()
         drawWallpaper(for: display, in: inset, selected: selected)
