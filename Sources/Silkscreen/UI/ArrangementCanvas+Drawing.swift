@@ -78,9 +78,12 @@ extension ArrangementCanvas {
     /// on the participating screen.
     private func drawEdgeBars(_ bars: [SeamBar]) {
         guard let me = centerID else { return }
-        let thickness: CGFloat = 9
-        // On a notched display, keep top-edge bars below the menu-bar/notch area.
-        let notch = window?.screen?.safeAreaInsets.top ?? 0
+        // Constant *physical* thickness on every screen: these bars live in this screen's
+        // point space, so a fixed point thickness would look thinner on a denser panel.
+        // Convert a target physical thickness to points via this screen's density.
+        let thicknessInches: CGFloat = 0.08
+        let ppi = displays.first { $0.id == me }?.pointsPerInch
+        let thickness: CGFloat = ppi.map { thicknessInches * CGFloat($0) } ?? 9
         for bar in bars where bar.aID == me || bar.bID == me {
             let weAreA = (bar.aID == me)
             let facing = colorFor[weAreA ? bar.bID : bar.aID] ?? .systemGray
@@ -97,7 +100,7 @@ extension ArrangementCanvas {
                 rect = NSRect(x: x, y: along - len / 2, width: thickness, height: len)
                 inward = weAreA ? .minX : .maxX                  // a hugs the right edge → rounds left
             } else {
-                let y = weAreA ? bounds.height - thickness : notch
+                let y = weAreA ? bounds.height - thickness : 0   // top edge: flush at screen top
                 rect = NSRect(x: along - len / 2, y: y, width: len, height: thickness)
                 inward = weAreA ? .minY : .maxY
             }
