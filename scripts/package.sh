@@ -53,4 +53,31 @@ codesign --verify --strict --verbose=2 "$APP"
 echo "✓ $APP"
 if [[ "$IDENTITY" == "-" ]]; then
 	echo "  (ad-hoc signed — for distribution, re-run with CODESIGN_IDENTITY set, then notarize.)"
+	exit 0
+fi
+
+# Notarize when asked (needs a real Developer ID signature above). Provide either a
+# stored credential profile or an Apple ID / team / app-specific-password triple:
+#   NOTARIZE=1 NOTARY_PROFILE="silkscreen"                       scripts/package.sh
+#   NOTARIZE=1 NOTARY_APPLE_ID=… NOTARY_TEAM_ID=… NOTARY_PASSWORD=…  scripts/package.sh
+if [[ "${NOTARIZE:-0}" == "1" ]]; then
+	ZIP="$BUILD_DIR/$APP_NAME.zip"
+	echo "▸ Zipping for notarization…"
+	ditto -c -k --keepParent "$APP" "$ZIP"
+
+	echo "▸ Submitting to Apple notary service (this can take a few minutes)…"
+	if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+		xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+	else
+		xcrun notarytool submit "$ZIP" \
+			--apple-id "${NOTARY_APPLE_ID:?set NOTARY_APPLE_ID}" \
+			--team-id "${NOTARY_TEAM_ID:?set NOTARY_TEAM_ID}" \
+			--password "${NOTARY_PASSWORD:?set NOTARY_PASSWORD}" --wait
+	fi
+
+	echo "▸ Stapling ticket…"
+	xcrun stapler staple "$APP"
+	xcrun stapler validate "$APP"
+	rm -f "$ZIP"
+	echo "✓ Notarized: $APP"
 fi
