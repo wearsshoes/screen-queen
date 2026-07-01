@@ -120,12 +120,21 @@ final class ArrangementWindows {
         canvas.autoresizingMask = [.width, .height]
 
         if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView(frame: fullFrame)
+            // `NSGlassEffectView` draws a light rim at its edges (the Liquid Glass border).
+            // On a full-screen overlay that reads as a white outline around the whole screen.
+            // Oversize the glass past the window bounds on every side so its rim falls outside
+            // the visible area (clipped), and keep the canvas at the true full frame on top so
+            // its own layout/bounds stay correct.
+            let bleed: CGFloat = 24
+            let host = NSView(frame: fullFrame)
+            host.autoresizingMask = [.width, .height]
+            let glass = NSGlassEffectView(frame: fullFrame.insetBy(dx: -bleed, dy: -bleed))
             glass.style = .clear
             glass.cornerRadius = 0
             glass.autoresizingMask = [.width, .height]
-            glass.contentView = canvas
-            window.contentView = glass
+            host.addSubview(glass)
+            host.addSubview(canvas)            // canvas on top, at the true full frame
+            window.contentView = host
         } else {
             let blur = NSVisualEffectView(frame: fullFrame)
             blur.material = .hudWindow

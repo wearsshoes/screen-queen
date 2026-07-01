@@ -48,10 +48,14 @@ extension ArrangementCanvas {
                 drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
             }
         }
+        // Seam particle emitters are repositioned each draw (they animate on the GPU
+        // between draws). Wrap the bar passes, which register the current edges.
+        seamEmitters.begin()
         drawReferenceBars(bars, t: t, seamColor: seamColor)
         let markers = activeMarkers(rects)
         for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
         drawEdgeBars(bars, seamColor: seamColor)   // full-screen reference bars hugging this screen's real edges
+        seamEmitters.commit()
         drawScreenMarkers(activeMarkers(rects))   // alignment notches/arrows at this screen's real edges
         drawMirrorColumn()                        // mirrored displays live in the right column
         drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution")
@@ -105,18 +109,40 @@ extension ArrangementCanvas {
             } else {
                 let cA = t.viewPoint(CGPoint(x: bar.physAlongA, y: bar.physLine))
                 let cB = t.viewPoint(CGPoint(x: bar.physAlongB, y: bar.physLine))
-                // a = top display: bar's bottom edge at the seam, rounds toward a's center (up).
-                drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y - gap - thickness, width: lenA, height: thickness), roundedOn: .minY, color: color)
-                drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y + gap, width: lenB, height: thickness), roundedOn: .maxY, color: color)
+                // a = top display (center above the seam). View is y-up, so "above" is larger
+                // y: a's bar sits above the seam line and rounds on its top edge (.maxY, facing
+                // a's center); b (below) sits under the seam and rounds .minY.
+                drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y + gap, width: lenA, height: thickness), roundedOn: .maxY, color: color)
+                drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y - gap - thickness, width: lenB, height: thickness), roundedOn: .minY, color: color)
             }
         }
     }
 
     /// A D-shaped mini-map bar: rounded on the `inward` edge (facing its display's
-    /// center), flat against the seam — matching the on-glass edge bars.
+    /// center), flat against the seam. Colored circles drift off the inward edge toward
+    /// the display center and fade out.
     private func drawBar(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
         color.setFill()
         dPath(rect, roundedOn: inward).fill()
+        // seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: color,
+        //                  id: "mini-\(barID(rect, inward))", sizeScale: 1)
+    }
+
+    /// The direction particles drift: toward the display center = the `inward` edge. View is
+    /// y-up, so the `minY` edge faces the screen *bottom* (drift down) and `maxY` the top.
+    private func particleDirection(_ inward: RectEdge) -> SeamEmitters.Direction {
+        switch inward {
+        case .minX: return .left
+        case .maxX: return .right
+        case .minY: return .down
+        case .maxY: return .up
+        }
+    }
+
+    /// A stable per-edge id so an emitter persists across frames (quantized so sub-pixel
+    /// jitter doesn't reseed a new emitter each draw).
+    private func barID(_ r: NSRect, _ inward: RectEdge) -> String {
+        "\(Int(r.minX / 3))-\(Int(r.minY / 3))-\(inward)"
     }
 
     /// Full-screen reference bars hugging *this* screen's real edges (in its own
@@ -159,12 +185,17 @@ extension ArrangementCanvas {
                 rect = NSRect(x: x, y: along - len / 2, width: thickness, height: len)
                 inward = weAreA ? .minX : .maxX                  // a hugs the right edge → rounds left
             } else {
-                let y = weAreA ? bounds.height - thickness : 0   // top edge: flush at screen top
+                // `a` is the display above the seam, so the seam is at its *bottom* edge.
+                // y-up: screen bottom = y 0, and "inward" (toward center) rounds upward = .maxY.
+                let y = weAreA ? 0 : bounds.height - thickness
                 rect = NSRect(x: along - len / 2, y: y, width: len, height: thickness)
-                inward = weAreA ? .minY : .maxY
+                inward = weAreA ? .maxY : .minY
             }
             facing.setFill()
             dPath(rect, roundedOn: inward).fill()
+            // Edge bars are full-screen scale → larger particles than the mini-map bars.
+            // seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: facing,
+            //                  id: "edge-\(barID(rect, inward))", sizeScale: 2.6)
         }
     }
 
@@ -200,10 +231,9 @@ extension ArrangementCanvas {
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.45)
         shadow.shadowBlurRadius = 8
-        shadow.shadowOffset = NSSize(width: 0, height: 3)   // flipped view: +y casts the shadow downward
+        shadow.shadowOffset = NSSize(width: 0, height: -3)   // y-up view: -y casts the shadow downward
         shadow.set()
-        let path = NSBezierPath(roundedRect: tileRect.insetBy(dx: 1.5, dy: 1.5),
-                                xRadius: tileCornerRadius, yRadius: tileCornerRadius)
+        let path = SchematicGeometry.tilePath(tileRect.insetBy(dx: 1.5, dy: 1.5), cornerRadius: tileCornerRadius)
         NSColor.black.setFill()
         path.fill()
         NSGraphicsContext.restoreGraphicsState()
@@ -242,7 +272,7 @@ extension ArrangementCanvas {
         // Depth band (perpendicular to the Dock axis) shared by icons + tray.
         let depthLo: CGFloat   // near edge in view coords
         switch edge {
-        case .bottom: depthLo = inset.maxY - margin - icon   // flipped: maxY is bottom
+        case .bottom: depthLo = inset.minY + margin          // y-up: minY is the screen bottom
         case .left:   depthLo = inset.minX + margin
         case .right:  depthLo = inset.maxX - margin - icon
         }
@@ -291,7 +321,9 @@ extension ArrangementCanvas {
         let pad: CGFloat = 18
         let cardW = colW - pad * 2       // fixed width; height follows each screen's aspect
         let gap: CGFloat = 16
-        var y = outerPadding
+        // The column stacks top-down. In this y-up view "down" means *decreasing* y, so we
+        // track `y` as the top edge of the next element and subtract each element's height.
+        var y = bounds.height - outerPadding
 
         let hAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
@@ -299,8 +331,9 @@ extension ArrangementCanvas {
         ]
 
         if !mirrored.isEmpty {
+            y -= 18   // header text height
             ("Mirrored" as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
-            y += 26
+            y -= 8
         }
 
         for d in mirrored {
@@ -309,16 +342,19 @@ extension ArrangementCanvas {
             let sz0 = pointSize(d)
             let aspect = sz0.height > 0 ? sz0.width / sz0.height : 16.0 / 9
             let cardH = min(max(cardW / max(aspect, 0.1), 120), 260)
-            let card = NSRect(x: colX + pad, y: y, width: cardW, height: cardH)
+            let card = NSRect(x: colX + pad, y: y - cardH, width: cardW, height: cardH)
             NSColor(white: 0.72, alpha: 0.85).setFill()
             NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
 
             let inner = card.insetBy(dx: 18, dy: 16)
-            var ty = inner.minY
+            // Lines stack top-down: start at the card's top and drop by each line's height.
+            var ty = inner.maxY
             func line(_ s: String, _ font: NSFont, _ color: NSColor) {
                 let a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+                let h = (s as NSString).size(withAttributes: a).height
+                ty -= h
                 (s as NSString).draw(at: CGPoint(x: inner.minX, y: ty), withAttributes: a)
-                ty += (s as NSString).size(withAttributes: a).height + 5
+                ty -= 5
             }
             line(d.name, .boldSystemFont(ofSize: 20), .labelColor)
             // The mirrored display's own stats — resolution (HiDPI-tagged), diagonal, PPI —
@@ -339,7 +375,7 @@ extension ArrangementCanvas {
             line("⤷ mirrors \(masterName)", .systemFont(ofSize: 15), .secondaryLabelColor)
 
             // Un-mirror button (top-right ✕).
-            let bx = NSRect(x: card.maxX - 34, y: card.minY + 10, width: 24, height: 24)
+            let bx = NSRect(x: card.maxX - 34, y: card.maxY - 34, width: 24, height: 24)
             NSColor(white: 0.4, alpha: 0.9).setFill()
             NSBezierPath(ovalIn: bx).fill()
             let x: [NSAttributedString.Key: Any] = [
@@ -349,7 +385,7 @@ extension ArrangementCanvas {
             ("✕" as NSString).draw(at: CGPoint(x: bx.midX - xs.width / 2, y: bx.midY - xs.height / 2), withAttributes: x)
             unmirrorButtonRects[d.id] = bx
 
-            y += cardH + gap
+            y -= cardH + gap
         }
 
         if let session = airplaySession {
@@ -365,29 +401,35 @@ extension ArrangementCanvas {
         _ session: AirPlaySession, colX: CGFloat, pad: CGFloat, cardW: CGFloat,
         y: inout CGFloat, hAttrs: [NSAttributedString.Key: Any]
     ) {
+        y -= 18   // header text height
         ("AirPlay" as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
-        y += 26
+        y -= 8
 
         let cardH: CGFloat = 140
-        let card = NSRect(x: colX + pad, y: y, width: cardW, height: cardH)
+        let card = NSRect(x: colX + pad, y: y - cardH, width: cardW, height: cardH)
         NSColor(white: 0.72, alpha: 0.85).setFill()
         NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
 
         let inner = card.insetBy(dx: 18, dy: 16)
-        var ty = inner.minY
+        // Lines stack top-down: start at the card's top and drop by each line's height.
+        var ty = inner.maxY
         func line(_ s: String, _ font: NSFont, _ color: NSColor) {
             let a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             let bounding = (s as NSString).boundingRect(
                 with: CGSize(width: inner.width, height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: a)
+            ty -= bounding.height
             (s as NSString).draw(with: CGRect(x: inner.minX, y: ty, width: inner.width, height: bounding.height),
                                  options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: a)
-            ty += bounding.height + 5
+            ty -= 5
         }
 
         // Device name, with the AirPlay glyph inline before it (sized to the 20pt title
         // and drawn as a template so it takes the label color).
         let nameFont = NSFont.boldSystemFont(ofSize: 20)
+        let name = (session.receiverName ?? "AirPlay receiver") as NSString
+        let nameAttrs: [NSAttributedString.Key: Any] = [.font: nameFont, .foregroundColor: NSColor.labelColor]
+        ty -= name.size(withAttributes: nameAttrs).height   // drop to this line's baseline (y-up)
         var nameX = inner.minX
         if let icon = NSImage(systemSymbolName: "airplayvideo", accessibilityDescription: "AirPlay") {
             let cfg = NSImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
@@ -401,10 +443,8 @@ extension ArrangementCanvas {
                        respectFlipped: true, hints: nil)
             nameX = iconRect.maxX + 8
         }
-        let name = (session.receiverName ?? "AirPlay receiver") as NSString
-        let nameAttrs: [NSAttributedString.Key: Any] = [.font: nameFont, .foregroundColor: NSColor.labelColor]
         name.draw(at: CGPoint(x: nameX, y: ty), withAttributes: nameAttrs)
-        ty += name.size(withAttributes: nameAttrs).height + 5
+        ty -= 5
         line("Mirroring a window or app", .systemFont(ofSize: 15), .labelColor)
         line("Managed by macOS.",
              .systemFont(ofSize: 13), .secondaryLabelColor)
@@ -412,7 +452,7 @@ extension ArrangementCanvas {
         // Hands off to the Control Center **Screen Mirroring** menu — the live control
         // for an AirPlay session (Display Settings doesn't know about it), and the only
         // way to change or end one we can see but can't cancel ourselves.
-        let btn = NSRect(x: inner.minX, y: ty + 6, width: 168, height: 28)
+        let btn = NSRect(x: inner.minX, y: ty - 6 - 28, width: 168, height: 28)
         NSColor(white: 0.4, alpha: 0.9).setFill()
         NSBezierPath(roundedRect: btn, xRadius: 6, yRadius: 6).fill()
         let ba: [NSAttributedString.Key: Any] = [
@@ -423,7 +463,7 @@ extension ArrangementCanvas {
         label.draw(at: CGPoint(x: btn.midX - ls.width / 2, y: btn.midY - ls.height / 2), withAttributes: ba)
         airplaySettingsButtonRect = btn
 
-        y += cardH + 16
+        y -= cardH + 16
     }
 
     private func drawTile(for display: DisplaySnapshot, in rect: NSRect, scale: CGFloat) {
@@ -435,7 +475,7 @@ extension ArrangementCanvas {
             ? NSColor.controlAccentColor.blended(withFraction: 0.78, of: .white) ?? .white
             : NSColor(white: 0.72, alpha: 0.85)
         let inset = rect.insetBy(dx: 1.5, dy: 1.5)
-        let path = NSBezierPath(roundedRect: inset, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
+        let path = SchematicGeometry.tilePath(inset, cornerRadius: tileCornerRadius)
         color.setFill(); path.fill()
         color.setStroke(); path.lineWidth = 1.5; path.stroke()
         drawWallpaper(for: display, in: inset, selected: selected)
@@ -470,9 +510,8 @@ extension ArrangementCanvas {
         tile.fill()
     }
 
-    /// Draw `image` aspect-filled (cover, center-crop) into `rect`, oriented correctly
-    /// for this flipped view. The single place image orientation is handled — call this
-    /// instead of `CGContext.draw`/`NSImage.draw` so no site re-derives the flip.
+    /// Draw `image` aspect-filled (cover, center-crop) into `rect`. The view is a standard
+    /// y-up NSView matching CGImage's native orientation, so no flip is needed here.
     func drawImageAspectFill(_ image: CGImage, in rect: NSRect, alpha: CGFloat = 1) {
         guard let ctx = NSGraphicsContext.current?.cgContext, image.width > 0, image.height > 0 else { return }
         let iw = CGFloat(image.width), ih = CGFloat(image.height)
@@ -483,10 +522,8 @@ extension ArrangementCanvas {
         ctx.saveGState()
         defer { ctx.restoreGState() }
         ctx.setAlpha(alpha)
-        // This view is flipped (y-down); CGImage draws y-up. Flip within `dst` once, here,
-        // so callers never think about orientation.
-        ctx.translateBy(x: 0, y: dst.minY + dst.maxY)
-        ctx.scaleBy(x: 1, y: -1)
+        // The view is now a standard y-up NSView, matching CGImage's native y-up geometry —
+        // no per-image flip needed (that was the old `isFlipped` workaround).
         ctx.draw(image, in: dst)
     }
 
@@ -562,9 +599,10 @@ extension ArrangementCanvas {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    /// The menu-bar strip across the top of a tile (flipped view: min-y is the top).
+    /// The menu-bar strip across the top of a tile (y-up view: max-y is the top).
     func menuBarRect(inTile tile: NSRect) -> NSRect {
-        return NSRect(x: tile.minX, y: tile.minY, width: tile.width, height: min(18, tile.height * 0.2))
+        let h = min(18, tile.height * 0.2)
+        return NSRect(x: tile.minX, y: tile.maxY - h, width: tile.width, height: h)
     }
 
     private func drawMenuBar(in rect: NSRect) {
@@ -624,7 +662,8 @@ extension ArrangementCanvas {
         let gap: CGFloat = 3
         let sizes = lines.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]) }
         let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(lines.count - 1)
-        let top = rect.midY - total / 2
+        // The block is vertically centered; `bottom` is its lower edge (y-up).
+        let bottom = rect.midY - total / 2
 
         // A rounded translucent plate behind the info block so it reads against the
         // wallpaper. Sized to the widest visible line, capped to the tile.
@@ -632,7 +671,7 @@ extension ArrangementCanvas {
         if let widest = visibleWidths.max() {
             let padX: CGFloat = 11, padY: CGFloat = 6
             let boxW = min(widest + padX * 2, rect.width - 4)
-            let box = NSRect(x: rect.midX - boxW / 2, y: top - padY,
+            let box = NSRect(x: rect.midX - boxW / 2, y: bottom - padY,
                              width: boxW, height: total + padY * 2)
             // A light plate under the (dark) label text so it reads over any wallpaper.
             let fill = selected
@@ -642,14 +681,16 @@ extension ArrangementCanvas {
             NSBezierPath(roundedRect: box, xRadius: 11, yRadius: 11).fill()
         }
 
-        var y = top
+        // Stack lines top-down (y-up): start at the block's top and drop each line's height.
+        var y = bottom + total
         for (i, (text, font, color)) in lines.enumerated() {
             let s = sizes[i]
+            y -= s.height
             if s.width <= rect.width - 8 {
                 (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: y),
                                         withAttributes: [.font: font, .foregroundColor: color])
             }
-            y += s.height + gap
+            y -= gap
         }
         // The resolution slider now lives in the bottom control cluster (between Undo and
         // Done), acting on the selected display — no longer drawn on the tile.
@@ -658,28 +699,30 @@ extension ArrangementCanvas {
     /// The eight perimeter anchor positions (corners + edge midpoints).
     private enum AnchorPos: CaseIterable {
         case topLeft, topMid, topRight, leftMid, rightMid, bottomLeft, bottomMid, bottomRight
+        // View is y-up: screen-top = maxY, screen-bottom = minY.
         func point(in r: NSRect) -> CGPoint {
             switch self {
-            case .topLeft: return CGPoint(x: r.minX, y: r.minY)
-            case .topMid: return CGPoint(x: r.midX, y: r.minY)
-            case .topRight: return CGPoint(x: r.maxX, y: r.minY)
+            case .topLeft: return CGPoint(x: r.minX, y: r.maxY)
+            case .topMid: return CGPoint(x: r.midX, y: r.maxY)
+            case .topRight: return CGPoint(x: r.maxX, y: r.maxY)
             case .leftMid: return CGPoint(x: r.minX, y: r.midY)
             case .rightMid: return CGPoint(x: r.maxX, y: r.midY)
-            case .bottomLeft: return CGPoint(x: r.minX, y: r.maxY)
-            case .bottomMid: return CGPoint(x: r.midX, y: r.maxY)
-            case .bottomRight: return CGPoint(x: r.maxX, y: r.maxY)
+            case .bottomLeft: return CGPoint(x: r.minX, y: r.minY)
+            case .bottomMid: return CGPoint(x: r.midX, y: r.minY)
+            case .bottomRight: return CGPoint(x: r.maxX, y: r.minY)
             }
         }
+        // Unit vector from the anchor toward the tile center (y-up: top anchors point down).
         var inward: CGVector {
             switch self {
-            case .topLeft: return CGVector(dx: 1, dy: 1)
-            case .topMid: return CGVector(dx: 0, dy: 1)
-            case .topRight: return CGVector(dx: -1, dy: 1)
+            case .topLeft: return CGVector(dx: 1, dy: -1)
+            case .topMid: return CGVector(dx: 0, dy: -1)
+            case .topRight: return CGVector(dx: -1, dy: -1)
             case .leftMid: return CGVector(dx: 1, dy: 0)
             case .rightMid: return CGVector(dx: -1, dy: 0)
-            case .bottomLeft: return CGVector(dx: 1, dy: -1)
-            case .bottomMid: return CGVector(dx: 0, dy: -1)
-            case .bottomRight: return CGVector(dx: -1, dy: -1)
+            case .bottomLeft: return CGVector(dx: 1, dy: 1)
+            case .bottomMid: return CGVector(dx: 0, dy: 1)
+            case .bottomRight: return CGVector(dx: -1, dy: 1)
             }
         }
     }
@@ -704,7 +747,9 @@ extension ArrangementCanvas {
     private func drawScreenMarkers(_ markers: [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)]) {
         guard let me = centerID, let active = markers[me] else { return }
         let notch = window?.screen?.safeAreaInsets.top ?? 0   // keep clear of the notch on top
-        let area = NSRect(x: bounds.minX + 40, y: bounds.minY + 40 + notch,
+        // y-up: the notch is at the top (high y), so reserve its clearance off the top of
+        // the area (shrink the height; the origin stays at the bottom).
+        let area = NSRect(x: bounds.minX + 40, y: bounds.minY + 40,
                           width: bounds.width - 80, height: bounds.height - 80 - notch)
         drawArrow(at: active.pos.point(in: area), dir: active.dir, scale: 3)
     }
@@ -744,12 +789,12 @@ extension ArrangementCanvas {
                     at = CGPoint(x: g.midX, y: exposedY)
                 }
             }
-            let travel: CGVector   // flipped view: up = -y
+            let travel: CGVector   // y-up view: up = +y
             switch dir {
             case .left:  travel = CGVector(dx: -1, dy: 0)
             case .right: travel = CGVector(dx: 1, dy: 0)
-            case .up:    travel = CGVector(dx: 0, dy: -1)
-            case .down:  travel = CGVector(dx: 0, dy: 1)
+            case .up:    travel = CGVector(dx: 0, dy: 1)
+            case .down:  travel = CGVector(dx: 0, dy: -1)
             }
             drawDirectionArrow(centeredAt: at, pointing: travel, length: 34)
         }
@@ -814,7 +859,8 @@ extension ArrangementCanvas {
     private func dirV(_ pos: AnchorPos, corner: Bool, partner: VAnchor) -> CGVector {
         if corner { return pos.inward }
         guard partner != .center else { return pos.inward }
-        return CGVector(dx: pos.inward.dx, dy: partner == .top ? -1 : 1)
+        // y-up: partner on top (high y) means the arrow points up (+y).
+        return CGVector(dx: pos.inward.dx, dy: partner == .top ? 1 : -1)
     }
     private func dirH(_ pos: AnchorPos, corner: Bool, partner: HAnchor) -> CGVector {
         if corner { return pos.inward }
@@ -849,7 +895,7 @@ extension ArrangementCanvas {
     private func drawFooter(_ text: String) {
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.tertiaryLabelColor]
         let size = (text as NSString).size(withAttributes: attrs)
-        (text as NSString).draw(at: CGPoint(x: (bounds.width - size.width) / 2, y: bounds.height - size.height - 8), withAttributes: attrs)
+        (text as NSString).draw(at: CGPoint(x: (bounds.width - size.width) / 2, y: 8), withAttributes: attrs)
     }
 
     private func drawCenteredMessage(_ message: String) {

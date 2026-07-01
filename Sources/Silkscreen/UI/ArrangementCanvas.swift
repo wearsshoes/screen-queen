@@ -38,6 +38,25 @@ final class ArrangementCanvas: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// GPU-backed seam particles (CAEmitterLayer). Their simulation runs on the GPU, so
+    /// no per-frame draw work or animation timer is needed — `draw(_:)` only repositions
+    /// the emitters when the layout changes.
+    private(set) lazy var seamEmitters: SeamEmitters = {
+        wantsLayer = true
+        let host = CALayer()
+        // View is now a standard y-up NSView, matching CALayer's y-up geometry — no flip.
+        host.frame = bounds
+        host.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        host.zPosition = 1               // particles above the schematic fill
+        layer?.addSublayer(host)
+        return SeamEmitters(host: host)
+    }()
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { seamEmitters.clear() }
+    }
+
     /// Idiomatic bottom button bar (Reset · Undo · Done) grouped in a rounded box,
     /// on every screen, sitting above the Dock.
     private func setupButtonBar() {
@@ -167,9 +186,13 @@ final class ArrangementCanvas: NSView {
         container.translatesAutoresizingMaskIntoConstraints = false
         addSubview(container)
         container.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
-        buttonBarBottom = container.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -130)
+        buttonBarBottom = container.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -baseBottomMargin)
         buttonBarBottom?.isActive = true
     }
+
+    /// Base clearance above the screen bottom (before adding the Dock height): enough to
+    /// clear a bottom-edge alignment arrow, but no more — the Dock inset is added on top.
+    private let baseBottomMargin: CGFloat = 40
 
     /// A glass pill hosting the resolution slider, flanked by "A" / "a" end glyphs —
     /// wider than the round button capsules, same height.
@@ -217,7 +240,7 @@ final class ArrangementCanvas: NSView {
         if let screen = window?.screen {
             // Height the Dock lifts the visible area off the screen's bottom edge.
             let dockInset = max(0, screen.visibleFrame.minY - screen.frame.minY)
-            buttonBarBottom?.constant = -130 - dockInset
+            buttonBarBottom?.constant = -baseBottomMargin - dockInset
         }
     }
 
@@ -400,7 +423,6 @@ final class ArrangementCanvas: NSView {
     /// wallpaper reloads. `nil` value = looked up, none available.
     var wallpaperCache: [CGDirectDisplayID: (url: URL, image: NSImage)?] = [:]
 
-    override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     // Handle clicks even when this window isn't key (no activate-first click).
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -429,13 +451,24 @@ final class ArrangementCanvas: NSView {
         let scale: CGFloat            // view px per inch
         let offset: CGPoint
         let unionOrigin: CGPoint
+        let viewHeight: CGFloat       // for the single plane→view y-flip
+
+        // The physical plane is y-down (top-left origin, from `CGDisplayBounds`); this view
+        // is a standard y-up NSView. Flip y exactly here — the one gate — so everything that
+        // enters view space through `viewRect`/`viewPoint` (tiles, bars, particles, markers,
+        // ghosts) is oriented correctly without any per-consumer flipping downstream.
+        private func flipY(_ y: CGFloat) -> CGFloat { viewHeight - y }
+
         func viewRect(_ r: CGRect) -> CGRect {
-            CGRect(x: offset.x + (r.minX - unionOrigin.x) * scale,
-                   y: offset.y + (r.minY - unionOrigin.y) * scale,
-                   width: r.width * scale, height: r.height * scale)
+            let x = offset.x + (r.minX - unionOrigin.x) * scale
+            let yDown = offset.y + (r.minY - unionOrigin.y) * scale
+            let h = r.height * scale
+            // Flip the rect's *top* edge to a y-up bottom-left origin.
+            return CGRect(x: x, y: flipY(yDown + h), width: r.width * scale, height: h)
         }
         func viewPoint(_ g: CGPoint) -> CGPoint {
-            CGPoint(x: offset.x + (g.x - unionOrigin.x) * scale, y: offset.y + (g.y - unionOrigin.y) * scale)
+            CGPoint(x: offset.x + (g.x - unionOrigin.x) * scale,
+                    y: flipY(offset.y + (g.y - unionOrigin.y) * scale))
         }
     }
 
@@ -445,10 +478,9 @@ final class ArrangementCanvas: NSView {
         let union = values.dropFirst().reduce(first) { $0.union($1) }
         guard union.width > 0, union.height > 0 else { return nil }
 
-        // Center this screen's own tile (or the main, as a fallback) at the view midpoint.
-        let focusRect = (centerID.flatMap { rects[$0] })
-            ?? displays.first(where: { $0.isMain }).flatMap { rects[$0.id] } ?? union
-        let focus = CGPoint(x: focusRect.midX, y: focusRect.midY)
+        // Center the whole arrangement (the union) at the view midpoint — the same layout
+        // on every screen, rather than pivoting each canvas around its own tile.
+        let focus = CGPoint(x: union.midX, y: union.midY)
 
         // The mirror column overlays on the right; the plane stays centered in the full
         // bounds (not offset by the column), so mirroring doesn't shift the arrangement.
@@ -472,6 +504,6 @@ final class ArrangementCanvas: NSView {
         // Offset so the focus tile lands at the view midpoint.
         let offset = CGPoint(x: bounds.midX - (focus.x - union.minX) * scale,
                              y: bounds.midY - (focus.y - union.minY) * scale)
-        return Transform(scale: scale, offset: offset, unionOrigin: union.origin)
+        return Transform(scale: scale, offset: offset, unionOrigin: union.origin, viewHeight: bounds.height)
     }
 }
