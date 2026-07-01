@@ -17,6 +17,23 @@ IDENTITY="${CODESIGN_IDENTITY:--}"   # "-" = ad-hoc
 
 BUILD_DIR="build"
 APP="$BUILD_DIR/$APP_NAME.app"
+DMG="$BUILD_DIR/$APP_NAME.dmg"
+
+# Build a drag-to-Applications DMG from the assembled .app. Uses only hdiutil (no
+# third-party tooling). The DMG inherits the app's signature/notarization ticket, so
+# call this *after* signing (and after stapling, for a notarized release).
+make_dmg() {
+	echo "▸ Building ${DMG}…"
+	rm -f "$DMG"
+	local staging
+	staging="$(mktemp -d)"
+	cp -R "$APP" "$staging/"
+	ln -s /Applications "$staging/Applications"   # drag target
+	hdiutil create -volname "$APP_NAME" -srcfolder "$staging" \
+		-ov -format UDZO "$DMG" >/dev/null
+	rm -rf "$staging"
+	echo "✓ $DMG"
+}
 
 echo "▸ Building release binary…"
 swift build -c release --product "$APP_NAME"
@@ -56,6 +73,13 @@ if [[ "$IDENTITY" == "-" ]]; then
 	exit 0
 fi
 
+# Signed with a real identity but not notarizing: still emit a DMG on request
+# (DMG=1), e.g. for a quick internal hand-off. Skipped when NOTARIZE=1, which
+# builds the DMG from the *stapled* app further down.
+if [[ "${DMG:-0}" == "1" && "${NOTARIZE:-0}" != "1" ]]; then
+	make_dmg
+fi
+
 # Notarize when asked (needs a real Developer ID signature above). Provide either a
 # stored credential profile or an Apple ID / team / app-specific-password triple:
 #   NOTARIZE=1 NOTARY_PROFILE="silkscreen"                       scripts/package.sh
@@ -80,4 +104,7 @@ if [[ "${NOTARIZE:-0}" == "1" ]]; then
 	xcrun stapler validate "$APP"
 	rm -f "$ZIP"
 	echo "✓ Notarized: $APP"
+
+	# Package the stapled app into the distributable DMG.
+	make_dmg
 fi
