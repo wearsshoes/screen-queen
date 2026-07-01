@@ -16,9 +16,11 @@ extension ArrangementCanvas {
             // Wash the whole screen in the system accent (darkened a touch so tiles/bars
             // still read on top) — the same accent used for the selected tile.
             (NSColor.controlAccentColor.blended(withFraction: 0.35, of: .black) ?? .controlAccentColor)
-                .withAlphaComponent(0.85).setFill()
+                .withAlphaComponent(0.75).setFill()
         } else {
-            NSColor.black.withAlphaComponent(0.6).setFill()
+            // A behind-window blur sits under this wash; keep it fairly dark for a moody,
+            // focused backdrop.
+            NSColor.black.withAlphaComponent(0.55).setFill()
         }
         bounds.fill()
 
@@ -416,11 +418,60 @@ extension ArrangementCanvas {
         let path = NSBezierPath(roundedRect: inset, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
         color.setFill(); path.fill()
         color.setStroke(); path.lineWidth = 1.5; path.stroke()
+        drawWallpaper(for: display, in: inset, selected: selected)
         drawBoxing(for: display, in: inset, color: color)
         // Centered name/resolution/ppi, with the pinned resolution slider on the selected tile.
         drawLabel(for: display, in: inset, selected: selected, viewScale: scale, tileColor: color)
         // The main display carries a menu-bar strip (drag it to another tile to move main).
         if display.isMain, draggingMenuBar == nil { drawMenuBar(in: menuBarRect(inTile: inset)) }
+    }
+
+    /// Fill the tile with the display's actual desktop wallpaper (clipped to the rounded
+    /// tile, scaled to cover), so each tile reads as *that* screen. A mirrored slave
+    /// shows its master's wallpaper. Dimmed slightly so labels/bars stay legible on top.
+    private func drawWallpaper(for display: DisplaySnapshot, in tile: NSRect, selected: Bool) {
+        guard let image = wallpaper(for: display), image.size.width > 0, image.size.height > 0 else { return }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSBezierPath(roundedRect: tile, xRadius: tileCornerRadius, yRadius: tileCornerRadius).addClip()
+
+        // This view is flipped (y-down); NSImage.draw assumes y-up, so flip about the
+        // tile's vertical midline or the wallpaper renders upside down.
+        NSGraphicsContext.current?.cgContext.translateBy(x: 0, y: tile.minY + tile.maxY)
+        NSGraphicsContext.current?.cgContext.scaleBy(x: 1, y: -1)
+
+        // Aspect-fill: scale so the image covers the tile, centered (crop overflow).
+        let iw = image.size.width, ih = image.size.height
+        let scale = max(tile.width / iw, tile.height / ih)
+        let w = iw * scale, h = ih * scale
+        let dst = NSRect(x: tile.midX - w / 2, y: tile.midY - h / 2, width: w, height: h)
+        image.draw(in: dst, from: .zero, operation: .sourceOver, fraction: selected ? 1.0 : 0.95)
+
+        // A very faint scrim so seam bars/anchors keep contrast against a busy wallpaper
+        // (the info block has its own plate now, so this can be light). A solid rect is
+        // orientation-agnostic even inside the flipped/clipped context.
+        NSColor.black.withAlphaComponent(selected ? 0.06 : 0.12).setFill()
+        tile.fill()
+    }
+
+    /// The desktop wallpaper for `display` (its master, if mirrored), cached and
+    /// reloaded when the wallpaper URL changes.
+    private func wallpaper(for display: DisplaySnapshot) -> NSImage? {
+        let id = display.mirrorMaster ?? display.id
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        guard let screen = NSScreen.screens.first(where: {
+            ($0.deviceDescription[key] as? NSNumber)?.uint32Value == id
+        }), let url = NSWorkspace.shared.desktopImageURL(for: screen) else {
+            wallpaperCache[display.id] = .some(nil)
+            return nil
+        }
+        if let cached = wallpaperCache[display.id], let entry = cached, entry.url == url {
+            return entry.image
+        }
+        let image = NSImage(contentsOf: url)
+        wallpaperCache[display.id] = image.map { (url, $0) }
+        return image
     }
 
     /// If the current (or previewed) mode's aspect ratio doesn't match the panel's
@@ -515,8 +566,8 @@ extension ArrangementCanvas {
         // On the selected (accent-tinted) tile, text is a deep saturated accent so it
         // stays legible against the blue-white and reads as "active" — not white-on-white.
         let accent = NSColor.controlAccentColor
-        let primary = selected ? (accent.blended(withFraction: 0.55, of: .black) ?? accent) : .labelColor
-        let secondary = selected ? (accent.blended(withFraction: 0.30, of: .black) ?? accent) : .secondaryLabelColor
+        let primary = selected ? (accent.blended(withFraction: 0.72, of: .black) ?? accent) : .labelColor
+        let secondary = selected ? (accent.blended(withFraction: 0.55, of: .black) ?? accent) : .secondaryLabelColor
 
         // The text lines (name, resolution, diagonal·ppi). These *scale* with the tile
         // to preview resolution, so they must not shove the slider around.
@@ -538,7 +589,25 @@ extension ArrangementCanvas {
         let gap: CGFloat = 3
         let sizes = lines.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]) }
         let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(lines.count - 1)
-        var y = rect.midY - total / 2
+        let top = rect.midY - total / 2
+
+        // A rounded translucent plate behind the info block so it reads against the
+        // wallpaper. Sized to the widest visible line, capped to the tile.
+        let visibleWidths = sizes.filter { $0.width <= rect.width - 8 }.map(\.width)
+        if let widest = visibleWidths.max() {
+            let padX: CGFloat = 11, padY: CGFloat = 6
+            let boxW = min(widest + padX * 2, rect.width - 4)
+            let box = NSRect(x: rect.midX - boxW / 2, y: top - padY,
+                             width: boxW, height: total + padY * 2)
+            // A light plate under the (dark) label text so it reads over any wallpaper.
+            let fill = selected
+                ? NSColor.white.withAlphaComponent(0.6)
+                : NSColor(white: 0.9, alpha: 0.44)
+            fill.setFill()
+            NSBezierPath(roundedRect: box, xRadius: 11, yRadius: 11).fill()
+        }
+
+        var y = top
         for (i, (text, font, color)) in lines.enumerated() {
             let s = sizes[i]
             if s.width <= rect.width - 8 {

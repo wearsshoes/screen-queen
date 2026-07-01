@@ -102,18 +102,21 @@ extension ArrangementCanvas {
                            y: centerY - resSliderBandHeight(tileWidth: tile.width) / 2,
                            width: (track.maxX + aSz.width + glyphGap * 2) - (track.minX - ASz.width - glyphGap * 2),
                            height: resSliderBandHeight(tileWidth: tile.width))
-        tileColor.withAlphaComponent(0.95).setFill()
+        // A soft translucent white plate (matching the info plate / glass idiom), not an
+        // opaque tile-colored slab — still masks the label text underneath.
+        NSColor.white.withAlphaComponent(0.82).setFill()
         NSBezierPath(roundedRect: plate, xRadius: plate.height / 2, yRadius: plate.height / 2).fill()
 
         // Track: a rounded capsule. The leading (left, "A"-side) portion up to the knob
-        // is filled with the accent to read as "amount", like a native slider.
+        // is filled with a softened accent to read as "amount", like a native slider.
         let radius = track.height / 2
         let base = NSBezierPath(roundedRect: track, xRadius: radius, yRadius: radius)
-        ink.withAlphaComponent(0.22).setFill(); base.fill()
+        ink.withAlphaComponent(0.16).setFill(); base.fill()
 
         let filled = NSRect(x: track.minX, y: track.minY, width: knob.x - track.minX, height: track.height)
         if filled.width > 0 {
-            NSColor.controlAccentColor.setFill()
+            (NSColor.controlAccentColor.blended(withFraction: 0.15, of: .white) ?? .controlAccentColor)
+                .withAlphaComponent(0.9).setFill()
             NSBezierPath(roundedRect: filled, xRadius: radius, yRadius: radius).fill()
         }
 

@@ -244,6 +244,10 @@ final class ArrangementCanvas: NSView {
     /// panel, so a stale entry for a disconnected id is harmless.
     var nativeAspectCache: [CGDirectDisplayID: Double?] = [:]
 
+    /// Cached desktop wallpaper per display, keyed by (id, image URL) so a changed
+    /// wallpaper reloads. `nil` value = looked up, none available.
+    var wallpaperCache: [CGDirectDisplayID: (url: URL, image: NSImage)?] = [:]
+
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     // Handle clicks even when this window isn't key (no activate-first click).

@@ -91,9 +91,31 @@ final class ArrangementWindows {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         window.isReleasedWhenClosed = false
 
-        let canvas = ArrangementCanvas(state: state, frame: CGRect(origin: .zero, size: frame.size))
+        // The backdrop softens the desktop/apps showing through the transparent overlay
+        // while the arranger is active. On macOS 26 use native Liquid Glass (clear
+        // style); older systems fall back to a behind-window .hudWindow blur. The canvas
+        // (with its own dim wash) sits on top.
+        let fullFrame = CGRect(origin: .zero, size: frame.size)
+        let canvas = ArrangementCanvas(state: state, frame: fullFrame)
         canvas.centerID = centerID
-        window.contentView = canvas
+        canvas.autoresizingMask = [.width, .height]
+
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView(frame: fullFrame)
+            glass.style = .clear
+            glass.cornerRadius = 0
+            glass.autoresizingMask = [.width, .height]
+            glass.contentView = canvas
+            window.contentView = glass
+        } else {
+            let blur = NSVisualEffectView(frame: fullFrame)
+            blur.material = .hudWindow
+            blur.blendingMode = .behindWindow
+            blur.state = .active
+            blur.autoresizingMask = [.width, .height]
+            blur.addSubview(canvas)
+            window.contentView = blur
+        }
         window.makeFirstResponder(canvas)
         canvases.append(canvas)
         return window
