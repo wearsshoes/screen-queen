@@ -50,6 +50,15 @@ enum ModeCatalog {
         return raw.filter { $0.isUsableForDesktopGUI() }.map(DisplayMode.init)
     }
 
+    /// The CGDisplayMode on `id` matching a saved profile entry's pixel + point
+    /// dimensions (preferring the highest refresh), for restoring a layout profile.
+    static func mode(for id: CGDirectDisplayID, matching e: LayoutStore.Entry) -> CGDisplayMode? {
+        modes(for: id)
+            .filter { $0.pixelWidth == e.pixelWidth && $0.pixelHeight == e.pixelHeight
+                   && $0.pointWidth == e.pointWidth && $0.pointHeight == e.pointHeight }
+            .max { $0.refresh < $1.refresh }?.cgMode
+    }
+
     /// The panel's native pixel aspect ratio (width / height), from its largest pixel
     /// mode — the reference for detecting letter-/pillar-boxed modes. nil if unknown.
     static func nativeAspect(for id: CGDirectDisplayID) -> Double? {

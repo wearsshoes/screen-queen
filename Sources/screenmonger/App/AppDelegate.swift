@@ -97,10 +97,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var statusMenu: NSMenu = {
         let menu = NSMenu()
         menu.addItem(withTitle: "Show Arrangement  (⌘⌥F1)", action: #selector(showWindow), keyEquivalent: "")
+        menu.addItem(withTitle: "Reset Saved Layouts", action: #selector(resetSavedLayouts), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit screenmonger", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu
     }()
+
+    @objc private func resetSavedLayouts() {
+        LayoutStore.clearAll()   // current set stays "known", so nothing re-pops
+    }
 
     @objc private func statusItemClicked() {
         let rightClick = NSApp.currentEvent?.type == .rightMouseUp
@@ -298,7 +303,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Mid-manipulation the shared plane owns the working state; don't clobber it.
         guard !isLiveDragging else { return }
         let displays = DisplayManager.snapshot()
+        handleProfiles(displays)
         arranger.refresh(displays: displays, colors: DisplayGraph.colors(displays))
+    }
+
+    private var lastDisplaySet: Set<String> = []
+
+    /// Auto-save / auto-restore layout profiles. When the connected display *set*
+    /// changes (a hotplug), apply the best saved profile for it; otherwise (a settled
+    /// state after our own commit) save the current layout as the profile for this set.
+    /// If a newly-plugged display isn't covered by any profile, open the arranger and
+    /// select it so the user can place it.
+    private func handleProfiles(_ displays: [DisplaySnapshot]) {
+        let set = Set(displays.map(\.fingerprint))
+        let added = set.subtracting(lastDisplaySet)
+        defer { lastDisplaySet = set }
+        guard !set.isEmpty else { return }
+
+        guard set != lastDisplaySet else {
+            LayoutStore.store(LayoutStore.profile(from: displays))   // settled → remember this layout
+            return
+        }
+
+        let profile = LayoutStore.bestMatch(for: Array(set))
+        if let profile { applyProfile(profile, to: displays) }
+
+        // Any newly-connected display not covered by the applied profile is
+        // "unrecognized" — surface the arranger and select it.
+        let recognized = profile.map { Set($0.keys) } ?? []
+        if let newFP = added.subtracting(recognized).first,
+           let d = displays.first(where: { $0.fingerprint == newFP }) {
+            if !arranger.isVisible { showWindow() }
+            arranger.state.selectedID = d.id
+            arranger.state.notify()
+        }
+    }
+
+    /// Apply a saved profile to the matching connected displays: set each present
+    /// display's mode, then its origin (pinning main at 0,0).
+    private func applyProfile(_ profile: LayoutStore.Profile, to displays: [DisplaySnapshot]) {
+        let byFingerprint = Dictionary(uniqueKeysWithValues: displays.map { ($0.fingerprint, $0) })
+        var origins: [CGDirectDisplayID: CGPoint] = [:]
+        var mainID: CGDirectDisplayID?
+        preservingCursor {
+            for (fp, e) in profile {
+                guard let d = byFingerprint[fp] else { continue }
+                if let mode = ModeCatalog.mode(for: d.id, matching: e) { DisplayManager.applyMode(mode, to: d.id) }
+                origins[d.id] = CGPoint(x: e.originX, y: e.originY)
+                if e.isMain { mainID = d.id }
+            }
+            return DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true)
+        }
     }
 
     private var refreshScheduled = false
