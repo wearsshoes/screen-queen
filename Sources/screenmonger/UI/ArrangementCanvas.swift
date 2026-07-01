@@ -591,8 +591,21 @@ final class ArrangementCanvas: NSView {
             if let current, ModeCatalog.sameMode(current, mode.cgMode) { mi.state = .on }
             submenu.addItem(mi)
         }
+        // The built-in normally lists only its standard (2×) modes; let the user opt
+        // into the full extended set here, on its own tile.
+        if d.isBuiltin {
+            submenu.addItem(.separator())
+            let ext = NSMenuItem(title: "Show Extended Resolutions", action: #selector(toggleExtendedBuiltin(_:)), keyEquivalent: "")
+            ext.target = self; ext.state = extendedBuiltinModes ? .on : .off
+            submenu.addItem(ext)
+        }
         item.submenu = submenu
         return item
+    }
+
+    @objc private func toggleExtendedBuiltin(_ s: NSMenuItem) {
+        extendedBuiltinModes.toggle()
+        needsDisplay = true
     }
 
     private final class ModeChoice {

@@ -24,7 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var canvas: ArrangementCanvas!
     private let overlay = OverlayController()
     private let closeButtons = CloseButtonController()
-    private var overlayMenuItem: NSMenuItem!
     private let calibrationController = CalibrationController()
     private var revertButton: NSButton!
 
@@ -54,19 +53,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "🖥"
+        // Left-click opens the arranger; right-click shows a menu (just Quit).
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
 
+    private lazy var statusMenu: NSMenu = {
         let menu = NSMenu()
         menu.addItem(withTitle: "Show Arrangement", action: #selector(showWindow), keyEquivalent: "")
-        overlayMenuItem = NSMenuItem(title: "Show Reference Bars",
-                                     action: #selector(toggleOverlays(_:)), keyEquivalent: "b")
-        menu.addItem(overlayMenuItem)
-        menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r")
-        let extItem = NSMenuItem(title: "Extended Built-in Resolutions",
-                                 action: #selector(toggleExtendedBuiltin(_:)), keyEquivalent: "")
-        menu.addItem(extItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit screenmonger", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        statusItem.menu = menu
+        return menu
+    }()
+
+    @objc private func statusItemClicked() {
+        let rightClick = NSApp.currentEvent?.type == .rightMouseUp
+            || NSApp.currentEvent?.modifierFlags.contains(.control) == true
+        if rightClick {
+            statusItem.menu = statusMenu
+            statusItem.button?.performClick(nil)   // pop the menu
+            statusItem.menu = nil                  // detach so the next left-click hits our action
+        } else if window.isVisible {
+            dismissArranger()                      // a second click closes it
+        } else {
+            showWindow()
+        }
     }
 
     private func setupWindow() {
@@ -141,8 +153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             calibrate(id) // no trusted reference available — fall back to manual entry
             return
         }
-        // Avoid the reference boxes cluttering the comparison.
-        if overlay.isVisible { overlay.hide(); overlayMenuItem.state = .off }
+        // Dismiss the arranger overlay so it doesn't clutter the calibration windows.
+        dismissArranger()
         calibrationController.begin(target: target, reference: reference)
     }
 
@@ -354,17 +366,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return screen?.frame
     }
 
-    @objc func toggleOverlays(_ sender: NSMenuItem) {
-        overlay.toggle(bars: canvas.currentBars())
-        sender.state = overlay.isVisible ? .on : .off
-    }
-
-    @objc func toggleExtendedBuiltin(_ sender: NSMenuItem) {
-        canvas.extendedBuiltinModes.toggle()
-        sender.state = canvas.extendedBuiltinModes ? .on : .off
-        refresh()
-    }
-
     @objc func showWindow() {
         if let frame = mainScreenFrame() { window.setFrame(frame, display: true) }  // fill the current main
         // Always show the reference bars, dimming every screen, while the arranger is
@@ -372,7 +373,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.dim = true
         overlay.show(bars: canvas.currentBars())
         closeButtons.show()
-        overlayMenuItem.state = .on
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(canvas)
         NSApp.activate(ignoringOtherApps: true)
@@ -383,6 +383,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.dim = false
         overlay.hide()
         closeButtons.hide()
-        overlayMenuItem.state = .off
     }
 }
