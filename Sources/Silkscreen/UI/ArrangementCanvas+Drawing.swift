@@ -37,8 +37,16 @@ extension ArrangementCanvas {
         if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
         for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!), scale: t.scale) }
         // Predicted Dock: a strip hugging the Dock edge of the screen it'll land on.
+        // With the live feed on, the tiles already show the real desktop (Dock included),
+        // so only surface the indicator when it's informative: the Dock would move, or a
+        // menu-bar drag is underway (grabbing it signals intent to move main, so show it
+        // immediately). With the feed off, always show it.
         if let dockID = predictedDockDisplay(), let r = rects[dockID] {
-            drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
+            let dockWouldMove = dockID != state.currentDockDisplay()
+            let showDock = !state.feedEnabled || dockWouldMove || draggingMenuBar != nil
+            if showDock {
+                drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
+            }
         }
         drawReferenceBars(bars, t: t, seamColor: seamColor)
         let markers = activeMarkers(rects)
@@ -123,13 +131,25 @@ extension ArrangementCanvas {
         let thicknessInches: CGFloat = 0.08
         let ppi = displays.first { $0.id == me }?.pointsPerInch
         let thickness: CGFloat = ppi.map { thicknessInches * CGFloat($0) } ?? 9
+        // The bars' `localAlong`/`windowPoints` are in the display's *previewed* point
+        // space (from `sizedDisplays`), but these edge bars are drawn against the real
+        // window `bounds`. During a resolution preview those differ, so scale the along-
+        // axis position/length from previewed points onto the real bounds — otherwise the
+        // edge-bar spacing drifts while the zoom slider moves (the mini-map bars, which
+        // live in previewed space throughout, stay correct).
+        let previewed = displays.first { $0.id == me }.map { pointSize($0) }
         for bar in bars where bar.aID == me || bar.bID == me {
             let weAreA = (bar.aID == me)
             let facing = seamColor[DisplayGraph.SeamKey(bar.aID, bar.bID)] ?? .systemGray
-            let along = weAreA ? bar.localAlongA : bar.localAlongB
+            // Map previewed-point offsets onto the real window bounds along the seam axis.
+            let axisPreview = bar.isVertical ? (previewed?.height ?? bounds.height)
+                                             : (previewed?.width ?? bounds.width)
+            let axisReal = bar.isVertical ? bounds.height : bounds.width
+            let s = axisPreview > 0 ? axisReal / axisPreview : 1
+            let along = (weAreA ? bar.localAlongA : bar.localAlongB) * s
             // Small end margin, but capped so a short crossing region shrinks
             // proportionally instead of vanishing into the fixed margin.
-            let len = max(1.5, bar.windowPoints - min(12, bar.windowPoints / 3))
+            let len = max(1.5, bar.windowPoints * s - min(12, bar.windowPoints * s / 3))
             let rect: NSRect
             // `inward` is the side facing the screen center (rounded); the opposite,
             // outward side sits flat against the screen edge.
@@ -426,33 +446,48 @@ extension ArrangementCanvas {
         if display.isMain, draggingMenuBar == nil { drawMenuBar(in: menuBarRect(inTile: inset)) }
     }
 
-    /// Fill the tile with the display's actual desktop wallpaper (clipped to the rounded
-    /// tile, scaled to cover), so each tile reads as *that* screen. A mirrored slave
-    /// shows its master's wallpaper. Dimmed slightly so labels/bars stay legible on top.
+    /// Fill the tile with what's actually on that screen: a live capture frame (the real
+    /// desktop + windows, minus Silkscreen's own overlay) when available, else the static
+    /// wallpaper. Clipped to the rounded tile and scaled to cover. A mirrored slave shows
+    /// its master's content. Dimmed slightly so labels/bars stay legible on top.
     private func drawWallpaper(for display: DisplaySnapshot, in tile: NSRect, selected: Bool) {
-        guard let image = wallpaper(for: display), image.size.width > 0, image.size.height > 0 else { return }
+        let sourceID = display.mirrorMaster ?? display.id
+        // Prefer the live capture (only when the feed is enabled); fall back to the static
+        // wallpaper. Both are reduced to a CGImage and drawn through one orientation-
+        // correct primitive.
+        let live = state.feedEnabled ? state.capture?.frames[sourceID] : nil
+        let image = live ?? wallpaper(for: display)?.asCGImage
+        guard let image else { return }
 
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         NSBezierPath(roundedRect: tile, xRadius: tileCornerRadius, yRadius: tileCornerRadius).addClip()
+        drawImageAspectFill(image, in: tile, alpha: selected ? 1.0 : 0.95)
 
-        // This view is flipped (y-down); NSImage.draw assumes y-up, so flip about the
-        // tile's vertical midline or the wallpaper renders upside down.
-        NSGraphicsContext.current?.cgContext.translateBy(x: 0, y: tile.minY + tile.maxY)
-        NSGraphicsContext.current?.cgContext.scaleBy(x: 1, y: -1)
-
-        // Aspect-fill: scale so the image covers the tile, centered (crop overflow).
-        let iw = image.size.width, ih = image.size.height
-        let scale = max(tile.width / iw, tile.height / ih)
-        let w = iw * scale, h = ih * scale
-        let dst = NSRect(x: tile.midX - w / 2, y: tile.midY - h / 2, width: w, height: h)
-        image.draw(in: dst, from: .zero, operation: .sourceOver, fraction: selected ? 1.0 : 0.95)
-
-        // A very faint scrim so seam bars/anchors keep contrast against a busy wallpaper
-        // (the info block has its own plate now, so this can be light). A solid rect is
-        // orientation-agnostic even inside the flipped/clipped context.
+        // A very faint scrim so seam bars/anchors keep contrast against busy content
+        // (the info block has its own plate now, so this can be light).
         NSColor.black.withAlphaComponent(selected ? 0.06 : 0.12).setFill()
         tile.fill()
+    }
+
+    /// Draw `image` aspect-filled (cover, center-crop) into `rect`, oriented correctly
+    /// for this flipped view. The single place image orientation is handled — call this
+    /// instead of `CGContext.draw`/`NSImage.draw` so no site re-derives the flip.
+    func drawImageAspectFill(_ image: CGImage, in rect: NSRect, alpha: CGFloat = 1) {
+        guard let ctx = NSGraphicsContext.current?.cgContext, image.width > 0, image.height > 0 else { return }
+        let iw = CGFloat(image.width), ih = CGFloat(image.height)
+        let scale = max(rect.width / iw, rect.height / ih)
+        let w = iw * scale, h = ih * scale
+        let dst = NSRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
+
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        ctx.setAlpha(alpha)
+        // This view is flipped (y-down); CGImage draws y-up. Flip within `dst` once, here,
+        // so callers never think about orientation.
+        ctx.translateBy(x: 0, y: dst.minY + dst.maxY)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(image, in: dst)
     }
 
     /// The desktop wallpaper for `display` (its master, if mirrored), cached and
@@ -479,7 +514,7 @@ extension ArrangementCanvas {
     /// an inset rectangle and hatch the black-bar regions so it's obvious.
     private func drawBoxing(for display: DisplaySnapshot, in tile: NSRect, color: NSColor) {
         // Image aspect from the current or pending pixel resolution.
-        let pending = pendingMode?.id == display.id ? pendingMode?.mode : nil
+        let pending = state.pendingMode(for: display.id)
         let imgW = Double(pending?.pixelWidth ?? Int(display.pixelSize.width))
         let imgH = Double(pending?.pixelHeight ?? Int(display.pixelSize.height))
         // Compare the image aspect against the panel's native pixel aspect.
@@ -539,7 +574,7 @@ extension ArrangementCanvas {
 
     private func drawLabel(for display: DisplaySnapshot, in rect: NSRect, selected: Bool, viewScale: CGFloat, tileColor: NSColor) {
         let sz = pointSize(display)
-        let pending = pendingMode?.id == display.id ? pendingMode?.mode : nil
+        let pending = state.pendingMode(for: display.id)
         let pixelW = pending?.pixelWidth ?? Int(display.pixelSize.width)
 
         // Effective PPI (points per physical inch, from the live/previewed point size).
@@ -616,16 +651,8 @@ extension ArrangementCanvas {
             }
             y += s.height + gap
         }
-
-        // Slider on top (only on the selected tile), pinned near the bottom.
-        if selected, resSliderPosition(for: display) != nil {
-            let band = resSliderBandHeight(tileWidth: rect.width)
-            // Keep clear of a bottom Dock strip on the predicted-Dock tile.
-            let dockBottom = predictedDockDisplay() == display.id && DockPredictor.edge() == .bottom
-            let bottomMargin: CGFloat = 8 + (dockBottom ? dockStripDepth(in: rect) : 0)
-            let sliderCenterY = rect.maxY - band / 2 - bottomMargin
-            drawResSlider(for: display, in: rect, centerY: sliderCenterY, tileColor: tileColor)
-        }
+        // The resolution slider now lives in the bottom control cluster (between Undo and
+        // Done), acting on the selected display — no longer drawn on the tile.
     }
 
     /// The eight perimeter anchor positions (corners + edge midpoints).

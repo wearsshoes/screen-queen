@@ -67,4 +67,11 @@ extension NSImage {
         rotated.isTemplate = isTemplate
         return rotated
     }
+
+    /// This image as a `CGImage` (full bounds), or nil. Cached is unnecessary here — the
+    /// wallpaper `NSImage` itself is cached by the caller.
+    var asCGImage: CGImage? {
+        var rect = CGRect(origin: .zero, size: size)
+        return cgImage(forProposedRect: &rect, context: nil, hints: nil)
+    }
 }

@@ -25,5 +25,7 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Silkscreen shows a live preview of each display's contents inside its tile in the arranger.</string>
 </dict>
 </plist>

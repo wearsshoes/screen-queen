@@ -129,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.onCommit = { [weak self] origins in self?.commitArrangement(origins) }
         s.onSetMain = { [weak self] id in self?.setMainDisplay(id) }
         s.onSetResolution = { [weak self] id, mode, origins in self?.setResolution(id, mode, origins) }
+        s.onSetResolutions = { [weak self] modes, origins in self?.setResolutions(modes, origins) }
         s.onSetMirror = { [weak self] slave, master in self?.setMirror(slave: slave, master: master) }
         s.onUnmirror = { [weak self] id in self?.unmirror(id) }
         s.onCalibrate = { [weak self] id in self?.calibrate(id) }
@@ -277,6 +278,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }, revert: {
             if let previousMode { DisplayManager.applyMode(previousMode, to: id) }
+            DisplayManager.applyOrigins(previousOrigins, permanent: true)
+        })
+    }
+
+    /// Apply a resolution change to several displays at once (the `.all`-scope slider),
+    /// as a single revertable step so one undo restores every display's prior mode.
+    private func setResolutions(_ modes: [CGDirectDisplayID: CGDisplayMode],
+                                _ origins: [CGDirectDisplayID: CGPoint]) {
+        guard !modes.isEmpty else { return }
+        isLiveDragging = false
+        let snap = DisplayManager.snapshot()
+        let previousModes = Dictionary(uniqueKeysWithValues:
+            modes.keys.compactMap { id in CGDisplayCopyDisplayMode(id).map { (id, $0) } })
+        let previousOrigins = originMap(of: snap)
+        let mainID = snap.first(where: { $0.isMain })?.id
+        applyRevertable(apply: {
+            for (id, mode) in modes { _ = DisplayManager.applyMode(mode, to: id) }
+            DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true)
+            return true
+        }, revert: {
+            for (id, mode) in previousModes { DisplayManager.applyMode(mode, to: id) }
             DisplayManager.applyOrigins(previousOrigins, permanent: true)
         })
     }

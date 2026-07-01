@@ -17,10 +17,19 @@ final class ArrangementCanvas: NSView {
 
     /// Shared editing state — one instance across every per-screen canvas.
     let state: ArrangementState
+    private let feedButton = NSButton(title: "", target: nil, action: nil)
     private let resetButton = NSButton(title: "Reset", target: nil, action: nil)
     private let undoButton = NSButton(title: "Undo", target: nil, action: nil)
     private let doneButton = NSButton(title: "Done", target: nil, action: nil)
+    /// Resolution slider (A ↔ a) for the selected display, in the bottom cluster.
+    private let resSlider = NSSlider()
+    /// One/All scope toggle for the slider (single rectangle vs. overlapping rectangles).
+    private let scopeButton = NSButton(title: "", target: nil, action: nil)
     private let buttonBar = NSVisualEffectView()
+
+    /// The selected display's sorted modes, cached while the slider drives them so a
+    /// live preview doesn't recompute per tick. Rebuilt in `syncButtons`.
+    private var sliderModes: [DisplayMode] = []
 
     init(state: ArrangementState, frame: NSRect) {
         self.state = state
@@ -38,23 +47,42 @@ final class ArrangementCanvas: NSView {
         undoButton.target = self; undoButton.action = #selector(undoTapped)
         doneButton.target = self; doneButton.action = #selector(doneTapped)
         doneButton.keyEquivalent = "\r"   // primary action → renders blue (default button)
-        for b in [resetButton, undoButton, doneButton] {
+        feedButton.target = self; feedButton.action = #selector(feedTapped)
+        let allButtons = [feedButton, resetButton, undoButton, doneButton]
+        for b in allButtons {
             b.bezelStyle = .push
             b.controlSize = .large
         }
         // Icon-only round glass buttons (like the Spotlight icon pills). Titles are
-        // dropped for the label; tooltips keep them identifiable.
+        // dropped for the label; tooltips keep them identifiable. The feed icon is set in
+        // syncButtons (it flips between play/stop with the toggle state).
+        let iconConfig = NSImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
         resetButton.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Reset")
         undoButton.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: "Undo")
         doneButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Done")
-        let iconConfig = NSImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
         resetButton.toolTip = "Reset"; undoButton.toolTip = "Undo"; doneButton.toolTip = "Done"
-        for b in [resetButton, undoButton, doneButton] {
+        for b in allButtons {
             b.image = b.image?.withSymbolConfiguration(iconConfig)
             b.imagePosition = .imageOnly
             b.title = ""
         }
         resetButton.image = resetButton.image?.rotatedCCW(degrees: 120, offset: CGSize(width: -1, height: 0))
+
+        // Resolution slider for the selected display: left = larger UI (lower res),
+        // right = more space (higher res), matching macOS "Larger Text ↔ More Space".
+        resSlider.minValue = 0
+        resSlider.maxValue = 1
+        resSlider.isContinuous = true
+        resSlider.controlSize = .large
+        resSlider.target = self
+        resSlider.action = #selector(resSliderChanged)
+        resSlider.toolTip = "Resolution"
+
+        // One/All scope toggle (icon set in syncButtons to reflect the current scope).
+        scopeButton.isBordered = false
+        scopeButton.imagePosition = .imageOnly
+        scopeButton.target = self
+        scopeButton.action = #selector(scopeTapped)
 
         // Each button is its own glass capsule (like the Spotlight icon pills), grouped
         // in a container so nearby glass samples the backdrop consistently and merges
@@ -64,7 +92,7 @@ final class ArrangementCanvas: NSView {
         if #available(macOS 26.0, *) {
             // Chromeless buttons so the glass capsule *is* the surface; the label/icon
             // still draws (border off ≠ content off).
-            for b in [resetButton, undoButton, doneButton] {
+            for b in [feedButton, resetButton, undoButton, doneButton] {
                 b.isBordered = false
                 b.contentTintColor = .labelColor
             }
@@ -73,7 +101,7 @@ final class ArrangementCanvas: NSView {
             // contentView. (Adding a control directly to the glass view renders it blank
             // — the glass only composites its `contentView`.)
             let diameter: CGFloat = 56
-            let glassy = zip([resetButton, undoButton, doneButton], [false, false, true]).map {
+            let glassy = zip([feedButton, resetButton, undoButton, doneButton], [false, false, false, true]).map {
                 (button, prominent) -> NSGlassEffectView in
                 // A square content box → the glass renders as a circle (radius = ½ side).
                 let pad = NSView()
@@ -99,7 +127,12 @@ final class ArrangementCanvas: NSView {
                 g.contentView = pad
                 return g
             }
-            let stack = NSStackView(views: glassy)
+            // The slider lives in its own wider glass pill, inserted between Undo and Done.
+            let sliderPill = makeSliderPill(height: diameter)
+            var pieces: [NSView] = glassy
+            pieces.insert(sliderPill, at: 3)   // feed, reset, undo, [slider], done
+
+            let stack = NSStackView(views: pieces)
             stack.orientation = .horizontal
             stack.spacing = 22
             stack.translatesAutoresizingMaskIntoConstraints = false
@@ -109,7 +142,8 @@ final class ArrangementCanvas: NSView {
             group.contentView = stack
             container = group
         } else {
-            let stack = NSStackView(views: [resetButton, undoButton, doneButton])
+            resSlider.widthAnchor.constraint(equalToConstant: 120).isActive = true
+            let stack = NSStackView(views: [feedButton, resetButton, undoButton, resSlider, doneButton])
             stack.orientation = .horizontal
             stack.spacing = 12
             stack.translatesAutoresizingMaskIntoConstraints = false
@@ -137,6 +171,42 @@ final class ArrangementCanvas: NSView {
         buttonBarBottom?.isActive = true
     }
 
+    /// A glass pill hosting the resolution slider, flanked by "A" / "a" end glyphs —
+    /// wider than the round button capsules, same height.
+    @available(macOS 26.0, *)
+    private func makeSliderPill(height: CGFloat) -> NSGlassEffectView {
+        let big = NSTextField(labelWithString: "A")
+        big.font = .boldSystemFont(ofSize: 20); big.textColor = .labelColor
+        let small = NSTextField(labelWithString: "a")
+        small.font = .systemFont(ofSize: 14); small.textColor = .labelColor
+
+        resSlider.translatesAutoresizingMaskIntoConstraints = false
+        resSlider.widthAnchor.constraint(equalToConstant: 172).isActive = true
+
+        let row = NSStackView(views: [big, resSlider, small, scopeButton])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.setCustomSpacing(14, after: small)   // a little gap before the scope toggle
+
+        let pad = NSView()
+        pad.translatesAutoresizingMaskIntoConstraints = false
+        row.translatesAutoresizingMaskIntoConstraints = false
+        pad.addSubview(row)
+        NSLayoutConstraint.activate([
+            pad.heightAnchor.constraint(equalToConstant: height),
+            row.leadingAnchor.constraint(equalTo: pad.leadingAnchor, constant: 20),
+            row.trailingAnchor.constraint(equalTo: pad.trailingAnchor, constant: -20),
+            row.centerYAnchor.constraint(equalTo: pad.centerYAnchor),
+        ])
+
+        let g = NSGlassEffectView()
+        g.cornerRadius = height / 2
+        g.style = .clear
+        g.contentView = pad
+        return g
+    }
+
     private var buttonBarBottom: NSLayoutConstraint?
 
     /// Keep the button bar above the Dock (which intrudes on visibleFrame, not the safe
@@ -154,10 +224,90 @@ final class ArrangementCanvas: NSView {
     @objc private func resetTapped() { state.onReset?() }
     @objc private func undoTapped() { state.undo() }
     @objc private func doneTapped() { onDismiss?() }
+    @objc private func feedTapped() { state.onToggleFeed?(!state.feedEnabled) }
+    @objc private func scopeTapped() {
+        state.sliderScope = state.sliderScope == .one ? .all : .one
+        state.notify()   // refresh every canvas so the icon/tooltip update everywhere
+    }
 
-    /// Reflect undo availability (a plane edit or a pending revert) on the Undo button.
+    /// Index of the selected display's mode at the moment a slider drag began, so `.all`
+    /// scope can apply the same *step delta* to every display.
+    private var sliderDragStartIndex: Int?
+
+    /// Live-preview resolution as the slider moves — the selected display in `.one` scope,
+    /// or every display by the same step delta in `.all` scope. Commit on mouse-up.
+    @objc private func resSliderChanged() {
+        guard let id = selectedID, sliderModes.count > 1 else { return }
+        let n = sliderModes.count
+        let idx = max(0, min(n - 1, Int((Double(n - 1) * resSlider.doubleValue).rounded())))
+        resSlider.doubleValue = Double(idx) / Double(n - 1)   // snap knob to the detent
+
+        // Remember where the drag started (first change since a fresh mouse-down).
+        let event = NSApp.currentEvent?.type
+        if sliderDragStartIndex == nil {
+            sliderDragStartIndex = currentModeIndex(for: displays.first { $0.id == id }!, in: sliderModes)
+        }
+
+        switch state.sliderScope {
+        case .one:
+            previewMode(sliderModes[idx], on: id)
+        case .all:
+            let delta = idx - (sliderDragStartIndex ?? idx)
+            previewProportional(stepDelta: delta)
+        }
+
+        if event == .leftMouseUp {
+            commitPendingResolution()
+            sliderDragStartIndex = nil
+        }
+    }
+
+    /// Preview every display shifted by `stepDelta` detents from its *current* mode
+    /// (clamped to each display's own range), for `.all` scope.
+    private func previewProportional(stepDelta: Int) {
+        state.pendingModes.removeAll(); pendingSize.removeAll()
+        for d in displays where !d.isMirrored {
+            let modes = sortedModes(for: d)
+            guard modes.count > 1, let base = currentModeIndex(for: d, in: modes) else { continue }
+            let target = max(0, min(modes.count - 1, base + stepDelta))
+            previewMode(modes[target], on: d.id, replacing: false)
+        }
+        needsDisplay = true
+        emitPreview()
+    }
+
+    /// Reflect undo availability and sync the resolution slider to the selected display.
     private func syncButtons() {
         undoButton.isEnabled = state.canUndo
+
+        // Feed toggle: a running stick figure when live (on), standing when off.
+        let feedCfg = NSImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
+        let feedSymbol = state.feedEnabled ? "figure.run" : "figure.stand"
+        feedButton.image = NSImage(systemSymbolName: feedSymbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(feedCfg)
+        feedButton.contentTintColor = .labelColor
+        feedButton.toolTip = state.feedEnabled ? "Stop live preview" : "Show live preview"
+
+        // One/All scope toggle: single rectangle = one display, overlapping = all.
+        let scopeCfg = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        let scopeSymbol = state.sliderScope == .all ? "rectangle.on.rectangle" : "rectangle"
+        scopeButton.image = NSImage(systemSymbolName: scopeSymbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(scopeCfg)
+        scopeButton.contentTintColor = state.sliderScope == .all ? .controlAccentColor : .secondaryLabelColor
+        scopeButton.toolTip = state.sliderScope == .all
+            ? "Zoom all displays proportionally" : "Zoom the selected display only"
+
+        let selected = selectedID.flatMap { id in displays.first(where: { $0.id == id }) }
+        sliderModes = selected.map { sortedModes(for: $0) } ?? []
+        let usable = sliderModes.count > 1
+        resSlider.isEnabled = usable
+        if usable, let d = selected {
+            // Don't fight a live drag/preview: only re-sync from the committed mode.
+            if pendingMode?.id != d.id {
+                let idx = currentModeIndex(for: d, in: sliderModes) ?? (sliderModes.count - 1) / 2
+                resSlider.doubleValue = Double(idx) / Double(sliderModes.count - 1)
+            }
+        }
     }
 
     // Forwarding accessors so this view's methods read/write the shared state.
@@ -174,6 +324,7 @@ final class ArrangementCanvas: NSView {
     var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)? { state.onCommit }
     var onSetMain: ((CGDirectDisplayID) -> Void)? { state.onSetMain }
     var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)? { state.onSetResolution }
+    var onSetResolutions: (([CGDirectDisplayID: CGDisplayMode], [CGDirectDisplayID: CGPoint]) -> Void)? { state.onSetResolutions }
     var onSetMirror: ((CGDirectDisplayID, CGDirectDisplayID) -> Void)? { state.onSetMirror }
     var onUnmirror: ((CGDirectDisplayID) -> Void)? { state.onUnmirror }
     var onCalibrate: ((CGDirectDisplayID) -> Void)? { state.onCalibrate }
@@ -198,13 +349,6 @@ final class ArrangementCanvas: NSView {
     var optionMirrorDrag = false
     var mirrorDragPoint: CGPoint?         // cursor while Option-mirror dragging (drop target)
 
-    // Dragging the selected tile's resolution slider (id + its track, view coords).
-    var draggingResSlider: (id: CGDirectDisplayID, track: NSRect)?
-    // The slider track from this canvas's most recent draw (its Y comes from the label
-    // stack layout), used to hit-test grabs. View-local, so it's per-canvas not shared.
-    var lastSliderTrack: NSRect?
-    var lastSliderTrackID: CGDirectDisplayID?
-
     // Keyboard continuous-move (nudge) state.
     var heldDirections: Set<MoveDirection> = []
     var moveTimer: Timer?
@@ -216,6 +360,14 @@ final class ArrangementCanvas: NSView {
 
     // Resolution preview flag (commits the pending mode when ⌘ is released).
     var zoomPending = false
+
+    // Global (⌘⇧ ±) zoom run state. `globalZoomLevel` is a continuous, *unclamped* scale
+    // applied to every display's starting PPI; each display picks the achievable mode
+    // nearest `startPPI × level`, clamped to its range. Tracking the unclamped level (not
+    // per-display detent positions) is what makes a maxed-out display stay pinned while
+    // the level keeps rising, then rejoin proportionally as it falls. Reset each run.
+    var globalZoomLevel: Double = 1
+    var globalZoomStartPPI: [CGDirectDisplayID: Double] = [:]
 
     var showAlignGhosts: Bool { get { state.showAlignGhosts } set { state.showAlignGhosts = newValue } }
 

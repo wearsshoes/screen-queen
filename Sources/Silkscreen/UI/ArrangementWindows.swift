@@ -12,8 +12,21 @@ final class ArrangementWindows {
 
     var isVisible: Bool { !windows.isEmpty }
 
+    private let capture = ScreenCaptureManager()
+
     init() {
         state.changed = { [weak self] in self?.canvases.forEach { $0.refresh() } }
+        state.capture = capture
+        // A new frame from any display just repaints the tiles (coalesced by AppKit).
+        capture.onFrame = { [weak self] in self?.canvases.forEach { $0.needsDisplay = true } }
+        state.onToggleFeed = { [weak self] on in self?.setFeed(on) }
+    }
+
+    /// Turn the live per-display feed on or off (from the toggle button).
+    private func setFeed(_ on: Bool) {
+        state.feedEnabled = on
+        if on { capture.start() } else { capture.stop() }
+        canvases.forEach { $0.refresh() }
     }
 
     /// Show an arranger on every screen (rebuilding to match the current screen set),
@@ -27,6 +40,11 @@ final class ArrangementWindows {
         // arranger takes no keyboard focus until clicked. Make the main display's window
         // key so shortcuts (arrows, ⌘Z, ⌘Delete, Return) work immediately.
         makeMainWindowKey()
+        // Default the live feed on unless the machine is already busy (>50% CPU) — a
+        // heavy box shouldn't get a surprise capture load. The user can toggle it with the
+        // leftmost button. Our overlays exist now, so capture can exclude them.
+        let busy = (ScreenCaptureManager.systemCPUUsage() ?? 0) > 0.5
+        setFeed(!busy)
     }
 
     /// Make the arranger window on the main display key (falling back to any window).
@@ -37,6 +55,7 @@ final class ArrangementWindows {
     }
 
     func hide() {
+        capture.stop()
         windows.values.forEach { $0.orderOut(nil) }
         windows.removeAll()
         canvases.removeAll()

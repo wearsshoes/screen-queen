@@ -12,6 +12,9 @@ final class ArrangementState {
     /// Set the main display (dragging the menu-bar strip onto another tile).
     var onSetMain: ((CGDirectDisplayID) -> Void)?
     var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)?
+    /// Apply a resolution change to one *or many* displays as a single revertable step
+    /// (the `.all`-scope slider zooms every display at once → one undo).
+    var onSetResolutions: (([CGDirectDisplayID: CGDisplayMode], [CGDirectDisplayID: CGPoint]) -> Void)?
     /// Mirror `slave` onto `master` (Option-drag one tile onto another).
     var onSetMirror: ((_ slave: CGDirectDisplayID, _ master: CGDirectDisplayID) -> Void)?
     /// Stop `id` mirroring (the column's un-mirror button).
@@ -32,6 +35,16 @@ final class ArrangementState {
     var displays: [DisplaySnapshot] = []
     var selectedID: CGDirectDisplayID?
 
+    /// Live per-display screen-content capture (nil when unavailable / not started).
+    /// Tiles draw the latest frame for their display, excluding Silkscreen's own overlay.
+    var capture: ScreenCaptureManager?
+
+    /// Whether the live video feed is currently on (drives the leftmost toggle button and
+    /// whether tiles show live content vs. static wallpaper).
+    var feedEnabled = false
+    /// Toggle the live feed on/off (wired by ArrangementWindows to start/stop capture).
+    var onToggleFeed: ((Bool) -> Void)?
+
     /// A live macOS-managed AirPlay visual session (nil when none). Detected via a
     /// power assertion, so it catches even the "Window or App" mode that has no
     /// `CGDirectDisplayID` — see `AirPlayMonitor`. Shown as a read-only card in the
@@ -45,9 +58,26 @@ final class ArrangementState {
     /// dragged display's own screen can brighten its backdrop). nil when not dragging.
     var draggingDisplayID: CGDirectDisplayID?
 
-    /// Resolution preview (pending until ⌘ released).
+    /// Resolution preview (pending until ⌘ released). `pendingModes` holds the previewed
+    /// CGDisplayMode per display — one entry in `.one` scope, many in `.all` scope.
     var pendingSize: [CGDirectDisplayID: CGSize] = [:]
-    var pendingMode: (id: CGDirectDisplayID, mode: CGDisplayMode)?
+    var pendingModes: [CGDirectDisplayID: CGDisplayMode] = [:]
+    /// Back-compat single-display view of `pendingModes` for the callers/drawing that
+    /// still think in one display (e.g. the keyboard ⌘± path and boxing preview).
+    var pendingMode: (id: CGDirectDisplayID, mode: CGDisplayMode)? {
+        get { pendingModes.first.map { ($0.key, $0.value) } }
+        set {
+            pendingModes.removeAll()
+            if let newValue { pendingModes[newValue.id] = newValue.mode }
+        }
+    }
+
+    /// The previewed mode for `id`, if any.
+    func pendingMode(for id: CGDirectDisplayID) -> CGDisplayMode? { pendingModes[id] }
+
+    /// Whether the resolution slider drives one display or all of them proportionally.
+    enum SliderScope { case one, all }
+    var sliderScope: SliderScope = .one
 
     /// Active alignment anchors, for the tile arrow markers.
     var activeV: (selfA: VAnchor, otherA: VAnchor, otherID: CGDirectDisplayID)?
@@ -160,9 +190,25 @@ final class ArrangementState {
             let o = origins[d.id] ?? d.bounds.origin
             pointRects[d.id] = CGRect(origin: o, size: d.bounds.size)
         }
-        let mainID = sized.first { $0.isMain }?.id
+        // During a menu-bar drag, `pendingMainID` is the would-be main, so the Dock
+        // prediction moves live before the drop commits.
+        let mainID = pendingMainID ?? sized.first { $0.isMain }?.id
         return DockPredictor.dockDisplay(pointRects: pointRects, mainID: mainID, edge: DockPredictor.edge())
     }
+
+    /// The display the Dock is on *right now* in the committed OS layout (before any
+    /// pending plane edit / main change). Used to decide whether the prediction differs.
+    func currentDockDisplay() -> CGDirectDisplayID? {
+        let mainID = pendingMainID ?? displays.first { $0.isMain }?.id
+        var pointRects: [CGDirectDisplayID: CGRect] = [:]
+        for d in displays { pointRects[d.id] = d.bounds }
+        return DockPredictor.dockDisplay(pointRects: pointRects, mainID: mainID, edge: DockPredictor.edge())
+    }
+
+    /// The main display implied by an in-progress menu-bar drag (nil when not dragging).
+    /// Set by the canvas while the menu-bar strip hovers a target tile, so the dock
+    /// prediction reflects the would-be main during the drag.
+    var pendingMainID: CGDirectDisplayID?
 
     /// Colors keyed by seam (unordered display pair), derived from the current bars so
     /// both bars of a seam — edge and mini-map — share one color, recomputed as the

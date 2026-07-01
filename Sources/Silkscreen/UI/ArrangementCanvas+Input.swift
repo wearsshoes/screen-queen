@@ -31,15 +31,13 @@ extension ArrangementCanvas {
         if airplaySettingsButtonRect?.contains(p) == true {
             onOpenAirPlaySettings?(); return
         }
-        // Grabbing the main tile's menu-bar strip starts a "move main" drag.
-        if mainMenuBarViewRect()?.contains(p) == true { draggingMenuBar = p; needsDisplay = true; return }
-        // Grabbing the selected tile's resolution slider starts a zoom drag (takes
-        // priority over dragging the tile itself, since it sits on top of it).
-        if let hit = resSliderHit(at: p) {
-            dragTransform = transform(plane)   // freeze the mapping like a tile drag
-            draggingResSlider = (hit.id, hit.track)
-            zoomPending = true
-            resSliderDrag(to: p)
+        // Grabbing the main tile's menu-bar strip starts a "move main" drag. The Dock
+        // indicator appears immediately (grabbing signals intent to move main); until the
+        // cursor is over another tile the would-be main stays the current one.
+        if mainMenuBarViewRect()?.contains(p) == true {
+            draggingMenuBar = p
+            state.pendingMainID = displays.first { $0.isMain }?.id
+            state.notify()   // repaint every canvas so the Dock indicator shows everywhere
             return
         }
         guard let d = display(at: p), plane[d.id] != nil else { return }
@@ -58,8 +56,15 @@ extension ArrangementCanvas {
 
     override func mouseDragged(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        if draggingMenuBar != nil { draggingMenuBar = p; needsDisplay = true; return }
-        if draggingResSlider != nil { resSliderDrag(to: p); return }
+        if draggingMenuBar != nil {
+            draggingMenuBar = p
+            // Would-be main = the tile under the cursor (else the current main), so the
+            // Dock prediction follows the strip live during the drag.
+            let over = display(at: p)
+            state.pendingMainID = over?.id ?? displays.first { $0.isMain }?.id
+            state.notify()
+            return
+        }
         // Option-mirror drag: don't move the plane; just track the cursor for the drop
         // target and highlight the tile under it (drawn like the menu-bar drop hint).
         if optionMirrorDrag { mirrorDragPoint = p; dragMoved = true; needsDisplay = true; return }
@@ -77,26 +82,10 @@ extension ArrangementCanvas {
         emitPreview()
     }
 
-    /// Update the previewed resolution from the slider cursor position `p`.
-    private func resSliderDrag(to p: CGPoint) {
-        guard let (id, track) = draggingResSlider,
-              let d = displays.first(where: { $0.id == id }),
-              let mode = resSliderMode(for: d, track: track, atX: p.x) else { return }
-        // Only re-preview when the chosen mode changes (dragging within a detent is a no-op).
-        if let cur = pendingMode, cur.id == id, ModeCatalog.sameMode(cur.mode, mode.cgMode) { return }
-        previewMode(mode, on: id)
-    }
-
     override func mouseUp(with event: NSEvent) {
         defer { draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil
-                draggingResSlider = nil; optionMirrorDrag = false; mirrorDragPoint = nil
+                optionMirrorDrag = false; mirrorDragPoint = nil; state.pendingMainID = nil
                 state.draggingDisplayID = nil; state.notify() }
-        // Released the resolution slider: apply the previewed mode.
-        if draggingResSlider != nil {
-            if zoomPending, pendingMode != nil { commitPendingResolution() } else { zoomPending = false }
-            needsDisplay = true
-            return
-        }
         // Dropped the menu-bar strip: whichever tile it's over becomes main.
         if let p = draggingMenuBar {
             needsDisplay = true
@@ -232,7 +221,9 @@ extension ArrangementCanvas {
         if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 { onDismiss?(); return }
 
         if cmd, let ch = event.charactersIgnoringModifiers, "+=-_0".contains(ch) {
-            if !event.isARepeat { handleResolutionKey(ch) }
+            if !event.isARepeat {
+                if shift { handleGlobalResolutionKey(ch) } else { handleResolutionKey(ch) }
+            }
             return
         }
         guard let dir = direction(event) else { super.keyDown(with: event); return }
@@ -264,7 +255,7 @@ extension ArrangementCanvas {
         let f = event.modifierFlags
         // Ghost the possible ⌘⇧ alignment destinations while ⌘⇧ is held — on every
         // display, so broadcast the shared flag.
-        let ghosts = f.contains(.command) && f.contains(.shift) && selectedID != nil
+        let ghosts = f.contains(.command) && f.contains(.shift) && selectedID != nil && !zoomPending
         if ghosts != showAlignGhosts { showAlignGhosts = ghosts; emitPreview() }
         if alignPending, !(f.contains(.command) && f.contains(.shift)) {
             alignPending = false
@@ -528,6 +519,87 @@ extension ArrangementCanvas {
         zoomPending = true
     }
 
+    /// PPI of `mode` on `d` (points per physical inch — the density that governs how big
+    /// UI looks), or nil when the physical size is unknown.
+    private func modePPI(_ mode: DisplayMode, on d: DisplaySnapshot) -> Double? {
+        let inches = Double(d.physicalSizeMM.width) / 25.4
+        guard inches > 0.1 else { return nil }
+        return Double(mode.pointWidth) / inches
+    }
+
+    /// Global (⌘⇧ +/−/0) resolution zoom, keeping displays roughly proportional in PPI.
+    ///
+    /// A single continuous, *unclamped* `globalZoomLevel` scales every display's starting
+    /// PPI; each display snaps to the achievable mode nearest `startPPI × level`, clamped
+    /// to its own range. Because the level is unclamped, a display that hits its max stays
+    /// pinned while the level keeps rising (others pass it), then rejoins proportionally
+    /// as the level falls back — the "descend alone until ratios match" behaviour. The
+    /// whole ⌘⇧-held run commits as one revertable step (one undo).
+    private func handleGlobalResolutionKey(_ ch: String) {
+        // A fresh run (no zoom in progress): capture each display's starting PPI and reset
+        // the level. `0` also resets the run and targets each display's default.
+        if !zoomPending {
+            globalZoomLevel = 1
+            globalZoomStartPPI.removeAll()
+            for d in displays where !d.isMirrored {
+                let modes = sortedModes(for: d)
+                if let idx = currentModeIndex(for: d, in: modes), let ppi = modePPI(modes[idx], on: d) {
+                    globalZoomStartPPI[d.id] = ppi
+                }
+            }
+        }
+
+        let previousLevel = globalZoomLevel
+        switch ch {
+        case "=", "+": globalZoomLevel *= 1.12   // ↑ resolution (denser → smaller UI)
+        case "-", "_": globalZoomLevel /= 1.12
+        case "0":      globalZoomLevel = 1        // back to each display's starting level
+        default: return
+        }
+
+        // Resolve the target mode each display would take at the new level.
+        func targetMode(for d: DisplaySnapshot, modes: [DisplayMode]) -> DisplayMode {
+            if ch == "0", let def = defaultMode(modes) { return def }
+            if let start = globalZoomStartPPI[d.id] {
+                let target = start * globalZoomLevel
+                return modes.min(by: {
+                    abs((modePPI($0, on: d) ?? 0) - target) < abs((modePPI($1, on: d) ?? 0) - target)
+                }) ?? modes[modes.count / 2]
+            }
+            // No PPI (uncalibrated): fall back to a plain detent step from the current mode.
+            let cur = currentModeIndex(for: d, in: modes) ?? 0
+            let s = ch == "-" || ch == "_" ? 1 : -1
+            return modes[max(0, min(modes.count - 1, cur + s))]
+        }
+
+        var targets: [(CGDirectDisplayID, DisplayMode)] = []
+        var anyMoved = false
+        for d in displays where !d.isMirrored {
+            let modes = sortedModes(for: d)
+            guard modes.count > 1 else { continue }
+            let mode = targetMode(for: d, modes: modes)
+            // Did this display actually change from its current/previewed mode?
+            if let curIdx = currentModeIndex(for: d, in: modes),
+               !ModeCatalog.sameMode(modes[curIdx].cgMode, mode.cgMode) {
+                anyMoved = true
+            }
+            targets.append((d.id, mode))
+        }
+
+        // Every display is pinned at an extreme — don't let the unclamped level drift, or
+        // you'd have to unwind that phantom travel before anything moves again.
+        guard !targets.isEmpty else { NSSound.beep(); return }
+        guard anyMoved || ch == "0" else {
+            globalZoomLevel = previousLevel
+            NSSound.beep()
+            return
+        }
+
+        state.pendingModes.removeAll(); pendingSize.removeAll()
+        for (id, mode) in targets { previewMode(mode, on: id, replacing: false) }
+        zoomPending = true
+    }
+
     /// Sorted resolution modes (small → large point area) for `d`, the ordering the
     /// slider and the ⌘±/0 keys both index into.
     func sortedModes(for d: DisplaySnapshot) -> [DisplayMode] {
@@ -536,28 +608,32 @@ extension ArrangementCanvas {
 
     /// Index of `d`'s current (or pending) mode within `sortedModes`, if present.
     func currentModeIndex(for d: DisplaySnapshot, in modes: [DisplayMode]) -> Int? {
-        let cur = (pendingMode?.id == d.id ? pendingMode?.mode : nil) ?? CGDisplayCopyDisplayMode(d.id)
+        let cur = state.pendingMode(for: d.id) ?? CGDisplayCopyDisplayMode(d.id)
         return modes.firstIndex { cur != nil && ModeCatalog.sameMode(cur!, $0.cgMode) }
     }
 
     /// Preview `mode` on `id` (physical size unchanged, so the plane and alignment are
-    /// untouched). Shared by the ⌘± keys and the tile slider.
-    func previewMode(_ mode: DisplayMode, on id: CGDirectDisplayID) {
-        pendingMode = (id, mode.cgMode)
+    /// untouched). `replacing: true` (default) clears any other pending preview — the
+    /// single-display path (⌘± keys, `.one` slider); `false` adds to the set for the
+    /// `.all` slider, which previews several displays at once.
+    func previewMode(_ mode: DisplayMode, on id: CGDirectDisplayID, replacing: Bool = true) {
+        if replacing { state.pendingModes.removeAll(); pendingSize.removeAll() }
+        state.pendingModes[id] = mode.cgMode
         pendingSize[id] = CGSize(width: mode.pointWidth, height: mode.pointHeight)
         needsDisplay = true
         emitPreview()
     }
 
-    /// Apply the pending resolution: commit the point arrangement that reproduces the
-    /// plane at the new size (preserving alignment), then clear the preview. Shared by
-    /// the ⌘-release path and the slider's mouse-up.
+    /// Apply the pending resolution(s): commit the point arrangement that reproduces the
+    /// plane at the new size(s) (preserving alignment), then clear the preview. Commits
+    /// every pending display in one batch so a multi-display zoom is a single undo.
     func commitPendingResolution() {
         zoomPending = false
-        let mode = pendingMode
+        let modes = state.pendingModes
+        guard !modes.isEmpty else { return }
         let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
-        pendingMode = nil; pendingSize.removeAll()
-        if let mode { onSetResolution?(mode.id, mode.mode, origins) }
+        state.pendingModes.removeAll(); pendingSize.removeAll()
+        onSetResolutions?(modes, origins)
     }
 
     private func modesList(for d: DisplaySnapshot) -> [DisplayMode] {
