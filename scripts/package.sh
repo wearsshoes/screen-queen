@@ -13,7 +13,24 @@ APP_NAME="Silkscreen"
 BUNDLE_ID="com.moxsf.silkscreen"
 SHORT_VERSION="${SHORT_VERSION:-1.0}"
 BUILD_VERSION="${BUILD_VERSION:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
-IDENTITY="${CODESIGN_IDENTITY:--}"   # "-" = ad-hoc
+# Resolve the codesigning identity:
+#   - CODESIGN_IDENTITY set  → use it verbatim (must resolve, or we bail).
+#   - unset                  → auto-detect a "Developer ID Application" identity;
+#                              fall back to "-" (ad-hoc) if none is installed.
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+	IDENTITY="$CODESIGN_IDENTITY"
+	if ! security find-identity -v -p codesigning | grep -qF "$IDENTITY"; then
+		echo "✗ No codesigning identity matching: $IDENTITY" >&2
+		echo "  Installed identities:" >&2
+		security find-identity -v -p codesigning | sed 's/^/    /' >&2
+		exit 1
+	fi
+else
+	IDENTITY="$(security find-identity -v -p codesigning \
+		| grep 'Developer ID Application' | head -1 \
+		| sed -E 's/.*"(.*)".*/\1/')"
+	IDENTITY="${IDENTITY:--}"   # "-" = ad-hoc when no Developer ID is installed
+fi
 
 BUILD_DIR="build"
 APP="$BUILD_DIR/$APP_NAME.app"
