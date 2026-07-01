@@ -8,7 +8,10 @@ cd "$(dirname "$0")/.."
 
 run() {
 	swift build 2>&1 | grep -vE "^\[|Planning|Compiling|Write |Emitting|Linking|Applying" || true
-	pkill -f ".build/.*/debug/Silkscreen" 2>/dev/null || true
+	# Kill the prior instance and wait for it to actually exit, so we never briefly
+	# run two copies (a fast rebuild can start before the old process dies).
+	pkill -f "/debug/Silkscreen$" 2>/dev/null || true
+	for _ in $(seq 1 20); do pgrep -f "/debug/Silkscreen$" >/dev/null || break; sleep 0.1; done
 	# Launch the binary directly (not the .app) so stdout/logs stream to this terminal.
 	.build/debug/Silkscreen &
 	echo "▸ launched (pid $!) — ⌘⌥F1 or the 🖥 menu-bar item opens the arranger"
