@@ -117,6 +117,9 @@ final class ArrangementCanvas: NSView {
     // Dragging the main display's menu-bar strip to move main to another tile.
     var draggingMenuBar: CGPoint?         // current cursor point while dragging
 
+    // Dragging the selected tile's resolution slider (id + its track, view coords).
+    var draggingResSlider: (id: CGDirectDisplayID, track: NSRect)?
+
     // Keyboard continuous-move (nudge) state.
     var heldDirections: Set<MoveDirection> = []
     var moveTimer: Timer?
@@ -155,6 +158,7 @@ final class ArrangementCanvas: NSView {
     func currentRects() -> [CGDirectDisplayID: CGRect] { plane }
     func currentBars() -> [SeamBar] { state.currentBars() }
     func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] { state.seamColors(bars) }
+    func predictedDockDisplay() -> CGDirectDisplayID? { state.predictedDockDisplay() }
 
     /// Commit the plane, then broadcast so every canvas redraws.
     func commitPlane() { state.commit() }

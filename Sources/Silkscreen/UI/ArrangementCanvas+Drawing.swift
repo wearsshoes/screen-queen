@@ -34,6 +34,10 @@ extension ArrangementCanvas {
         // so the shadow reads under it (the tile lifts off the plane, macOS-style).
         if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
         for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!)) }
+        // Predicted Dock: a strip hugging the Dock edge of the screen it'll land on.
+        if let dockID = predictedDockDisplay(), let r = rects[dockID] {
+            drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
+        }
         drawReferenceBars(bars, t: t, seamColor: seamColor)
         let markers = activeMarkers(rects)
         for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
@@ -170,6 +174,64 @@ extension ArrangementCanvas {
         NSGraphicsContext.restoreGraphicsState()
     }
 
+    /// A mini Dock hugging the predicted Dock edge of a tile: three app squircles, a
+    /// divider line, and a fourth squircle (Trash) — the macOS Dock in miniature, so
+    /// it's clear which screen the Dock lands on. Laid out along the Dock's axis.
+    private func drawDockIndicator(in tile: NSRect, edge: DockPredictor.Edge) {
+        let inset = tile.insetBy(dx: 1.5, dy: 1.5)
+        let horizontal = (edge == .bottom)            // bottom Dock runs left↔right
+        // Icon size from the short dimension; the run centers along the long one.
+        let icon = min(max((horizontal ? inset.height : inset.width) * 0.10, 7), 15)
+        let gap = icon * 0.28                          // tight spacing between icons
+        let preDivider = icon * 0.22                    // tight gap on the divider's left
+        let postDivider = icon * 0.34                   // a smidge more on the right
+        let tray = icon * 0.34                          // dark tray padding around the icons
+        let margin = icon * 0.5                         // clearance from the screen edge
+        let r = icon * 0.28                             // squircle corner radius
+
+        // Run length along the Dock axis: 3 icons (2 gaps) + pre + divider + post + 1 icon.
+        let lineThick = max(1, icon * 0.12)
+        let runLen = icon * 4 + gap * 2 + preDivider + lineThick + postDivider
+
+        // Depth band (perpendicular to the Dock axis) shared by icons + tray.
+        let depthLo: CGFloat   // near edge in view coords
+        switch edge {
+        case .bottom: depthLo = inset.maxY - margin - icon   // flipped: maxY is bottom
+        case .left:   depthLo = inset.minX + margin
+        case .right:  depthLo = inset.maxX - margin - icon
+        }
+        func square(at a: CGFloat) -> NSRect {
+            horizontal ? NSRect(x: a, y: depthLo, width: icon, height: icon)
+                       : NSRect(x: depthLo, y: a, width: icon, height: icon)
+        }
+        let startA = (horizontal ? inset.midX : inset.midY) - runLen / 2
+
+        // Dark rounded tray behind everything, padded by `tray` on all sides.
+        let trayRect: NSRect = horizontal
+            ? NSRect(x: startA - tray, y: depthLo - tray, width: runLen + tray * 2, height: icon + tray * 2)
+            : NSRect(x: depthLo - tray, y: startA - tray, width: icon + tray * 2, height: runLen + tray * 2)
+        let trayR = (horizontal ? trayRect.height : trayRect.width) * 0.32
+        NSColor(white: 0.32, alpha: 0.6).setFill()
+        NSBezierPath(roundedRect: trayRect, xRadius: trayR, yRadius: trayR).fill()
+
+        func squircle(_ rect: NSRect) {
+            NSColor.white.withAlphaComponent(0.92).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r).fill()
+        }
+
+        var a = startA
+        for i in 0..<3 { squircle(square(at: a)); a += icon + (i < 2 ? gap : preDivider) }  // 3 icons, tight then pre-divider gap
+        // Divider line spanning the icon depth, across the Dock axis.
+        let s = square(at: a)
+        let line: NSRect = horizontal
+            ? NSRect(x: a, y: s.minY + icon * 0.1, width: lineThick, height: icon * 0.8)
+            : NSRect(x: s.minX + icon * 0.1, y: a, width: icon * 0.8, height: lineThick)
+        NSColor.white.withAlphaComponent(0.5).setFill()
+        NSBezierPath(roundedRect: line, xRadius: line.width / 2, yRadius: line.height / 2).fill()
+        a += lineThick + postDivider
+        squircle(square(at: a))                                     // 4th icon (Trash)
+    }
+
     private func drawTile(for display: DisplaySnapshot, in rect: NSRect) {
         // Monitors are neutral now — color lives on the seams (the bars), not the tiles.
         // A light gray reads as a "screen" against the darker backdrop; the selected tile
@@ -183,28 +245,10 @@ extension ArrangementCanvas {
         color.setFill(); path.fill()
         color.setStroke(); path.lineWidth = 1.5; path.stroke()
         drawBoxing(for: display, in: inset, color: color)
+        // The label stacks name → (slider on the selected tile) → stats, centered.
         drawLabel(for: display, in: inset, selected: selected)
-        drawNickname(display, in: inset)
         // The main display carries a menu-bar strip (drag it to another tile to move main).
         if display.isMain, draggingMenuBar == nil { drawMenuBar(in: menuBarRect(inTile: inset)) }
-    }
-
-    /// The display's nickname (fingerprint-derived), faint at the tile bottom.
-    private func drawNickname(_ display: DisplaySnapshot, in rect: NSRect) {
-        let text = display.nickname
-        guard !text.isEmpty else { return }
-        // Resolve the dynamic catalog color to a concrete RGBA before applying alpha: a
-        // catalog color that CoreText can't convert lands as a nil attribute value and
-        // crashes layout ("nil object from objects[0]").
-        let label = (NSColor.labelColor.usingColorSpace(.sRGB) ?? .white).withAlphaComponent(0.35)
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .regular),
-            .foregroundColor: label,
-        ]
-        let s = (text as NSString).size(withAttributes: attrs)
-        guard s.width <= rect.width - 8 else { return }
-        (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: rect.maxY - s.height - 4),
-                                withAttributes: attrs)   // flipped view: maxY is the bottom
     }
 
     /// If the current (or previewed) mode's aspect ratio doesn't match the panel's
@@ -293,34 +337,51 @@ extension ArrangementCanvas {
         let primary = selected ? (accent.blended(withFraction: 0.55, of: .black) ?? accent) : .labelColor
         let secondary = selected ? (accent.blended(withFraction: 0.30, of: .black) ?? accent) : .secondaryLabelColor
 
-        var lines: [(String, NSFont, NSColor)] = []
-        lines.append((display.name, f(16, bold: true), primary))
+        // The stack, top → bottom: name, then (on the selected tile) the resolution
+        // slider, then the stats lines. A `.slider` item reserves a fixed-height band
+        // that `drawResSlider` fills, so the slider lands in the tile's vertical center
+        // with the name above it and the stats below.
+        enum Item { case text(String, NSFont, NSColor); case slider(CGFloat) }
+        var items: [Item] = []
+        items.append(.text(display.name, f(16, bold: true), primary))
+        if selected, resSliderPosition(for: display) != nil { items.append(.slider(resSliderBandHeight)) }
 
         // Resolution "W×H" (points) with HiDPI tagged on; italic while a zoom mode is
         // uncommitted.
         let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
-        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13, italic: pending != nil), primary))
+        items.append(.text("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13, italic: pending != nil), primary))
 
         // Diagonal inches then effective PPI.
         let diag = display.diagonalInches > 0 ? String(format: "%.0f″ · ", display.diagonalInches) : ""
         if let effPPI {
-            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), secondary))
+            items.append(.text(diag + String(format: "%.0f ppi", effPPI), f(13), secondary))
         } else {
-            lines.append((diag + "calibrate?", f(13), secondary))
+            items.append(.text(diag + "calibrate?", f(13), secondary))
         }
 
-        // Center the block vertically and each line horizontally in the tile.
-        let attrsFor: (NSFont) -> [NSAttributedString.Key: Any] = { [.font: $0] }
-        let sizes = lines.map { ($0.0 as NSString).size(withAttributes: attrsFor($0.1)) }
+        // Measure each item's height, then center the whole stack vertically.
+        func height(_ item: Item) -> CGFloat {
+            switch item {
+            case .text(let s, let font, _): return (s as NSString).size(withAttributes: [.font: font]).height
+            case .slider(let h): return h
+            }
+        }
         let gap: CGFloat = 3
-        let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(lines.count - 1)
+        let total = items.reduce(0) { $0 + height($1) } + gap * CGFloat(items.count - 1)
         var y = rect.midY - total / 2
-        for (i, (text, font, color)) in lines.enumerated() {
-            let s = sizes[i]
-            guard s.width <= rect.width - 8 else { y += s.height + gap; continue }
-            (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: y),
-                                    withAttributes: [.font: font, .foregroundColor: color])
-            y += s.height + gap
+        for item in items {
+            let h = height(item)
+            switch item {
+            case .text(let text, let font, let color):
+                let s = (text as NSString).size(withAttributes: [.font: font])
+                if s.width <= rect.width - 8 {
+                    (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: y),
+                                            withAttributes: [.font: font, .foregroundColor: color])
+                }
+            case .slider:
+                drawResSlider(for: display, in: rect, centerY: y + h / 2)
+            }
+            y += h + gap
         }
     }
 

@@ -25,6 +25,15 @@ extension ArrangementCanvas {
         let p = convert(event.locationInWindow, from: nil)
         // Grabbing the main tile's menu-bar strip starts a "move main" drag.
         if mainMenuBarViewRect()?.contains(p) == true { draggingMenuBar = p; needsDisplay = true; return }
+        // Grabbing the selected tile's resolution slider starts a zoom drag (takes
+        // priority over dragging the tile itself, since it sits on top of it).
+        if let hit = resSliderHit(at: p) {
+            dragTransform = transform(plane)   // freeze the mapping like a tile drag
+            draggingResSlider = (hit.id, hit.track)
+            zoomPending = true
+            resSliderDrag(to: p)
+            return
+        }
         guard let d = display(at: p), plane[d.id] != nil else { return }
         draggedID = d.id
         selectedID = d.id
@@ -40,6 +49,7 @@ extension ArrangementCanvas {
     override func mouseDragged(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         if draggingMenuBar != nil { draggingMenuBar = p; needsDisplay = true; return }
+        if draggingResSlider != nil { resSliderDrag(to: p); return }
         guard let id = draggedID, let dragged = displays.first(where: { $0.id == id }),
               let t = dragTransform ?? transform(plane) else { return }
         // The tile tracks the cursor 1:1: view delta ÷ scale = physical delta.
@@ -54,9 +64,26 @@ extension ArrangementCanvas {
         emitPreview()
     }
 
+    /// Update the previewed resolution from the slider cursor position `p`.
+    private func resSliderDrag(to p: CGPoint) {
+        guard let (id, track) = draggingResSlider,
+              let d = displays.first(where: { $0.id == id }),
+              let mode = resSliderMode(for: d, track: track, atX: p.x) else { return }
+        // Only re-preview when the chosen mode changes (dragging within a detent is a no-op).
+        if let cur = pendingMode, cur.id == id, ModeCatalog.sameMode(cur.mode, mode.cgMode) { return }
+        previewMode(mode, on: id)
+    }
+
     override func mouseUp(with event: NSEvent) {
         defer { draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil
+                draggingResSlider = nil
                 state.draggingDisplayID = nil; state.notify() }
+        // Released the resolution slider: apply the previewed mode.
+        if draggingResSlider != nil {
+            if zoomPending, pendingMode != nil { commitPendingResolution() } else { zoomPending = false }
+            needsDisplay = true
+            return
+        }
         // Dropped the menu-bar strip: whichever tile it's over becomes main.
         if let p = draggingMenuBar {
             needsDisplay = true
@@ -223,13 +250,9 @@ extension ArrangementCanvas {
             commitPlane()
         }
         if zoomPending, !f.contains(.command) {
-            zoomPending = false
-            let mode = pendingMode
             // A resolution change leaves the physical plane untouched; commit the point
             // arrangement that reproduces it at the new size, preserving alignment.
-            let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
-            pendingMode = nil; pendingSize.removeAll()
-            if let mode { onSetResolution?(mode.id, mode.mode, origins) }
+            commitPendingResolution()
         }
         super.flagsChanged(with: event)
     }
@@ -466,10 +489,9 @@ extension ArrangementCanvas {
     /// when ⌘ is released.
     private func handleResolutionKey(_ ch: String) {
         guard let id = selectedID, let display = displays.first(where: { $0.id == id }) else { NSSound.beep(); return }
-        let modes = modesList(for: display).sorted { $0.pointWidth * $0.pointHeight < $1.pointWidth * $1.pointHeight }
+        let modes = sortedModes(for: display)
         guard !modes.isEmpty else { return }
-        let currentMode = (pendingMode?.id == id ? pendingMode?.mode : nil) ?? CGDisplayCopyDisplayMode(id)
-        let idx = modes.firstIndex { currentMode != nil && ModeCatalog.sameMode(currentMode!, $0.cgMode) }
+        let idx = currentModeIndex(for: display, in: modes)
 
         var target: DisplayMode?
         switch ch {
@@ -480,11 +502,40 @@ extension ArrangementCanvas {
         }
         guard let t = target else { return }
 
-        pendingMode = (id, t.cgMode)
-        pendingSize[id] = CGSize(width: t.pointWidth, height: t.pointHeight)
+        previewMode(t, on: id)
         zoomPending = true
+    }
+
+    /// Sorted resolution modes (small → large point area) for `d`, the ordering the
+    /// slider and the ⌘±/0 keys both index into.
+    func sortedModes(for d: DisplaySnapshot) -> [DisplayMode] {
+        modesList(for: d).sorted { $0.pointWidth * $0.pointHeight < $1.pointWidth * $1.pointHeight }
+    }
+
+    /// Index of `d`'s current (or pending) mode within `sortedModes`, if present.
+    func currentModeIndex(for d: DisplaySnapshot, in modes: [DisplayMode]) -> Int? {
+        let cur = (pendingMode?.id == d.id ? pendingMode?.mode : nil) ?? CGDisplayCopyDisplayMode(d.id)
+        return modes.firstIndex { cur != nil && ModeCatalog.sameMode(cur!, $0.cgMode) }
+    }
+
+    /// Preview `mode` on `id` (physical size unchanged, so the plane and alignment are
+    /// untouched). Shared by the ⌘± keys and the tile slider.
+    func previewMode(_ mode: DisplayMode, on id: CGDirectDisplayID) {
+        pendingMode = (id, mode.cgMode)
+        pendingSize[id] = CGSize(width: mode.pointWidth, height: mode.pointHeight)
         needsDisplay = true
         emitPreview()
+    }
+
+    /// Apply the pending resolution: commit the point arrangement that reproduces the
+    /// plane at the new size (preserving alignment), then clear the preview. Shared by
+    /// the ⌘-release path and the slider's mouse-up.
+    func commitPendingResolution() {
+        zoomPending = false
+        let mode = pendingMode
+        let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
+        pendingMode = nil; pendingSize.removeAll()
+        if let mode { onSetResolution?(mode.id, mode.mode, origins) }
     }
 
     private func modesList(for d: DisplaySnapshot) -> [DisplayMode] {

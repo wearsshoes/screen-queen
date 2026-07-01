@@ -126,6 +126,19 @@ final class ArrangementState {
 
     func currentBars() -> [SeamBar] { SchematicLayout.seamBars(sizedDisplays(), rects: plane) }
 
+    /// The display macOS will put the Dock on for the arrangement currently on the plane
+    /// (predicted from the reconstructed point layout, so it updates live while dragging).
+    func predictedDockDisplay() -> CGDirectDisplayID? {
+        let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
+        var pointRects: [CGDirectDisplayID: CGRect] = [:]
+        for d in displays {
+            let o = origins[d.id] ?? d.bounds.origin
+            pointRects[d.id] = CGRect(origin: o, size: d.bounds.size)
+        }
+        let mainID = displays.first { $0.isMain }?.id
+        return DockPredictor.dockDisplay(pointRects: pointRects, mainID: mainID, edge: DockPredictor.edge())
+    }
+
     /// Colors keyed by seam (unordered display pair), derived from the current bars so
     /// both bars of a seam — edge and mini-map — share one color, recomputed as the
     /// layout changes during a drag.
