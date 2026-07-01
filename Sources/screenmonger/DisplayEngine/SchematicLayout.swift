@@ -1,17 +1,14 @@
 import CoreGraphics
 
-/// A reference bar at one seam, placed at the physically *smaller* screen's
-/// center along the seam (clamped to the overlap). It carries the position in two
-/// coordinate systems so the arranger and the on-glass overlay render the same
-/// spot: physical (inch) coordinates for the mini-map, and the same location in
-/// each display's global *point* coordinates for the glass.
+/// A reference bar at one seam, carrying its position in both physical (inch) and
+/// per-display point coordinates so the arranger and the on-glass overlay render
+/// the same spot.
 ///
-/// The bar models a *window* 95% of the smaller screen's edge dragged across the
-/// seam: one fixed **point** size (`windowPoints`) shown on both screens, capped
-/// so it fits the overlap on each. Because a window keeps its point size across
-/// displays, the two render at the same physical size only when the screens have
-/// equal density; otherwise the physical lengths differ (`physLenInchesA/B`),
-/// which is exactly the size change the bar is meant to reveal.
+/// It models a *window* the width of the smaller screen's edge dragged across the
+/// seam: one fixed **point** size (`windowPoints`) shown on both screens, capped to
+/// the overlap. A window keeps its point size across displays, so the two render at
+/// the same physical size only at equal density; otherwise the physical lengths
+/// differ (`physLenInchesA/B`).
 struct SeamBar {
     let aID: CGDirectDisplayID   // left (vertical seam) / top (horizontal seam)
     let bID: CGDirectDisplayID   // right / bottom
@@ -27,14 +24,12 @@ struct SeamBar {
 }
 
 /// Translation between the macOS *point* arrangement and the *physical* schematic
-/// (true relative sizes). A pure namespace of conversions, shared by the arranger
-/// (`ArrangementCanvas`) and the on-glass overlay so the two never disagree.
+/// (true relative sizes), shared by the arranger and the on-glass overlay.
 ///
-/// The two directions are `toPlane` (point → physical, to interpret a committed
-/// layout) and `toPoints` (physical → point, to commit the plane). The seam map
-/// between them is *continuous*: a display's coordinate along a seam is a smooth
-/// (piecewise-linear) function through the four anchor points where the metric
-/// spaces must agree — the two corners and the two edge-alignments.
+/// `toPlane` interprets a committed layout (point → physical); `toPoints` converts
+/// the plane back to commit (physical → point). A display's coordinate along a seam
+/// maps piecewise-linearly through four anchors where the two metric spaces agree:
+/// the two corners and the two edge-alignments.
 enum SchematicLayout {
 
     /// Physical size in inches, falling back to a points/100 proxy when the
@@ -64,8 +59,7 @@ enum SchematicLayout {
             let pr = out[parent.id]!        // physical rect
             for child in eff where out[child.id] == nil {
                 let c = child.bounds, cs = physSize(child)
-                // Allow touching-or-overlapping (incl. corner adjacency, overlap ≈ 0)
-                // so diagonal pairs connect and place via the blended map.
+                // Allow touching or corner-adjacent (overlap ≈ 0) so diagonal pairs connect.
                 let yOv = min(pp.maxY, c.maxY) - max(pp.minY, c.minY)
                 let xOv = min(pp.maxX, c.maxX) - max(pp.minX, c.minX)
                 var r: CGRect?
@@ -81,9 +75,7 @@ enum SchematicLayout {
                 if let r { out[child.id] = r; queue.append(child.id) }
             }
         }
-        // Fallback for displays with no shared edge at all: place relative to the
-        // main at the main's density (keeps the point relationship at a consistent
-        // scale rather than an arbitrary points/100 spot).
+        // Displays with no shared edge: place relative to the main at the main's density.
         if eff.contains(where: { out[$0.id] == nil }) {
             let mr = out[start.id]!
             let kx = mr.width / start.bounds.width, ky = mr.height / start.bounds.height
@@ -98,11 +90,10 @@ enum SchematicLayout {
 
     // MARK: - Commit: physical → point
 
-    /// Inverse of `toPlane`: given the physical plane `rects` (and each display's
-    /// point size via `displays`), reconstruct a point arrangement. BFS from the
-    /// main; each child docked to a placed parent gets its perpendicular
-    /// point-flush and its along-seam point via the inverse seam map. The main
-    /// lands at (0,0) (the commit pins it there anyway).
+    /// Inverse of `toPlane`: reconstruct a point arrangement from the physical plane
+    /// `rects` and each display's point size. BFS from the main; each child docked to
+    /// a placed parent gets its perpendicular point-flush and its along-seam point via
+    /// the inverse seam map. The main lands at (0,0).
     static func toPoints(rects: [CGDirectDisplayID: CGRect],
                          displays: [DisplaySnapshot]) -> [CGDirectDisplayID: CGPoint] {
         guard !displays.isEmpty else { return [:] }
@@ -141,7 +132,7 @@ enum SchematicLayout {
             }
         }
         // Disconnected (e.g. Shift-dragged into a gap): place relative to the main
-        // at the main's density — the inverse of the toPlane fallback.
+        // at the main's density.
         if let mr = rects[start.id] {
             let kx = start.bounds.width / max(mr.width, 0.01), ky = start.bounds.height / max(mr.height, 0.01)
             for d in displays where origins[d.id] == nil {
@@ -152,25 +143,17 @@ enum SchematicLayout {
         return origins
     }
 
-    /// The child's physical coordinate along the seam, as a *piecewise-linear* map
-    /// through four anchor points where the two metric spaces must agree: the two
-    /// corners (child's far edge at parent's near edge) and the two edge-alignments
-    /// (point-left↔physical-left, point-right↔physical-right). So point anchors
-    /// render at physical anchors (left/center/right flush, corner at corner),
-    /// sizes stay physical, and the slope differs per region (the smaller screen's
-    /// density on the outer legs; the difference density across the middle, which
-    /// goes vertical when the point widths match).
+    /// The child's physical coordinate along the seam, from its point coordinate via
+    /// the four seam anchors.
     private static func alignedPerp(child: DisplaySnapshot, parent: DisplaySnapshot,
                                     _ pr: CGRect, _ cs: CGSize, vertical: Bool) -> CGFloat {
         let anchors = seamAnchors(child: child, cs, parentPoint: parent.bounds, parentPhys: pr, vertical: vertical)
         return seamPhysical(vertical ? child.bounds.minY : child.bounds.minX, anchors)
     }
 
-    /// Point-along → physical-along along a seam, via the four seam anchors (both
-    /// edge-alignments always kept, so edges render flush even when a screen is
-    /// taller-and-narrower than its neighbor and the map is non-monotonic — that's
-    /// fine here: interpret and commit only evaluate it *at* anchors, where it's
-    /// exact, and the drag never touches it).
+    /// Point-along → physical-along along a seam. The map can be non-monotonic (a
+    /// taller-and-narrower neighbor), which is fine: interpret and commit only
+    /// evaluate it *at* anchors, where it's exact.
     static func seamPhysical(_ pointAlong: CGFloat, _ anchors: [(CGFloat, CGFloat)]) -> CGFloat {
         piecewise(pointAlong, anchors)
     }
@@ -181,9 +164,7 @@ enum SchematicLayout {
     }
 
     /// The four (point, physical) anchor pairs along the seam where the two metric
-    /// spaces must agree — two corners and the two edge-alignments. The forward map
-    /// (alignedPerp) interpolates point→physical through these; the drag inverts
-    /// physical→point by swapping the pairs.
+    /// spaces agree — two corners and the two edge-alignments.
     static func seamAnchors(child: DisplaySnapshot, _ cs: CGSize,
                             parentPoint pp: CGRect, parentPhys pr: CGRect,
                             vertical: Bool) -> [(CGFloat, CGFloat)] {
@@ -226,11 +207,9 @@ enum SchematicLayout {
     static func frac(_ a: HAnchor) -> CGFloat { a == .left ? 0 : (a == .center ? 0.5 : 1) }
     static func frac(_ a: VAnchor) -> CGFloat { a == .top ? 0 : (a == .center ? 0.5 : 1) }
 
-    /// The seven *physical* alignment positions along a horizontal seam: the
-    /// child's `minX` that puts each of the child's physical anchors onto the
-    /// parent's matching physical anchor. Sorted by position (visual order) for
-    /// cycling and used as the drag magnet targets. `parent` is the parent's plane
-    /// rect (inches).
+    /// The seven *physical* alignment positions along a horizontal seam: the child's
+    /// `minX` that lands each child anchor on the parent's matching anchor, sorted by
+    /// position (visual order) for cycling and drag-magnet targets.
     static func physSnapsH(childWidth cw: CGFloat, parent pr: CGRect) -> [(along: CGFloat, selfAnchor: HAnchor, otherAnchor: HAnchor)] {
         hPairs.map { (pr.minX + frac($0.1) * pr.width - frac($0.0) * cw, $0.0, $0.1) }
             .sorted { $0.0 < $1.0 }
@@ -282,20 +261,16 @@ enum SchematicLayout {
                                 _ aI: Int, _ bI: Int, _ ra: CGRect, _ rb: CGRect,
                                 vertical: Bool, line: CGFloat, lo: CGFloat, hi: CGFloat) -> SeamBar {
         let a = displays[aI], b = displays[bI]
-        // Bar at the overlap center (a single absolute physical point shown on
-        // both screens). While the screens are mostly aligned this is the smaller
-        // screen's center; as they slide apart it stays centered in the overlap,
-        // so relative to each screen the two bars drift opposite ways.
-        let center = (lo + hi) / 2  // overlap center, the bar's ideal location
+        // Anchor the bar at the overlap center, so as the screens slide apart the two
+        // bars drift opposite ways relative to their screens.
+        let center = (lo + hi) / 2
         // Points-per-inch along the seam axis (width for a horizontal seam).
         let aPPI = vertical ? a.bounds.height / max(ra.height, 0.01) : a.bounds.width / max(ra.width, 0.01)
         let bPPI = vertical ? b.bounds.height / max(rb.height, 0.01) : b.bounds.width / max(rb.width, 0.01)
 
-        // The window = the full *smaller* screen's edge, as a POINT size (a window
-        // keeps its point size when dragged across displays), capped to the point
-        // overlap = the largest window that fits the shared edge. It then renders
-        // at each screen's own density, so it's full on the smaller screen and
-        // larger on a lower-PPI screen — the size change the bar reveals.
+        // The window = the smaller screen's edge as a POINT size (a window keeps its
+        // point size across displays), capped to the point overlap. It renders at each
+        // screen's density, so it's larger on the lower-PPI screen.
         let aPhys = vertical ? ra.height : ra.width
         let bPhys = vertical ? rb.height : rb.width
         let smallerPoints = aPhys <= bPhys ? (vertical ? a.bounds.height : a.bounds.width)
@@ -306,10 +281,8 @@ enum SchematicLayout {
         let windowPoints = max(0, min(smallerPoints, pointOverlap))
         let lenA = windowPoints / aPPI, lenB = windowPoints / bPPI // physical lengths
 
-        // Keep each bar fully on its own screen (like a dragged window that stays
-        // on-screen): clamp its center so the half-length doesn't cross the tile
-        // edge. The wider, lower-PPI bar can push into the screen's non-overlapping
-        // area but never off it.
+        // Keep each bar fully on its own screen: clamp the center so the half-length
+        // doesn't cross the tile edge.
         func clampAlong(_ r: CGRect, _ len: CGFloat) -> CGFloat {
             let lo = (vertical ? r.minY : r.minX) + len / 2
             let hi = (vertical ? r.maxY : r.maxX) - len / 2

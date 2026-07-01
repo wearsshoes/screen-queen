@@ -16,12 +16,11 @@ import AppKit
 final class ArrangementCanvas: NSView {
 
     var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)?
-    /// The plane's reference bars, for the on-glass overlay — the same bars the
-    /// arranger draws, so the two are identical (no re-interpret, no round-trip).
+    /// The plane's reference bars, for the on-glass overlay (the same bars the arranger draws).
     var onPreview: (([SeamBar]) -> Void)?
     var onSetMain: ((CGDirectDisplayID) -> Void)?
-    /// Change a display's resolution *and* re-commit the arrangement so the physical
-    /// alignment along the seam is preserved at the new point size (keyboard + menu).
+    /// Change a display's resolution *and* re-commit the arrangement so the alignment
+    /// along the seam is preserved at the new point size.
     var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)?
     var onCalibrate: ((CGDirectDisplayID) -> Void)?
     var onCalibrateVisual: ((CGDirectDisplayID) -> Void)?
@@ -71,10 +70,9 @@ final class ArrangementCanvas: NSView {
     func update(with displays: [DisplaySnapshot], colors: [CGDirectDisplayID: NSColor]) {
         self.displays = displays
         self.colorFor = colors
-        // Interpret point→physical only when the OS layout genuinely diverges from
-        // the plane — first load, hotplug, calibration, or an external rearrange.
-        // Our own committed changes round-trip to the same arrangement, so we keep
-        // the plane (no interpret, no round-trip drift).
+        // Re-interpret only when the OS layout diverges from the plane — first load,
+        // hotplug, calibration, or an external rearrange. Our own commits round-trip,
+        // so the plane is kept.
         if !planeMatches(displays) {
             plane = SchematicLayout.toPlane(displays)
         }
@@ -91,9 +89,8 @@ final class ArrangementCanvas: NSView {
         needsDisplay = true
     }
 
-    /// Whether the plane already represents `snapshot` (same displays + physical
-    /// sizes, and it converts back to the same point arrangement). If so we keep
-    /// the plane rather than re-interpreting.
+    /// Whether the plane already represents `snapshot`: same displays and physical
+    /// sizes, and it converts back to the same point arrangement.
     private func planeMatches(_ snapshot: [DisplaySnapshot]) -> Bool {
         guard !plane.isEmpty, Set(snapshot.map(\.id)) == Set(plane.keys) else { return false }
         for d in snapshot {
@@ -117,13 +114,11 @@ final class ArrangementCanvas: NSView {
         displays.map { $0.with(bounds: CGRect(origin: $0.bounds.origin, size: pointSize($0))) }
     }
 
-    /// The plane is the persistent source of truth — render straight from it.
     private func currentRects() -> [CGDirectDisplayID: CGRect] { plane }
     /// The reference bars for the current plane (shared with the on-glass overlay).
     func currentBars() -> [SeamBar] { SchematicLayout.seamBars(effDisplays(), rects: plane) }
 
-    /// Convert the plane to a point arrangement and commit. The plane stays put;
-    /// our commit round-trips, so the next `update` keeps it (see `planeMatches`).
+    /// Convert the plane to a point arrangement and commit.
     private func commitPlane() {
         guard !plane.isEmpty else { return }
         onCommit?(SchematicLayout.toPoints(rects: plane, displays: effDisplays()))
@@ -297,9 +292,8 @@ final class ArrangementCanvas: NSView {
         if zoomPending, !f.contains(.command) {
             zoomPending = false
             let mode = pendingMode
-            // The plane (physical) is unchanged by a resolution change; commit the
-            // point arrangement that reproduces it at the new size, keeping the
-            // alignment. The plane stays put (our commit round-trips).
+            // A resolution change leaves the physical plane untouched; commit the point
+            // arrangement that reproduces it at the new size, preserving alignment.
             let origins = SchematicLayout.toPoints(rects: plane, displays: effDisplays())
             pendingMode = nil; pendingSize.removeAll()
             if let mode { onSetResolution?(mode.id, mode.mode, origins) }

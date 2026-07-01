@@ -49,10 +49,9 @@ final class OverlayController {
         })
     }
 
-    /// Draw the given reference `bars` (computed by the arranger from its plane, so
-    /// the glass and the mini-map are identical). Everything else — colors, window
-    /// frames, the zoom scale factor — comes from the *real* current displays.
-    /// No-op while hidden.
+    /// Draw the given reference `bars` (computed by the arranger from its plane).
+    /// Colors, window frames, and the zoom scale factor come from the *real* current
+    /// displays. No-op while hidden.
     func update(bars: [SeamBar]) {
         guard isVisible else { return }
 
