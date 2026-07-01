@@ -1,14 +1,17 @@
 import Foundation
 
-/// One-time migration of persisted settings from the app's previous bundle id
-/// (`com.moxsf.screenmonger`, when the app was named "screenmonger") into the
-/// current standard domain. Renaming the bundle repoints `UserDefaults.standard`
-/// at a fresh domain, so without this the user's saved layout profiles and size
-/// calibrations would silently disappear.
+/// One-time migration of persisted settings from the app's previous incarnation
+/// (the "screenmonger" executable) into Silkscreen's domain. Renaming the app —
+/// and giving it a real bundle id — repoints `UserDefaults.standard` at a fresh
+/// domain, so without this the user's saved layout profiles and size calibrations
+/// would silently disappear.
 enum PrefsMigration {
 
-    /// The previous app's UserDefaults suite name.
-    private static let oldDomain = "com.moxsf.screenmonger"
+    /// The previous app's UserDefaults domain names, most-likely first. The old app
+    /// ran as a bare SwiftPM executable, so its `UserDefaults.standard` domain was the
+    /// *executable name* (`screenmonger`); we also try the intended bundle id in case a
+    /// later build wrote there.
+    private static let oldDomains = ["screenmonger", "com.moxsf.screenmonger"]
     /// Guard so we only copy once (a later legitimate delete shouldn't be undone).
     private static let doneKey = "migratedFromScreenmonger"
     /// The keys the old app persisted (see `LayoutStore` / `CalibrationStore`).
@@ -19,9 +22,12 @@ enum PrefsMigration {
         guard !defaults.bool(forKey: doneKey) else { return }
         defaults.set(true, forKey: doneKey)   // mark first, so a partial copy doesn't loop
 
-        guard let old = UserDefaults(suiteName: oldDomain) else { return }
-        for key in keys where defaults.object(forKey: key) == nil {
-            if let value = old.object(forKey: key) { defaults.set(value, forKey: key) }
+        for domain in oldDomains {
+            guard let old = defaults.persistentDomain(forName: domain), !old.isEmpty else { continue }
+            for key in keys where defaults.object(forKey: key) == nil {
+                if let value = old[key] { defaults.set(value, forKey: key) }
+            }
+            break   // first non-empty old domain wins
         }
     }
 }
