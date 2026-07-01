@@ -28,6 +28,7 @@ extension ArrangementCanvas {
         guard let d = display(at: p), plane[d.id] != nil else { return }
         draggedID = d.id
         selectedID = d.id
+        state.draggingDisplayID = d.id   // brighten the grabbed display's screen from click
         dragStartMouse = p
         dragTransform = transform(plane)      // freeze so the cursor mapping is stable
         dragStartPhys = plane[d.id]?.origin ?? .zero
@@ -54,7 +55,8 @@ extension ArrangementCanvas {
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer { draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil }
+        defer { draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil
+                state.draggingDisplayID = nil; state.notify() }
         // Dropped the menu-bar strip: whichever tile it's over becomes main.
         if let p = draggingMenuBar {
             needsDisplay = true

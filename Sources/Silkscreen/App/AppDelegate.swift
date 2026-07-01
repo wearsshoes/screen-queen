@@ -304,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isLiveDragging else { return }
         let displays = DisplayManager.snapshot()
         handleProfiles(displays)
-        arranger.refresh(displays: displays, colors: DisplayGraph.colors(displays))
+        arranger.refresh(displays: displays)
     }
 
     private var lastDisplaySet: Set<String> = []
@@ -503,7 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         baselineModes = Dictionary(displays.compactMap { d in
             CGDisplayCopyDisplayMode(d.id).map { (d.id, $0) }
         }, uniquingKeysWith: { a, _ in a })
-        arranger.show(displays: displays, colors: DisplayGraph.colors(displays))
+        arranger.show(displays: displays)
     }
 
     /// Restore positions, resolutions, and main to the baseline captured on open.
@@ -517,7 +517,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Force a re-interpret so the plane returns to the (possibly edited-equivalent)
         // baseline layout, and repaint.
         let displays = DisplayManager.snapshot()
-        arranger.refresh(displays: displays, colors: DisplayGraph.colors(displays), force: true)
+        arranger.refresh(displays: displays, force: true)
     }
 
     private func dismissArranger() {

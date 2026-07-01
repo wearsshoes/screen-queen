@@ -7,8 +7,19 @@ extension ArrangementCanvas {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        // Each per-screen window owns its own dim backdrop.
-        NSColor.black.withAlphaComponent(0.4).setFill()
+        // Each per-screen window owns its own dim backdrop. While another screen's tile
+        // is being dragged, *this* screen brightens if it's the one being moved — a
+        // real-world "you're dragging me" cue on the physical monitor: a brighter *and*
+        // more opaque wash than the usual translucent dim.
+        let beingDragged = centerID != nil && state.draggingDisplayID == centerID
+        if beingDragged {
+            // Wash the whole screen in the system accent (darkened a touch so tiles/bars
+            // still read on top) — the same accent used for the selected tile.
+            (NSColor.controlAccentColor.blended(withFraction: 0.35, of: .black) ?? .controlAccentColor)
+                .withAlphaComponent(0.85).setFill()
+        } else {
+            NSColor.black.withAlphaComponent(0.6).setFill()
+        }
         bounds.fill()
 
         let rects = currentRects()
@@ -17,12 +28,16 @@ extension ArrangementCanvas {
             return
         }
         let bars = currentBars()
+        let seamColor = seamColors(bars)   // color per seam; both its bars share it
         if showAlignGhosts { drawAlignGhosts(t: t) }   // under the tiles
+        // Selection: a soft drop shadow behind the selected tile, drawn before the tiles
+        // so the shadow reads under it (the tile lifts off the plane, macOS-style).
+        if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
         for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!)) }
-        drawReferenceBars(bars, t: t)
+        drawReferenceBars(bars, t: t, seamColor: seamColor)
         let markers = activeMarkers(rects)
         for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
-        drawEdgeBars(bars)      // full-screen reference bars hugging this screen's real edges
+        drawEdgeBars(bars, seamColor: seamColor)   // full-screen reference bars hugging this screen's real edges
         drawScreenMarkers(activeMarkers(rects))   // alignment notches/arrows at this screen's real edges
         drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution")
         if let p = draggingMenuBar {
@@ -36,11 +51,13 @@ extension ArrangementCanvas {
         }
     }
 
-    /// Reference bars at each seam, from the shared `SchematicLayout`: the reference
-    /// window shown on each side in the facing color, at its own physical size (which
-    /// differs by density — the size jump a window makes crossing the seam).
-    private func drawReferenceBars(_ bars: [SeamBar], t: Transform) {
-        let thickness: CGFloat = 5, gap: CGFloat = 5   // inset each bar off the seam line
+    /// Reference bars at each seam, in the seam's color: the reference window shown on
+    /// each side at its own physical size (which differs by density — the size jump a
+    /// window makes crossing the seam). Drawn D-shaped and flush to the seam line,
+    /// echoing the on-glass edge bars: each bar rounds on the side facing its own
+    /// display's center and sits flat against the seam.
+    private func drawReferenceBars(_ bars: [SeamBar], t: Transform, seamColor: [DisplayGraph.SeamKey: NSColor]) {
+        let thickness: CGFloat = 5, gap: CGFloat = 2   // hug the seam, small breathing gap
         // Ends clear the tile's rounded corners, but a fixed trim would swamp a short
         // bar and floor it to a constant stub — so cap the trim at 1/3 of the bar and
         // keep only a hairline floor, so length stays proportional to the true overlap.
@@ -49,34 +66,37 @@ extension ArrangementCanvas {
             return max(1.5, full - min(8, full / 3))
         }
         for bar in bars {
+            let color = seamColor[DisplayGraph.SeamKey(bar.aID, bar.bID)] ?? .systemGray
             let lenA = barLen(bar.physLenInchesA)
             let lenB = barLen(bar.physLenInchesB)
             if bar.isVertical {
                 let cA = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongA))
                 let cB = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongB))
-                drawBar(NSRect(x: cA.x - thickness - gap, y: cA.y - lenA / 2, width: thickness, height: lenA))
-                drawBar(NSRect(x: cB.x + gap, y: cB.y - lenB / 2, width: thickness, height: lenB))
+                // a = left display: bar's right edge at the seam, rounds toward a's center (left).
+                drawBar(NSRect(x: cA.x - gap - thickness, y: cA.y - lenA / 2, width: thickness, height: lenA), roundedOn: .minX, color: color)
+                drawBar(NSRect(x: cB.x + gap, y: cB.y - lenB / 2, width: thickness, height: lenB), roundedOn: .maxX, color: color)
             } else {
                 let cA = t.viewPoint(CGPoint(x: bar.physAlongA, y: bar.physLine))
                 let cB = t.viewPoint(CGPoint(x: bar.physAlongB, y: bar.physLine))
-                drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y - thickness - gap, width: lenA, height: thickness))
-                drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y + gap, width: lenB, height: thickness))
+                // a = top display: bar's bottom edge at the seam, rounds toward a's center (up).
+                drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y - gap - thickness, width: lenA, height: thickness), roundedOn: .minY, color: color)
+                drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y + gap, width: lenB, height: thickness), roundedOn: .maxY, color: color)
             }
         }
     }
 
-    /// Mini-map reference bars are drawn fully white (the on-glass edge bars keep
-    /// each display's color).
-    private func drawBar(_ rect: NSRect) {
-        NSColor.white.setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
+    /// A D-shaped mini-map bar: rounded on the `inward` edge (facing its display's
+    /// center), flat against the seam — matching the on-glass edge bars.
+    private func drawBar(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
+        color.setFill()
+        dPath(rect, roundedOn: inward).fill()
     }
 
     /// Full-screen reference bars hugging *this* screen's real edges (in its own
-    /// point coordinates), in the facing display's color — the on-glass depiction of
-    /// how big a window is as it crosses the seam. Drawn only on the window that sits
-    /// on the participating screen.
-    private func drawEdgeBars(_ bars: [SeamBar]) {
+    /// point coordinates), in the seam's color — the on-glass depiction of how big a
+    /// window is as it crosses the seam. Drawn only on the window that sits on the
+    /// participating screen; the matching bar on the other screen shares the color.
+    private func drawEdgeBars(_ bars: [SeamBar], seamColor: [DisplayGraph.SeamKey: NSColor]) {
         guard let me = centerID else { return }
         // Constant *physical* thickness on every screen: these bars live in this screen's
         // point space, so a fixed point thickness would look thinner on a denser panel.
@@ -86,7 +106,7 @@ extension ArrangementCanvas {
         let thickness: CGFloat = ppi.map { thicknessInches * CGFloat($0) } ?? 9
         for bar in bars where bar.aID == me || bar.bID == me {
             let weAreA = (bar.aID == me)
-            let facing = colorFor[weAreA ? bar.bID : bar.aID] ?? .systemGray
+            let facing = seamColor[DisplayGraph.SeamKey(bar.aID, bar.bID)] ?? .systemGray
             let along = weAreA ? bar.localAlongA : bar.localAlongB
             // Small end margin, but capped so a short crossing region shrinks
             // proportionally instead of vanishing into the fixed margin.
@@ -134,18 +154,36 @@ extension ArrangementCanvas {
         return p
     }
 
+    /// A soft drop shadow behind the selected tile, lifting it off the plane. Drawn
+    /// before the tile so the tile covers the fill and only the offset blur shows.
+    private func drawSelectedShadow(_ tileRect: NSRect) {
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.45)
+        shadow.shadowBlurRadius = 8
+        shadow.shadowOffset = NSSize(width: 0, height: 3)   // flipped view: +y casts the shadow downward
+        shadow.set()
+        let path = NSBezierPath(roundedRect: tileRect.insetBy(dx: 1.5, dy: 1.5),
+                                xRadius: tileCornerRadius, yRadius: tileCornerRadius)
+        NSColor.black.setFill()
+        path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
     private func drawTile(for display: DisplaySnapshot, in rect: NSRect) {
-        let color = colorFor[display.id] ?? .systemGray
+        // Monitors are neutral now — color lives on the seams (the bars), not the tiles.
+        // A light gray reads as a "screen" against the darker backdrop; the selected tile
+        // takes a light wash of the *system accent* and lifts via `drawSelectedShadow`.
         let selected = display.id == selectedID
+        let color = selected
+            ? NSColor.controlAccentColor.blended(withFraction: 0.78, of: .white) ?? .white
+            : NSColor(white: 0.72, alpha: 0.85)
         let inset = rect.insetBy(dx: 1.5, dy: 1.5)
         let path = NSBezierPath(roundedRect: inset, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
-        color.withAlphaComponent(selected ? 0.95 : 0.8).setFill(); path.fill()
-        // The selected tile is outlined white so it's clear which display a zoom /
-        // resolution change will affect.
-        (selected ? NSColor.white : color).setStroke()   // selected tile: white outline
-        path.lineWidth = selected ? 3 : 1.5; path.stroke()
+        color.setFill(); path.fill()
+        color.setStroke(); path.lineWidth = 1.5; path.stroke()
         drawBoxing(for: display, in: inset, color: color)
-        drawLabel(for: display, in: inset)
+        drawLabel(for: display, in: inset, selected: selected)
         drawNickname(display, in: inset)
         // The main display carries a menu-bar strip (drag it to another tile to move main).
         if display.isMain, draggingMenuBar == nil { drawMenuBar(in: menuBarRect(inTile: inset)) }
@@ -232,7 +270,7 @@ extension ArrangementCanvas {
         NSColor.white.withAlphaComponent(0.6).setFill(); clip.fill()
     }
 
-    private func drawLabel(for display: DisplaySnapshot, in rect: NSRect) {
+    private func drawLabel(for display: DisplaySnapshot, in rect: NSRect, selected: Bool) {
         let sz = pointSize(display)
         let pending = pendingMode?.id == display.id ? pendingMode?.mode : nil
         let pixelW = pending?.pixelWidth ?? Int(display.pixelSize.width)
@@ -249,20 +287,26 @@ extension ArrangementCanvas {
             return italic ? NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask) : base
         }
 
+        // On the selected (accent-tinted) tile, text is a deep saturated accent so it
+        // stays legible against the blue-white and reads as "active" — not white-on-white.
+        let accent = NSColor.controlAccentColor
+        let primary = selected ? (accent.blended(withFraction: 0.55, of: .black) ?? accent) : .labelColor
+        let secondary = selected ? (accent.blended(withFraction: 0.30, of: .black) ?? accent) : .secondaryLabelColor
+
         var lines: [(String, NSFont, NSColor)] = []
-        lines.append((display.name, f(16, bold: true), .labelColor))
+        lines.append((display.name, f(16, bold: true), primary))
 
         // Resolution "W×H" (points) with HiDPI tagged on; italic while a zoom mode is
         // uncommitted.
         let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
-        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13, italic: pending != nil), .labelColor))
+        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13, italic: pending != nil), primary))
 
         // Diagonal inches then effective PPI.
         let diag = display.diagonalInches > 0 ? String(format: "%.0f″ · ", display.diagonalInches) : ""
         if let effPPI {
-            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), .secondaryLabelColor))
+            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), secondary))
         } else {
-            lines.append((diag + "calibrate?", f(13), .secondaryLabelColor))
+            lines.append((diag + "calibrate?", f(13), secondary))
         }
 
         // Center the block vertically and each line horizontally in the tile.

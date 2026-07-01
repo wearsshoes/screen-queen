@@ -36,7 +36,8 @@ final class ArrangementCanvas: NSView {
         resetButton.target = self; resetButton.action = #selector(resetTapped)
         undoButton.keyEquivalent = "z"; undoButton.keyEquivalentModifierMask = .command
         undoButton.target = self; undoButton.action = #selector(undoTapped)
-        doneButton.target = self; doneButton.action = #selector(doneTapped)  // Enter/⌘Enter via keyDown
+        doneButton.target = self; doneButton.action = #selector(doneTapped)
+        doneButton.keyEquivalent = "\r"   // primary action → renders blue (default button)
         for b in [resetButton, undoButton, doneButton] { b.bezelStyle = .rounded }
 
         let stack = NSStackView(views: [resetButton, undoButton, doneButton])
@@ -89,7 +90,6 @@ final class ArrangementCanvas: NSView {
 
     // Forwarding accessors so this view's methods read/write the shared state.
     var displays: [DisplaySnapshot] { get { state.displays } set { state.displays = newValue } }
-    var colorFor: [CGDirectDisplayID: NSColor] { state.colorFor }
     var selectedID: CGDirectDisplayID? { get { state.selectedID } set { state.selectedID = newValue } }
     var plane: [CGDirectDisplayID: CGRect] { get { state.plane } set { state.plane = newValue } }
     var pendingSize: [CGDirectDisplayID: CGSize] { get { state.pendingSize } set { state.pendingSize = newValue } }
@@ -154,6 +154,7 @@ final class ArrangementCanvas: NSView {
     func sizedDisplays() -> [DisplaySnapshot] { state.sizedDisplays() }
     func currentRects() -> [CGDirectDisplayID: CGRect] { plane }
     func currentBars() -> [SeamBar] { state.currentBars() }
+    func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] { state.seamColors(bars) }
 
     /// Commit the plane, then broadcast so every canvas redraws.
     func commitPlane() { state.commit() }

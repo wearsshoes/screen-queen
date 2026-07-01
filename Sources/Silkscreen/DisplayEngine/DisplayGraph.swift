@@ -1,8 +1,9 @@
 import AppKit
 import CoreGraphics
 
-/// Per-display palette assignment. Seam detection now lives in `SchematicLayout`
-/// (which works in physical space); this just hands each display a stable color.
+/// Per-*seam* palette assignment. Color belongs to a seam (a shared edge between two
+/// displays), not to a monitor: both bars for a seam — the on-glass edge bars on each
+/// participating screen and the mini-map reference bars — render in the seam's color.
 enum DisplayGraph {
 
     static let palette: [NSColor] = [
@@ -10,15 +11,30 @@ enum DisplayGraph {
         .systemPurple, .systemTeal, .systemYellow, .systemRed
     ]
 
-    /// Assign each display a distinct palette color, keyed to a stable id order.
-    /// Distinct-by-index (rather than minimal graph coloring) keeps colors stable
-    /// while dragging and guarantees neighbors always differ for any realistic
-    /// monitor count.
-    static func colors(_ displays: [DisplaySnapshot]) -> [CGDirectDisplayID: NSColor] {
-        var assigned: [CGDirectDisplayID: NSColor] = [:]
-        for (i, d) in displays.sorted(by: { $0.id < $1.id }).enumerated() {
-            assigned[d.id] = palette[i % palette.count]
+    /// A seam's stable identity: the unordered pair of display ids it joins.
+    struct SeamKey: Hashable {
+        let a: CGDirectDisplayID, b: CGDirectDisplayID
+        init(_ x: CGDirectDisplayID, _ y: CGDirectDisplayID) { a = min(x, y); b = max(x, y) }
+    }
+
+    /// Greedily edge-color the seams so two seams meeting at the same monitor never
+    /// share a color (a proper edge-coloring). Seams are processed in a stable order
+    /// (by their id pair) so colors don't churn while dragging.
+    static func seamColors(_ seams: [(CGDirectDisplayID, CGDirectDisplayID)]) -> [SeamKey: NSColor] {
+        let keys = Array(Set(seams.map { SeamKey($0.0, $0.1) })).sorted {
+            $0.a != $1.a ? $0.a < $1.a : $0.b < $1.b
         }
-        return assigned
+        var colorIndexOf: [SeamKey: Int] = [:]
+        // The color indices already used by seams incident to a given monitor.
+        var usedAt: [CGDirectDisplayID: Set<Int>] = [:]
+        for key in keys {
+            let taken = usedAt[key.a, default: []].union(usedAt[key.b, default: []])
+            var idx = 0
+            while taken.contains(idx) { idx += 1 }
+            colorIndexOf[key] = idx
+            usedAt[key.a, default: []].insert(idx)
+            usedAt[key.b, default: []].insert(idx)
+        }
+        return colorIndexOf.mapValues { palette[$0 % palette.count] }
     }
 }

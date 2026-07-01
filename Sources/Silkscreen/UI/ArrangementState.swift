@@ -23,11 +23,14 @@ final class ArrangementState {
     var changed: (() -> Void)?
 
     var displays: [DisplaySnapshot] = []
-    var colorFor: [CGDirectDisplayID: NSColor] = [:]
     var selectedID: CGDirectDisplayID?
 
     /// The physical plane (inches) — the source of truth while manipulating.
     var plane: [CGDirectDisplayID: CGRect] = [:]
+
+    /// The display whose tile is being dragged right now (shared across canvases so the
+    /// dragged display's own screen can brighten its backdrop). nil when not dragging.
+    var draggingDisplayID: CGDirectDisplayID?
 
     /// Resolution preview (pending until ⌘ released).
     var pendingSize: [CGDirectDisplayID: CGSize] = [:]
@@ -76,9 +79,8 @@ final class ArrangementState {
 
     // MARK: - Interpret / commit
 
-    func update(with displays: [DisplaySnapshot], colors: [CGDirectDisplayID: NSColor], force: Bool = false) {
+    func update(with displays: [DisplaySnapshot], force: Bool = false) {
         self.displays = displays
-        self.colorFor = colors
         if force || !planeMatches(displays) { plane = SchematicLayout.toPlane(displays) }
         pendingSize.removeAll()
         pendingMode = nil
@@ -123,6 +125,13 @@ final class ArrangementState {
     }
 
     func currentBars() -> [SeamBar] { SchematicLayout.seamBars(sizedDisplays(), rects: plane) }
+
+    /// Colors keyed by seam (unordered display pair), derived from the current bars so
+    /// both bars of a seam — edge and mini-map — share one color, recomputed as the
+    /// layout changes during a drag.
+    func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] {
+        DisplayGraph.seamColors(bars.map { ($0.aID, $0.bID) })
+    }
 
     func commit() {
         guard !plane.isEmpty else { return }

@@ -18,8 +18,8 @@ final class ArrangementWindows {
 
     /// Show an arranger on every screen (rebuilding to match the current screen set),
     /// and refresh the shared plane from the OS.
-    func show(displays: [DisplaySnapshot], colors: [CGDirectDisplayID: NSColor]) {
-        state.update(with: displays, colors: colors)
+    func show(displays: [DisplaySnapshot]) {
+        state.update(with: displays)
         rebuild()
         canvases.forEach { $0.refresh() }
         NSApp.activate(ignoringOtherApps: true)
@@ -34,9 +34,9 @@ final class ArrangementWindows {
     /// Re-interpret the OS layout into the shared plane and repaint (external change).
     /// `force` re-reads the plane even when it already matches (e.g. after Reset, which
     /// must discard any equivalent-but-edited plane).
-    func refresh(displays: [DisplaySnapshot], colors: [CGDirectDisplayID: NSColor], force: Bool = false) {
+    func refresh(displays: [DisplaySnapshot], force: Bool = false) {
         guard isVisible else { return }
-        state.update(with: displays, colors: colors, force: force)
+        state.update(with: displays, force: force)
         rebuild()   // screens may have changed
         canvases.forEach { $0.refresh() }
     }
