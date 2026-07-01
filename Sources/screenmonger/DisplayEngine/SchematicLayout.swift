@@ -1,21 +1,22 @@
 import CoreGraphics
 
-/// A reference bar at one seam: a window crossing it, keeping its **point** size
-/// (`windowPoints`) across displays so its *physical* size changes by density
-/// (`physLenInchesA/B`) — the size jump the arranger reveals. See `barGeometry` for
-/// how the length and centers are placed.
+/// A reference bar at one seam: the stretch of the shared edge whose cursor-crossing
+/// leads to the other display — i.e. the two screens' **point** overlap (what macOS
+/// actually enforces), *not* their physical overlap, which differs by density. The
+/// region is one point interval (`windowPoints`, same on both screens); it's physically
+/// longer on the coarser screen (`physLenInchesA/B`).
 struct SeamBar {
     let aID: CGDirectDisplayID   // left (vertical seam) / top (horizontal seam)
     let bID: CGDirectDisplayID   // right / bottom
     let isVertical: Bool
     let physLine: CGFloat        // physical seam coordinate
-    let physAlongA: CGFloat      // bar center along the seam on a (physical)
+    let physAlongA: CGFloat      // region center along the seam on a (physical)
     let physAlongB: CGFloat      // ditto on b
-    let localAlongA: CGFloat     // bar center on a, as a point offset from a's leading edge
+    let localAlongA: CGFloat     // region center on a, as a point offset from a's leading edge
     let localAlongB: CGFloat     // ditto on b
-    let windowPoints: CGFloat    // the window's point size (same on both screens)
-    let physLenInchesA: CGFloat  // that window's physical length on a
-    let physLenInchesB: CGFloat  // ditto on b (differs from a by density)
+    let windowPoints: CGFloat    // the crossing region's point length (same on both screens)
+    let physLenInchesA: CGFloat  // that region's physical length on a
+    let physLenInchesB: CGFloat  // ditto on b (longer on the coarser screen)
 }
 
 /// Translation between the macOS *point* arrangement and the *physical* schematic
@@ -257,16 +258,30 @@ enum SchematicLayout {
 
     static func seamBars(_ displays: [DisplaySnapshot],
                          rects: [CGDirectDisplayID: CGRect]) -> [SeamBar] {
+        // A bar answers "if my cursor crosses here, what display do I land on?", so
+        // adjacency is decided in *point* space (where the cursor lives), not on the
+        // physical plane — two screens can be point-adjacent while their physical rects,
+        // scaled by differing density, only corner-touch (or vice versa). Reconstruct
+        // the point arrangement and find seams there.
+        let origins = toPoints(rects: rects, displays: displays)
+        func pointRect(_ d: DisplaySnapshot) -> CGRect {
+            CGRect(origin: origins[d.id] ?? d.bounds.origin, size: d.bounds.size)
+        }
         var out: [SeamBar] = []
         for i in 0..<displays.count {
             for j in (i + 1)..<displays.count {
-                guard let ri = rects[displays[i].id], let rj = rects[displays[j].id],
-                      let s = seam(ri, rj) else { continue }
+                let pi = pointRect(displays[i]), pj = pointRect(displays[j])
+                guard let s = seam(pi, pj) else { continue }
                 // `seam` orders a = left/top; match i/j to that side.
-                let iIsA = s.vertical ? abs(ri.maxX - s.line) < 1 : abs(ri.maxY - s.line) < 1
+                let iIsA = s.vertical ? abs(pi.maxX - s.line) < 1 : abs(pi.maxY - s.line) < 1
                 let aI = iIsA ? i : j, bI = iIsA ? j : i
-                out.append(makeBar(displays, aI, bI, rects[displays[aI].id]!, rects[displays[bI].id]!,
-                                   vertical: s.vertical, line: s.line, lo: s.lo, hi: s.hi))
+                // The mini-map draws on the physical plane, so it still needs the seam's
+                // *physical* coordinate — the shared edge of the two physical rects.
+                let ra = rects[displays[aI].id]!, rb = rects[displays[bI].id]!
+                let physLine = s.vertical ? (ra.maxX + rb.minX) / 2 : (ra.maxY + rb.minY) / 2
+                out.append(makeBar(displays, aI, bI, ra, rb,
+                                   originA: origins[displays[aI].id], originB: origins[displays[bI].id],
+                                   vertical: s.vertical, line: physLine))
             }
         }
         return out
@@ -274,82 +289,53 @@ enum SchematicLayout {
 
     private static func makeBar(_ displays: [DisplaySnapshot],
                                 _ aI: Int, _ bI: Int, _ ra: CGRect, _ rb: CGRect,
-                                vertical: Bool, line: CGFloat, lo: CGFloat, hi: CGFloat) -> SeamBar {
+                                originA: CGPoint?, originB: CGPoint?,
+                                vertical: Bool, line: CGFloat) -> SeamBar {
         let a = displays[aI], b = displays[bI]
-        // Points-per-inch along the seam axis (width for a horizontal seam).
-        let aPPI = vertical ? a.bounds.height / max(ra.height, 0.01) : a.bounds.width / max(ra.width, 0.01)
-        let bPPI = vertical ? b.bounds.height / max(rb.height, 0.01) : b.bounds.width / max(rb.width, 0.01)
+        // Inches-per-point along the seam axis (width for a horizontal seam), for the
+        // physical length of the crossing region on each screen.
+        let aIPP = vertical ? ra.height / max(a.bounds.height, 0.01) : ra.width / max(a.bounds.width, 0.01)
+        let bIPP = vertical ? rb.height / max(b.bounds.height, 0.01) : rb.width / max(b.bounds.width, 0.01)
 
-        // The smaller screen owns the window; the bigger renders the same window at
-        // its own density. Solve the geometry in the smaller screen's frame.
-        let aSmaller = (vertical ? ra.height : ra.width) <= (vertical ? rb.height : rb.width)
-        let sr = aSmaller ? ra : rb, big = aSmaller ? rb : ra
-        let sPPI = aSmaller ? aPPI : bPPI, bigPPI = aSmaller ? bPPI : aPPI
-        func span(_ r: CGRect) -> (lo: CGFloat, hi: CGFloat) {
-            vertical ? (r.minY, r.maxY) : (r.minX, r.maxX)
+        // Each screen's point interval along the seam, from the reconstructed point
+        // arrangement (falling back to its own bounds). These live in a common point
+        // frame, so their intersection is the region a cursor crosses between them.
+        func pointSpan(_ o: CGPoint?, _ d: DisplaySnapshot) -> (lo: CGFloat, hi: CGFloat) {
+            let origin = o ?? d.bounds.origin
+            return vertical ? (origin.y, origin.y + d.bounds.height)
+                            : (origin.x, origin.x + d.bounds.width)
         }
-        let g = barGeometry(small: span(sr), big: span(big), sPPI: sPPI, bigPPI: bigPPI)
+        let pa = pointSpan(originA, a), pb = pointSpan(originB, b)
 
-        // The same window renders at windowPoints/bigPPI inches on the bigger screen;
-        // cap so that can't exceed its physical edge. As a zoom preview raises the
-        // smaller screen's PPI (growing its point edge), the *facing* (bigger) bar
-        // shrinks instead of overflowing.
-        let bigPhysEdge = span(big).hi - span(big).lo
-        let physLen = min(g.length, bigPhysEdge * bigPPI / max(sPPI, 0.01))
-        let windowPoints = physLen * sPPI
-        let alongA = aSmaller ? g.smallCenter : g.bigCenter
-        let alongB = aSmaller ? g.bigCenter : g.smallCenter
+        // The crossing region: the shared point interval, identical on both screens.
+        let lo = max(pa.lo, pb.lo), hi = min(pa.hi, pb.hi)
+        let windowPoints = max(0, hi - lo)
+        let center = (lo + hi) / 2
+        // Its center as a point offset from each screen's own leading edge.
+        let localA = center - pa.lo, localB = center - pb.lo
+        let physA = physFromLocal(localA, physRect: ra, pointSize: a.bounds.size, vertical: vertical)
+        let physB = physFromLocal(localB, physRect: rb, pointSize: b.bounds.size, vertical: vertical)
 
         return SeamBar(
             aID: a.id, bID: b.id, isVertical: vertical,
-            physLine: line, physAlongA: alongA, physAlongB: alongB,
-            localAlongA: localAlong(alongA, physRect: ra, pointSize: a.bounds.size, vertical: vertical),
-            localAlongB: localAlong(alongB, physRect: rb, pointSize: b.bounds.size, vertical: vertical),
+            physLine: line, physAlongA: physA, physAlongB: physB,
+            localAlongA: localA, localAlongB: localB,
             windowPoints: windowPoints,
-            physLenInchesA: windowPoints / aPPI, physLenInchesB: windowPoints / bPPI
+            // The same crossing region is physically longer on the coarser screen.
+            physLenInchesA: windowPoints * aIPP, physLenInchesB: windowPoints * bIPP
         )
     }
 
-    /// The 1-D window model along the seam axis, in the smaller screen's frame:
-    /// returns the smaller bar's length and both bars' centers (physical). While the
-    /// smaller screen is within the neighbor the window is a constant full-edge size;
-    /// past that the screens overhang and it shrinks to the overlap.
-    static func barGeometry(small s: (lo: CGFloat, hi: CGFloat),
-                            big b: (lo: CGFloat, hi: CGFloat),
-                            sPPI: CGFloat, bigPPI: CGFloat)
-        -> (length: CGFloat, smallCenter: CGFloat, bigCenter: CGFloat) {
-        let sEdge = s.hi - s.lo, bEdge = b.hi - b.lo
-        let bigLen = sEdge * sPPI / max(bigPPI, 0.01)   // the full window on the bigger screen
-
-        if s.lo >= b.lo && s.hi <= b.hi {
-            let slack = bEdge - sEdge                    // travel before the smaller screen overhangs
-            let f = slack > 0 ? (s.lo - b.lo) / slack : 0.5
-            // Both bars at fraction f of their travel, so the bigger reaches its edge
-            // exactly at edge-alignment (f = 0 or 1).
-            return (sEdge, s.lo + sEdge / 2, b.lo + bigLen / 2 + f * (bEdge - bigLen))
-        } else {
-            let ov0 = max(s.lo, b.lo), ov1 = min(s.hi, b.hi)
-            let len = max(0, ov1 - ov0)
-            let overhangHigh = s.hi > b.hi               // smaller screen pokes past the high edge
-            let pin = overhangHigh ? ov1 : ov0           // the still-shared edge
-            let bigHalf = len * sPPI / max(bigPPI, 0.01) / 2
-            return overhangHigh ? (len, pin - len / 2, pin - bigHalf)
-                                : (len, pin + len / 2, pin + bigHalf)
-        }
-    }
-
-    /// The bar center as a point offset from the display's own leading edge (top for
-    /// a vertical seam, left for a horizontal one). Screen-local, so it's independent
-    /// of the global point origin — the two screens' bars counter-slide correctly
-    /// regardless of any re-rooting.
-    private static func localAlong(_ phys: CGFloat, physRect: CGRect,
-                                   pointSize: CGSize, vertical: Bool) -> CGFloat {
+    /// A physical along-coordinate from a point offset off the screen's leading edge.
+    /// Lets the mini-map place a point-derived center on the physical plane.
+    private static func physFromLocal(_ local: CGFloat, physRect: CGRect,
+                                      pointSize: CGSize, vertical: Bool) -> CGFloat {
         if vertical {
-            guard physRect.height > 0 else { return pointSize.height / 2 }
-            return (phys - physRect.minY) / physRect.height * pointSize.height
+            guard pointSize.height > 0 else { return physRect.midY }
+            return physRect.minY + local / pointSize.height * physRect.height
         } else {
-            guard physRect.width > 0 else { return pointSize.width / 2 }
-            return (phys - physRect.minX) / physRect.width * pointSize.width
+            guard pointSize.width > 0 else { return physRect.midX }
+            return physRect.minX + local / pointSize.width * physRect.width
         }
     }
 }

@@ -93,7 +93,9 @@ extension ArrangementCanvas {
         }
         guard let o = neighbor else { return free }
 
-        // 2) Magnet the slide to a physical anchor (within a few view px).
+        // 2) Magnet the slide to a physical anchor of the docked-to neighbor (within a
+        //    few view px). The primary dock fixes the perpendicular axis; here we snap
+        //    the *along* axis.
         let threshold = 5 / max(scale, 0.0001) // inches
         if verticalSeam {
             var bestD = threshold
@@ -104,6 +106,62 @@ extension ArrangementCanvas {
             var bestD = threshold
             for s in SchematicLayout.physSnapsH(childWidth: dP.width, parent: o.rect) where abs(s.along - best.x) < bestD {
                 bestD = abs(s.along - best.x); best.x = s.along; activeH = (s.selfAnchor, s.otherAnchor, o.id)
+            }
+        }
+
+        // 3) Corner detent: with the tile docked to the primary neighbor, look for a
+        //    *second* neighbor it can also seat flush against along the free axis, and
+        //    prefer that (so dragging into an L-corner snaps into the corner). Only a
+        //    second neighbor that would actually overlap the tile's docked span counts.
+        best = cornerSnap(best, size: dP, along: verticalSeam, primary: o.id, threshold: threshold, others: others)
+        return best
+    }
+
+    /// If, once docked to the primary neighbor, the tile can also sit flush against a
+    /// second neighbor along the free axis (within `threshold`), snap it there so it
+    /// seats into the corner — setting the perpendicular active marker too. `along`
+    /// vertical ⇒ the free axis is y (snap top/bottom to a second neighbor's edge).
+    private func cornerSnap(_ pos: CGPoint, size dP: CGSize, along verticalSeam: Bool,
+                            primary: CGDirectDisplayID, threshold: CGFloat,
+                            others: [CGDirectDisplayID: CGRect]) -> CGPoint {
+        var best = pos, bestD = threshold, snapped = false
+        var snappedID: CGDirectDisplayID?, snapEdgeIsMin = false
+        // A candidate along-position is only valid if seating there doesn't overlap any
+        // other display (it can slide into a third tile).
+        func clear(_ origin: CGPoint) -> Bool {
+            let rect = CGRect(origin: origin, size: dP).insetBy(dx: 0.1, dy: 0.1)
+            return !others.contains { $0.value.intersects(rect) }
+        }
+        for (oid, oR) in others where oid != primary {
+            if verticalSeam {
+                // Free axis is y; a second neighbor whose x abuts the tile can seat its
+                // top or bottom flush. Require x-overlap so it's genuinely a corner.
+                guard min(pos.x + dP.width, oR.maxX) - max(pos.x, oR.minX) > 0.05 else { continue }
+                for (edge, isMin) in [(oR.minY - dP.height, false), (oR.maxY, true)] {
+                    let d = abs(edge - pos.y)
+                    if d < bestD, clear(CGPoint(x: pos.x, y: edge)) {
+                        bestD = d; best.y = edge; snapped = true; snappedID = oid; snapEdgeIsMin = isMin
+                    }
+                }
+            } else {
+                guard min(pos.y + dP.height, oR.maxY) - max(pos.y, oR.minY) > 0.05 else { continue }
+                for (edge, isMin) in [(oR.minX - dP.width, false), (oR.maxX, true)] {
+                    let d = abs(edge - pos.x)
+                    if d < bestD, clear(CGPoint(x: edge, y: pos.y)) {
+                        bestD = d; best.x = edge; snapped = true; snappedID = oid; snapEdgeIsMin = isMin
+                    }
+                }
+            }
+        }
+        // Reflect the second seam in the perpendicular marker (self meets the second
+        // neighbor edge-to-edge: our leading edge on its trailing edge, or vice versa).
+        if snapped, let sid = snappedID {
+            // snapEdgeIsMin ⇒ tile seated on the neighbor's max edge (tile below/right):
+            // tile's leading edge meets the neighbor's trailing edge, and vice versa.
+            if verticalSeam {
+                activeV = snapEdgeIsMin ? (.top, .bottom, sid) : (.bottom, .top, sid)
+            } else {
+                activeH = snapEdgeIsMin ? (.left, .right, sid) : (.right, .left, sid)
             }
         }
         return best

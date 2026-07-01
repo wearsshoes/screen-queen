@@ -41,10 +41,16 @@ extension ArrangementCanvas {
     /// differs by density — the size jump a window makes crossing the seam).
     private func drawReferenceBars(_ bars: [SeamBar], t: Transform) {
         let thickness: CGFloat = 5, gap: CGFloat = 5   // inset each bar off the seam line
-        let trim: CGFloat = 8                          // shorten so ends clear the tile's rounded corners
+        // Ends clear the tile's rounded corners, but a fixed trim would swamp a short
+        // bar and floor it to a constant stub — so cap the trim at 1/3 of the bar and
+        // keep only a hairline floor, so length stays proportional to the true overlap.
+        func barLen(_ inches: CGFloat) -> CGFloat {
+            let full = inches * t.scale
+            return max(1.5, full - min(8, full / 3))
+        }
         for bar in bars {
-            let lenA = max(2, bar.physLenInchesA * t.scale - trim)
-            let lenB = max(2, bar.physLenInchesB * t.scale - trim)
+            let lenA = barLen(bar.physLenInchesA)
+            let lenB = barLen(bar.physLenInchesB)
             if bar.isVertical {
                 let cA = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongA))
                 let cB = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongB))
@@ -72,14 +78,16 @@ extension ArrangementCanvas {
     /// on the participating screen.
     private func drawEdgeBars(_ bars: [SeamBar]) {
         guard let me = centerID else { return }
-        let thickness: CGFloat = 9, endMargin: CGFloat = 6
+        let thickness: CGFloat = 9
         // On a notched display, keep top-edge bars below the menu-bar/notch area.
         let notch = window?.screen?.safeAreaInsets.top ?? 0
         for bar in bars where bar.aID == me || bar.bID == me {
             let weAreA = (bar.aID == me)
             let facing = colorFor[weAreA ? bar.bID : bar.aID] ?? .systemGray
             let along = weAreA ? bar.localAlongA : bar.localAlongB
-            let len = max(0, bar.windowPoints - 2 * endMargin)   // small margin at each end
+            // Small end margin, but capped so a short crossing region shrinks
+            // proportionally instead of vanishing into the fixed margin.
+            let len = max(1.5, bar.windowPoints - min(12, bar.windowPoints / 3))
             let rect: NSRect
             // `inward` is the side facing the screen center (rounded); the opposite,
             // outward side sits flat against the screen edge.
@@ -143,9 +151,14 @@ extension ArrangementCanvas {
     /// The display's nickname (fingerprint-derived), faint at the tile bottom.
     private func drawNickname(_ display: DisplaySnapshot, in rect: NSRect) {
         let text = display.nickname
+        guard !text.isEmpty else { return }
+        // Resolve the dynamic catalog color to a concrete RGBA before applying alpha: a
+        // catalog color that CoreText can't convert lands as a nil attribute value and
+        // crashes layout ("nil object from objects[0]").
+        let label = (NSColor.labelColor.usingColorSpace(.sRGB) ?? .white).withAlphaComponent(0.35)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .regular),
-            .foregroundColor: NSColor.labelColor.withAlphaComponent(0.35),
+            .foregroundColor: label,
         ]
         let s = (text as NSString).size(withAttributes: attrs)
         guard s.width <= rect.width - 8 else { return }
