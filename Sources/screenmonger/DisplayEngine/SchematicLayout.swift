@@ -172,26 +172,18 @@ struct SchematicLayout {
         return seamPhysical(vertical ? child.bounds.minY : child.bounds.minX, anchors)
     }
 
-    /// Point-along → physical-along along a seam, via the seam anchors.
+    /// Point-along → physical-along along a seam, via the four seam anchors (both
+    /// edge-alignments always kept, so edges render flush even when a screen is
+    /// taller-and-narrower than its neighbor and the map is non-monotonic — that's
+    /// fine here: interpret and commit only evaluate it *at* anchors, where it's
+    /// exact, and the drag never touches it).
     static func seamPhysical(_ pointAlong: CGFloat, _ anchors: [(CGFloat, CGFloat)]) -> CGFloat {
-        piecewise(pointAlong, monotone(anchors))
+        piecewise(pointAlong, anchors)
     }
 
-    /// The inverse (physical-along → point-along) used by the drag.
+    /// The inverse (physical-along → point-along) used at commit.
     static func seamPoint(_ physAlong: CGFloat, _ anchors: [(CGFloat, CGFloat)]) -> CGFloat {
-        piecewise(physAlong, monotone(anchors).map { ($0.1, $0.0) })
-    }
-
-    /// Keep the map monotonic: if the two edge-align anchors invert in physical
-    /// (a denser screen taller in points but shorter in physical, etc.), drop them
-    /// and keep just the two corners → the blended map. Otherwise use all four
-    /// (edges render flush). A non-monotonic map would make the slide reverse and
-    /// the drag inverse ambiguous.
-    private static func monotone(_ anchors: [(CGFloat, CGFloat)]) -> [(CGFloat, CGFloat)] {
-        let a = anchors.sorted { $0.0 < $1.0 }
-        guard a.count == 4 else { return a }
-        let mono = a[0].1 <= a[1].1 && a[1].1 <= a[2].1 && a[2].1 <= a[3].1
-        return mono ? a : [a[0], a[3]]
+        piecewise(physAlong, anchors.map { ($0.1, $0.0) })
     }
 
     /// The four (point, physical) anchor pairs along the seam where the two metric
