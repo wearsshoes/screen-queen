@@ -8,6 +8,8 @@ final class OverlayController {
 
     private var windows: [CGDirectDisplayID: NSWindow] = [:]
     private(set) var isVisible = false
+    /// Dim every screen behind the bars (while the arranger overlay is open).
+    var dim = false
     private var fadeToken = 0
 
     func toggle(bars: [SeamBar]) {
@@ -77,7 +79,7 @@ final class OverlayController {
             if let view = window.contentView as? OverlayView {
                 view.frame = CGRect(origin: .zero, size: screen.frame.size)
                 view.configure(me: d, byID: byID, bars: bars, colors: colors,
-                               realWidths: realWidths)
+                               realWidths: realWidths, dim: dim)
             }
             window.orderFrontRegardless()
         }

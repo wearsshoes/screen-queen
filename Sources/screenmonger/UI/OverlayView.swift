@@ -1,5 +1,34 @@
 import AppKit
 
+/// A big (✕)-in-circle close button in a view's upper-right corner, shared by the
+/// arranger and each screen's glass so any screen can dismiss the overlay. Views are
+/// flipped (top-left origin), so "upper-right" is max-x, min-y.
+enum CloseButton {
+    static let radius: CGFloat = 26
+    static let margin: CGFloat = 28
+
+    static func frame(in bounds: NSRect) -> NSRect {
+        let c = CGPoint(x: bounds.maxX - margin - radius, y: margin + radius)
+        return NSRect(x: c.x - radius, y: c.y - radius, width: 2 * radius, height: 2 * radius)
+    }
+
+    static func hit(_ p: CGPoint, in bounds: NSRect) -> Bool {
+        let f = frame(in: bounds)
+        return hypot(p.x - f.midX, p.y - f.midY) <= radius
+    }
+
+    static func draw(in bounds: NSRect) {
+        let f = frame(in: bounds), c = CGPoint(x: f.midX, y: f.midY)
+        let circle = NSBezierPath(ovalIn: f)
+        NSColor.black.withAlphaComponent(0.55).setFill(); circle.fill()
+        NSColor.white.withAlphaComponent(0.9).setStroke(); circle.lineWidth = 2; circle.stroke()
+        let x = NSBezierPath(); let r = radius * 0.42
+        x.move(to: CGPoint(x: c.x - r, y: c.y - r)); x.line(to: CGPoint(x: c.x + r, y: c.y + r))
+        x.move(to: CGPoint(x: c.x - r, y: c.y + r)); x.line(to: CGPoint(x: c.x + r, y: c.y - r))
+        x.lineWidth = 3; x.lineCapStyle = .round; NSColor.white.setStroke(); x.stroke()
+    }
+}
+
 /// Draws, on one real display's glass, that display's colored outline plus a
 /// reference bar at each seam (in the facing display's color). Both screens show
 /// the same window at its fixed point size, so comparing the two bars' *physical*
@@ -13,6 +42,7 @@ final class OverlayView: NSView {
     private var bars: [SeamBar] = []
     private var colors: [CGDirectDisplayID: NSColor] = [:]
     private var realWidths: [CGDirectDisplayID: CGFloat] = [:]
+    private var dim = false
     private let barThickness: CGFloat = 22
 
     override var isFlipped: Bool { true }
@@ -21,18 +51,24 @@ final class OverlayView: NSView {
                    byID: [CGDirectDisplayID: DisplaySnapshot],
                    bars: [SeamBar],
                    colors: [CGDirectDisplayID: NSColor],
-                   realWidths: [CGDirectDisplayID: CGFloat]) {
+                   realWidths: [CGDirectDisplayID: CGFloat],
+                   dim: Bool) {
         self.me = me
         self.byID = byID
         self.bars = bars
         self.colors = colors
         self.realWidths = realWidths
+        self.dim = dim
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let me else { return }
         let selfColor = colors[me.id] ?? .systemGray
+
+        // Dim the whole screen behind the bars while the arranger is open (every
+        // screen, including the main — the arranger above is transparent).
+        if dim { NSColor.black.withAlphaComponent(0.4).setFill(); bounds.fill() }
 
         // Screen outline in this display's color.
         let outline = NSBezierPath(rect: bounds.insetBy(dx: 4, dy: 4))

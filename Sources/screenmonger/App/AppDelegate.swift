@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
     private var canvas: ArrangementCanvas!
     private let overlay = OverlayController()
+    private let closeButtons = CloseButtonController()
     private var overlayMenuItem: NSMenuItem!
     private let calibrationController = CalibrationController()
     private var revertButton: NSButton!
@@ -86,15 +87,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             revertButton.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
         ])
 
-        window = NSWindow(
+        // Windowless: a borderless, transparent overlay that fills the main screen.
+        window = KeyableBorderlessWindow(
             contentRect: frame,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: .borderless,
             backing: .buffered,
             defer: false
         )
-        window.title = "screenmonger — Arrangement"
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        // Above the glass overlay's dim (which is .floating) on the main screen.
+        window.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.contentView = container
-        window.center()
         window.isReleasedWhenClosed = false
 
         canvas.onCommit = { [weak self] origins in
@@ -118,6 +124,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         canvas.onResetCalibration = { [weak self] id in
             self?.resetCalibration(id)
         }
+        canvas.onDismiss = { [weak self] in self?.dismissArranger() }
+        closeButtons.onClose = { [weak self] in self?.dismissArranger() }
         calibrationController.onComplete = { [weak self] in self?.refresh() }
     }
 
@@ -333,7 +341,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Mid-drag, the canvas owns its working state; don't clobber it. The
         // overlay still updates so the reference bars track live.
         if !isLiveDragging { canvas.update(with: displays, colors: DisplayGraph.colors(displays)) }
+        // Keep the arranger on whichever screen is currently main (it may have changed).
+        if window.isVisible, let frame = mainScreenFrame() { window.setFrame(frame, display: true) }
         overlay.update(bars: canvas.currentBars())
+    }
+
+    /// The frame of whichever display is currently main.
+    private func mainScreenFrame() -> NSRect? {
+        let screen = NSScreen.screens.first(where: {
+            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == CGMainDisplayID()
+        }) ?? NSScreen.main
+        return screen?.frame
     }
 
     @objc func toggleOverlays(_ sender: NSMenuItem) {
@@ -348,8 +366,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showWindow() {
+        if let frame = mainScreenFrame() { window.setFrame(frame, display: true) }  // fill the current main
+        // Always show the reference bars, dimming every screen, while the arranger is
+        // open, with the close buttons as the topmost layer above the arranger.
+        overlay.dim = true
+        overlay.show(bars: canvas.currentBars())
+        closeButtons.show()
+        overlayMenuItem.state = .on
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(canvas)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func dismissArranger() {
+        window.orderOut(nil)
+        overlay.dim = false
+        overlay.hide()
+        closeButtons.hide()
+        overlayMenuItem.state = .off
     }
 }

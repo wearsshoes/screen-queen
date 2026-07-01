@@ -25,6 +25,8 @@ final class ArrangementCanvas: NSView {
     var onCalibrate: ((CGDirectDisplayID) -> Void)?
     var onCalibrateVisual: ((CGDirectDisplayID) -> Void)?
     var onResetCalibration: ((CGDirectDisplayID) -> Void)?
+    /// Dismiss the (windowless) arranger, e.g. on Escape.
+    var onDismiss: (() -> Void)?
 
     private var displays: [DisplaySnapshot] = []
     private var colorFor: [CGDirectDisplayID: NSColor] = [:]
@@ -152,10 +154,31 @@ final class ArrangementCanvas: NSView {
         guard let first = values.first else { return nil }
         let union = values.dropFirst().reduce(first) { $0.union($1) }
         guard union.width > 0, union.height > 0 else { return nil }
+
+        // Center the main display's tile at the view midpoint.
+        let mainRect = displays.first(where: { $0.isMain }).flatMap { rects[$0.id] } ?? union
+        let mainCenter = CGPoint(x: mainRect.midX, y: mainRect.midY)
+
         let availW = bounds.width - outerPadding * 2, availH = bounds.height - outerPadding * 2
-        let scale = min(availW / union.width, availH / union.height)
-        let offset = CGPoint(x: outerPadding + (availW - union.width * scale) / 2,
-                             y: outerPadding + (availH - union.height * scale) / 2)
+
+        // Target zoom: three of the physically-largest display fit across the view,
+        // matching axes — 3 widths across the view width, 3 heights down its height —
+        // so a landscape screen isn't over-shrunk by its (smaller) height.
+        let largestW = rects.values.map(\.width).max() ?? union.width
+        let largestH = rects.values.map(\.height).max() ?? union.height
+        let targetScale = min(availW / (3 * max(largestW, 0.0001)),
+                              availH / (3 * max(largestH, 0.0001)))
+
+        // But never let the layout overflow: cap so the union fits with padding.
+        // The main is centered, so each axis is limited by the union's farther side.
+        let reachX = max(mainCenter.x - union.minX, union.maxX - mainCenter.x)
+        let reachY = max(mainCenter.y - union.minY, union.maxY - mainCenter.y)
+        let fitScale = min(availW / 2 / max(reachX, 0.0001), availH / 2 / max(reachY, 0.0001))
+        let scale = min(targetScale, fitScale)
+
+        // Offset so mainCenter lands at the view midpoint.
+        let offset = CGPoint(x: bounds.midX - (mainCenter.x - union.minX) * scale,
+                             y: bounds.midY - (mainCenter.y - union.minY) * scale)
         return Transform(scale: scale, offset: offset, unionOrigin: union.origin)
     }
 
@@ -256,6 +279,8 @@ final class ArrangementCanvas: NSView {
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags
         let cmd = flags.contains(.command), shift = flags.contains(.shift)
+
+        if event.keyCode == 53 { onDismiss?(); return }   // Escape dismisses the overlay
 
         if cmd, let ch = event.charactersIgnoringModifiers, "+=-_0".contains(ch) {
             if !event.isARepeat { handleResolutionKey(ch) }
@@ -589,9 +614,8 @@ final class ArrangementCanvas: NSView {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
-        bounds.fill()
-
+        // Transparent: the glass overlay below owns the screen dimming; the arranger
+        // just draws the schematic.
         let rects = currentRects()
         guard let t = dragTransform ?? transform(rects) else {
             drawCenteredMessage("No displays detected")
@@ -601,7 +625,7 @@ final class ArrangementCanvas: NSView {
         drawReferenceBars(currentBars(), t: t)
         let markers = activeMarkers(rects)
         for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
-        drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution")
+        drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution · esc to close")
     }
 
     /// Reference bars at each seam, from the shared `SchematicLayout`: the reference
@@ -635,8 +659,8 @@ final class ArrangementCanvas: NSView {
         let selected = display.id == selectedID
         let inset = rect.insetBy(dx: 1.5, dy: 1.5)
         let path = NSBezierPath(roundedRect: inset, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
-        color.withAlphaComponent(selected ? 0.28 : 0.15).setFill(); path.fill()
-        color.withAlphaComponent(selected ? 1.0 : 0.7).setStroke()
+        color.withAlphaComponent(selected ? 0.95 : 0.8).setFill(); path.fill()
+        color.withAlphaComponent(1.0).setStroke()
         path.lineWidth = selected ? 3 : 1.5; path.stroke()
         drawLabel(for: display, in: inset)
     }
