@@ -41,15 +41,10 @@ struct SeamBar {
 struct SchematicLayout {
     let rects: [CGDirectDisplayID: CGRect]   // physical (inch) rects
     let bars: [SeamBar]
-    /// BFS parent (the display each was docked to), main = root. Lets callers tell
-    /// which of two adjacent displays is rendered as the child — its density is
-    /// the one that governs the seam, so snap targets must use it.
-    let parents: [CGDirectDisplayID: CGDirectDisplayID]
 
     init(displays: [DisplaySnapshot]) {
-        let (rects, parents) = Self.physicalRects(displays)
+        let rects = Self.physicalRects(displays)
         self.rects = rects
-        self.parents = parents
         self.bars = Self.seamBars(displays, rects: rects)
     }
 
@@ -63,13 +58,11 @@ struct SchematicLayout {
 
     // MARK: - Physical layout (BFS, continuous)
 
-    private static func physicalRects(_ eff: [DisplaySnapshot])
-        -> ([CGDirectDisplayID: CGRect], [CGDirectDisplayID: CGDirectDisplayID]) {
-        guard !eff.isEmpty else { return ([:], [:]) }
+    private static func physicalRects(_ eff: [DisplaySnapshot]) -> [CGDirectDisplayID: CGRect] {
+        guard !eff.isEmpty else { return [:] }
         let byID = Dictionary(uniqueKeysWithValues: eff.map { ($0.id, $0) })
         let start = eff.first(where: { $0.isMain }) ?? eff[0]
         var out: [CGDirectDisplayID: CGRect] = [start.id: CGRect(origin: .zero, size: physSize(start))]
-        var parents: [CGDirectDisplayID: CGDirectDisplayID] = [:]
         var queue = [start.id]
         let tol: CGFloat = 2
 
@@ -79,25 +72,26 @@ struct SchematicLayout {
             let pr = out[parent.id]!        // physical rect
             for child in eff where out[child.id] == nil {
                 let c = child.bounds, cs = physSize(child)
+                // Allow touching-or-overlapping (incl. corner adjacency, overlap ≈ 0)
+                // so diagonal pairs connect and place via the blended map.
                 let yOv = min(pp.maxY, c.maxY) - max(pp.minY, c.minY)
                 let xOv = min(pp.maxX, c.maxX) - max(pp.minX, c.minX)
                 var r: CGRect?
-                if abs(c.minX - pp.maxX) <= tol, yOv > tol {
+                if abs(c.minX - pp.maxX) <= tol, yOv > -tol {
                     r = CGRect(x: pr.maxX, y: alignedPerp(child: child, parent: parent, pr, cs, vertical: true), width: cs.width, height: cs.height)
-                } else if abs(c.maxX - pp.minX) <= tol, yOv > tol {
+                } else if abs(c.maxX - pp.minX) <= tol, yOv > -tol {
                     r = CGRect(x: pr.minX - cs.width, y: alignedPerp(child: child, parent: parent, pr, cs, vertical: true), width: cs.width, height: cs.height)
-                } else if abs(c.minY - pp.maxY) <= tol, xOv > tol {
+                } else if abs(c.minY - pp.maxY) <= tol, xOv > -tol {
                     r = CGRect(x: alignedPerp(child: child, parent: parent, pr, cs, vertical: false), y: pr.maxY, width: cs.width, height: cs.height)
-                } else if abs(c.maxY - pp.minY) <= tol, xOv > tol {
+                } else if abs(c.maxY - pp.minY) <= tol, xOv > -tol {
                     r = CGRect(x: alignedPerp(child: child, parent: parent, pr, cs, vertical: false), y: pr.minY - cs.height, width: cs.width, height: cs.height)
                 }
-                if let r { out[child.id] = r; parents[child.id] = parent.id; queue.append(child.id) }
+                if let r { out[child.id] = r; queue.append(child.id) }
             }
         }
-        // Disconnected fallback (e.g. corner-only / diagonal arrangements with no
-        // edge overlap): place relative to the main at the main's density, so the
-        // point-space relationship is preserved at a consistent physical scale
-        // instead of jumping to an arbitrary points/100 spot.
+        // Fallback for displays with no shared edge at all: place relative to the
+        // main at the main's density (keeps the point relationship at a consistent
+        // scale rather than an arbitrary points/100 spot).
         if eff.contains(where: { out[$0.id] == nil }) {
             let mr = out[start.id]!
             let kx = mr.width / start.bounds.width, ky = mr.height / start.bounds.height
@@ -107,21 +101,125 @@ struct SchematicLayout {
                                    width: physSize(d).width, height: physSize(d).height)
             }
         }
-        return (out, parents)
+        return out
     }
 
-    /// The child's physical perpendicular coordinate (minY for a vertical seam,
-    /// minX for horizontal): the parent's edge plus the child's point offset
-    /// scaled at the *child's own* density. Continuous, and it lands exactly on a
-    /// physical anchor when the point origin is one of the `*Snaps` values — so
-    /// the schematic moves smoothly as the displays slide, with no special cases.
+    /// Inverse of `physicalRects`: given the physical plane `rects` (and each
+    /// display's point size via `displays`), reconstruct a point arrangement.
+    /// BFS from the main; each child docked to a placed parent gets its
+    /// perpendicular point-flush and its along-seam point via the inverse seam
+    /// map. The main lands at (0,0) (the commit pins it there anyway).
+    static func pointArrangement(rects: [CGDirectDisplayID: CGRect],
+                                 displays: [DisplaySnapshot]) -> [CGDirectDisplayID: CGPoint] {
+        guard !displays.isEmpty else { return [:] }
+        let byID = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
+        let start = displays.first(where: { $0.isMain }) ?? displays[0]
+        guard rects[start.id] != nil else {
+            return Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0.bounds.origin) })
+        }
+        var origins: [CGDirectDisplayID: CGPoint] = [start.id: .zero]
+        var queue = [start.id]
+        let tol: CGFloat = 2
+
+        while !queue.isEmpty {
+            let parent = byID[queue.removeFirst()]!
+            let pr = rects[parent.id]!                                   // parent physical
+            let pp = CGRect(origin: origins[parent.id]!, size: parent.bounds.size) // parent point
+            for child in displays where origins[child.id] == nil {
+                guard let cr = rects[child.id] else { continue }
+                let cs = child.bounds.size, cPhys = physSize(child)
+                let yOv = min(pr.maxY, cr.maxY) - max(pr.minY, cr.minY)
+                let xOv = min(pr.maxX, cr.maxX) - max(pr.minX, cr.minX)
+                func along(_ physAlong: CGFloat, _ vertical: Bool) -> CGFloat {
+                    seamPoint(physAlong, seamAnchors(child: child, cPhys, parentPoint: pp, parentPhys: pr, vertical: vertical))
+                }
+                var origin: CGPoint?
+                if abs(cr.minX - pr.maxX) <= tol, yOv > -tol {
+                    origin = CGPoint(x: pp.maxX, y: along(cr.minY, true))
+                } else if abs(cr.maxX - pr.minX) <= tol, yOv > -tol {
+                    origin = CGPoint(x: pp.minX - cs.width, y: along(cr.minY, true))
+                } else if abs(cr.minY - pr.maxY) <= tol, xOv > -tol {
+                    origin = CGPoint(x: along(cr.minX, false), y: pp.maxY)
+                } else if abs(cr.maxY - pr.minY) <= tol, xOv > -tol {
+                    origin = CGPoint(x: along(cr.minX, false), y: pp.minY - cs.height)
+                }
+                if let origin { origins[child.id] = origin; queue.append(child.id) }
+            }
+        }
+        // Disconnected (e.g. Shift-dragged into a gap): place relative to the main
+        // at the main's density — the inverse of the physicalRects fallback.
+        if let mr = rects[start.id] {
+            let kx = start.bounds.width / max(mr.width, 0.01), ky = start.bounds.height / max(mr.height, 0.01)
+            for d in displays where origins[d.id] == nil {
+                let dr = rects[d.id] ?? CGRect(origin: .zero, size: physSize(d))
+                origins[d.id] = CGPoint(x: (dr.minX - mr.minX) * kx, y: (dr.minY - mr.minY) * ky)
+            }
+        }
+        return origins
+    }
+
+    /// The child's physical coordinate along the seam, as a *piecewise-linear* map
+    /// through four anchor points where the two metric spaces must agree: the two
+    /// corners (child's far edge at parent's near edge) and the two edge-alignments
+    /// (point-left↔physical-left, point-right↔physical-right). So point anchors
+    /// render at physical anchors (left/center/right flush, corner at corner),
+    /// sizes stay physical, and the slope differs per region (the smaller screen's
+    /// density on the outer legs; the difference density across the middle, which
+    /// goes vertical when the point widths match).
     private static func alignedPerp(child: DisplaySnapshot, parent: DisplaySnapshot,
                                     _ pr: CGRect, _ cs: CGSize, vertical: Bool) -> CGFloat {
-        if vertical {
-            return pr.minY + (child.bounds.minY - parent.bounds.minY) * (cs.height / child.bounds.height)
-        } else {
-            return pr.minX + (child.bounds.minX - parent.bounds.minX) * (cs.width / child.bounds.width)
+        let anchors = seamAnchors(child: child, cs, parentPoint: parent.bounds, parentPhys: pr, vertical: vertical)
+        return seamPhysical(vertical ? child.bounds.minY : child.bounds.minX, anchors)
+    }
+
+    /// Point-along → physical-along along a seam, via the seam anchors.
+    static func seamPhysical(_ pointAlong: CGFloat, _ anchors: [(CGFloat, CGFloat)]) -> CGFloat {
+        piecewise(pointAlong, monotone(anchors))
+    }
+
+    /// The inverse (physical-along → point-along) used by the drag.
+    static func seamPoint(_ physAlong: CGFloat, _ anchors: [(CGFloat, CGFloat)]) -> CGFloat {
+        piecewise(physAlong, monotone(anchors).map { ($0.1, $0.0) })
+    }
+
+    /// Keep the map monotonic: if the two edge-align anchors invert in physical
+    /// (a denser screen taller in points but shorter in physical, etc.), drop them
+    /// and keep just the two corners → the blended map. Otherwise use all four
+    /// (edges render flush). A non-monotonic map would make the slide reverse and
+    /// the drag inverse ambiguous.
+    private static func monotone(_ anchors: [(CGFloat, CGFloat)]) -> [(CGFloat, CGFloat)] {
+        let a = anchors.sorted { $0.0 < $1.0 }
+        guard a.count == 4 else { return a }
+        let mono = a[0].1 <= a[1].1 && a[1].1 <= a[2].1 && a[2].1 <= a[3].1
+        return mono ? a : [a[0], a[3]]
+    }
+
+    /// The four (point, physical) anchor pairs along the seam where the two metric
+    /// spaces must agree — two corners and the two edge-alignments. The forward map
+    /// (alignedPerp) interpolates point→physical through these; the drag inverts
+    /// physical→point by swapping the pairs.
+    static func seamAnchors(child: DisplaySnapshot, _ cs: CGSize,
+                            parentPoint pp: CGRect, parentPhys pr: CGRect,
+                            vertical: Bool) -> [(CGFloat, CGFloat)] {
+        let c = child.bounds
+        return vertical
+            ? [(pp.minY - c.height, pr.minY - cs.height), (pp.minY, pr.minY),
+               (pp.maxY - c.height, pr.maxY - cs.height), (pp.maxY, pr.maxY)]
+            : [(pp.minX - c.width, pr.minX - cs.width), (pp.minX, pr.minX),
+               (pp.maxX - c.width, pr.maxX - cs.width), (pp.maxX, pr.maxX)]
+    }
+
+    /// Linear interpolation through `pts` (x → y), extrapolating with the end
+    /// slopes outside the range. Ties in x (collapsed anchors) read as a jump.
+    static func piecewise(_ x: CGFloat, _ pts: [(CGFloat, CGFloat)]) -> CGFloat {
+        let p = pts.sorted { $0.0 < $1.0 }
+        func lerp(_ a: (CGFloat, CGFloat), _ b: (CGFloat, CGFloat)) -> CGFloat {
+            guard b.0 != a.0 else { return (a.1 + b.1) / 2 } // vertical segment → midpoint
+            return a.1 + (b.1 - a.1) / (b.0 - a.0) * (x - a.0)
         }
+        if x <= p[0].0 { return lerp(p[0], p[1]) }
+        for i in 0..<(p.count - 1) where x <= p[i + 1].0 { return lerp(p[i], p[i + 1]) }
+        return lerp(p[p.count - 2], p[p.count - 1])
     }
 
     // MARK: - Physical snap targets (the seven anchor offsets)
@@ -139,62 +237,28 @@ struct SchematicLayout {
         (.top, .center), (.bottom, .bottom), (.center, .bottom)
     ]
 
-    private static func frac(_ a: HAnchor) -> CGFloat { a == .left ? 0 : (a == .center ? 0.5 : 1) }
-    private static func frac(_ a: VAnchor) -> CGFloat { a == .top ? 0 : (a == .center ? 0.5 : 1) }
+    static func frac(_ a: HAnchor) -> CGFloat { a == .left ? 0 : (a == .center ? 0.5 : 1) }
+    static func frac(_ a: VAnchor) -> CGFloat { a == .top ? 0 : (a == .center ? 0.5 : 1) }
 
-    /// Target `minX` values for `sel` that put each physical anchor of `sel` onto
-    /// the matching physical anchor of `other`, across a horizontal seam. Sorted
-    /// by value (true physical order) for monotonic cycling.
-    ///
-    /// The seam is rendered using the *child's* density (the BFS descendant), so
-    /// the offset must be computed with that density — otherwise the alignment
-    /// drifts by the screens' density ratio (worse the more the PPIs differ).
-    /// `selIsChild` says whether `sel` is that descendant.
-    static func horizontalSnaps(sel: DisplaySnapshot, other: DisplaySnapshot,
-                                selIsChild: Bool) -> [HSnap] {
-        snaps(sel: sel, other: other, selIsChild: selIsChild,
-              selMin: sel.bounds.minX, otherMin: other.bounds.minX,
-              selPhys: physSize(sel).width, otherPhys: physSize(other).width,
-              childPoints: (selIsChild ? sel : other).bounds.width,
-              pairs: hPairs, frac: frac)
-            .map { HSnap(value: $0.0, selfAnchor: $0.1, otherAnchor: $0.2, otherID: other.id) }
+    /// The seven *physical* alignment positions along a horizontal seam: the
+    /// child's `minX` that puts each of the child's physical anchors onto the
+    /// parent's matching physical anchor. Sorted by position (visual order) for
+    /// cycling and used as the drag magnet targets. `parent` is the parent's plane
+    /// rect (inches).
+    static func physSnapsH(childWidth cw: CGFloat, parent pr: CGRect) -> [(along: CGFloat, selfAnchor: HAnchor, otherAnchor: HAnchor)] {
+        hPairs.map { (pr.minX + frac($0.1) * pr.width - frac($0.0) * cw, $0.0, $0.1) }
+            .sorted { $0.0 < $1.0 }
     }
 
-    /// Target `minY` values for `sel` across a vertical seam (see `horizontalSnaps`).
-    static func verticalSnaps(sel: DisplaySnapshot, other: DisplaySnapshot,
-                              selIsChild: Bool) -> [VSnap] {
-        snaps(sel: sel, other: other, selIsChild: selIsChild,
-              selMin: sel.bounds.minY, otherMin: other.bounds.minY,
-              selPhys: physSize(sel).height, otherPhys: physSize(other).height,
-              childPoints: (selIsChild ? sel : other).bounds.height,
-              pairs: vPairs, frac: frac)
-            .map { VSnap(value: $0.0, selfAnchor: $0.1, otherAnchor: $0.2, otherID: other.id) }
-    }
-
-    /// Shared snap math: returns (sel target min, selfAnchor, otherAnchor) for the
-    /// seven pairs. `Δ = childMin − parentMin` is computed at the child's density;
-    /// `sel`'s target is then `otherMin ± Δ` depending on whether sel is child.
-    private static func snaps<A>(sel: DisplaySnapshot, other: DisplaySnapshot, selIsChild: Bool,
-                                 selMin: CGFloat, otherMin: CGFloat,
-                                 selPhys: CGFloat, otherPhys: CGFloat, childPoints: CGFloat,
-                                 pairs: [(A, A)], frac: (A) -> CGFloat) -> [(CGFloat, A, A)] {
-        let cPhys = selIsChild ? selPhys : otherPhys
-        let pPhys = selIsChild ? otherPhys : selPhys
-        guard cPhys > 0 else { return [] }
-        let k = childPoints / cPhys // points per inch on the child
-        return pairs.map { selfA, otherA -> (CGFloat, A, A) in
-            let cFrac = selIsChild ? frac(selfA) : frac(otherA)
-            let pFrac = selIsChild ? frac(otherA) : frac(selfA)
-            let delta = (pFrac * pPhys - cFrac * cPhys) * k // child.min − parent.min
-            let value = selIsChild ? otherMin + delta : otherMin - delta
-            return (value, selfA, otherA)
-        }.sorted { $0.0 < $1.0 }
+    static func physSnapsV(childHeight ch: CGFloat, parent pr: CGRect) -> [(along: CGFloat, selfAnchor: VAnchor, otherAnchor: VAnchor)] {
+        vPairs.map { (pr.minY + frac($0.1) * pr.height - frac($0.0) * ch, $0.0, $0.1) }
+            .sorted { $0.0 < $1.0 }
     }
 
     // MARK: - Reference bars
 
-    private static func seamBars(_ displays: [DisplaySnapshot],
-                                 rects: [CGDirectDisplayID: CGRect]) -> [SeamBar] {
+    static func seamBars(_ displays: [DisplaySnapshot],
+                         rects: [CGDirectDisplayID: CGRect]) -> [SeamBar] {
         let tol: CGFloat = 1.5
         var out: [SeamBar] = []
         for i in 0..<displays.count {
