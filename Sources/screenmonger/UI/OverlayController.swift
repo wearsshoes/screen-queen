@@ -10,15 +10,15 @@ final class OverlayController {
     private(set) var isVisible = false
     private var fadeToken = 0
 
-    func toggle(with displays: [DisplaySnapshot]) {
-        if isVisible { hide() } else { show(with: displays) }
+    func toggle(bars: [SeamBar]) {
+        if isVisible { hide() } else { show(bars: bars) }
     }
 
-    func show(with displays: [DisplaySnapshot]) {
+    func show(bars: [SeamBar]) {
         isVisible = true
         fadeToken &+= 1 // cancel any in-flight fade
         for window in windows.values { window.alphaValue = 1 }
-        update(with: displays)
+        update(bars: bars)
     }
 
     func hide() {
@@ -49,26 +49,24 @@ final class OverlayController {
         })
     }
 
-    /// Rebuild overlay content. `displays` may be a prospective layout (drag /
-    /// nudge / align / zoom preview); the bars are derived from it via the shared
-    /// `SchematicLayout`, so the glass matches the arranger. No-op while hidden.
-    func update(with displays: [DisplaySnapshot]) {
+    /// Draw the given reference `bars` (computed by the arranger from its plane, so
+    /// the glass and the mini-map are identical). Everything else — colors, window
+    /// frames, the zoom scale factor — comes from the *real* current displays.
+    /// No-op while hidden.
+    func update(bars: [SeamBar]) {
         guard isVisible else { return }
 
-        let bars = SchematicLayout(displays: displays).bars
-        let colors = DisplayGraph.colors(displays)
-        let byID = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
+        let real = DisplayManager.snapshot()
+        let colors = DisplayGraph.colors(real)
+        let byID = Dictionary(uniqueKeysWithValues: real.map { ($0.id, $0) })
+        // During a zoom preview the real screen is still at its old resolution, so
+        // each bar is scaled by realWidth/prospectiveWidth to show the prospective
+        // size at the real pixel density.
+        let realWidths = Dictionary(uniqueKeysWithValues: real.map { ($0.id, $0.bounds.width) })
         let screens = screenMap()
 
-        // The bar is the window's point size (from the layout). During a zoom
-        // preview the real screen is still at its current resolution, so each
-        // display's bar is scaled by realWidth/prospectiveWidth to render the
-        // prospective size at the real pixel density.
-        let real = DisplayManager.snapshot()
-        let realWidths = Dictionary(uniqueKeysWithValues: real.map { ($0.id, $0.bounds.width) })
-
         var live: Set<CGDirectDisplayID> = []
-        for d in displays {
+        for d in real {
             guard let screen = screens[d.id] else { continue }
             live.insert(d.id)
 

@@ -27,26 +27,15 @@ struct SeamBar {
 }
 
 /// Translation between the macOS *point* arrangement and the *physical* schematic
-/// (true relative sizes). Built on demand from effective snapshots; shared by the
-/// arranger (`ArrangementCanvas`) and the on-glass overlay (`OverlayController`)
-/// so the two never disagree.
+/// (true relative sizes). A pure namespace of conversions, shared by the arranger
+/// (`ArrangementCanvas`) and the on-glass overlay so the two never disagree.
 ///
-/// Alignment is *continuous*: a display's physical position is a smooth function
-/// of its point origin (a BFS from the main display docks each display to its
-/// parent and slides it along the seam at its own density). There is no discrete
-/// "alignment intent" — the point offset is the alignment. Magnetic detents and
-/// keyboard cycling target `horizontalSnaps`/`verticalSnaps`, the point offsets
-/// that realize the seven *physical* anchor alignments (distinct even for
-/// equal-point-width screens, since physical sizes differ).
-struct SchematicLayout {
-    let rects: [CGDirectDisplayID: CGRect]   // physical (inch) rects
-    let bars: [SeamBar]
-
-    init(displays: [DisplaySnapshot]) {
-        let rects = Self.physicalRects(displays)
-        self.rects = rects
-        self.bars = Self.seamBars(displays, rects: rects)
-    }
+/// The two directions are `toPlane` (point → physical, to interpret a committed
+/// layout) and `toPoints` (physical → point, to commit the plane). The seam map
+/// between them is *continuous*: a display's coordinate along a seam is a smooth
+/// (piecewise-linear) function through the four anchor points where the metric
+/// spaces must agree — the two corners and the two edge-alignments.
+enum SchematicLayout {
 
     /// Physical size in inches, falling back to a points/100 proxy when the
     /// physical size is unknown (so unsized displays still lay out sensibly).
@@ -56,9 +45,12 @@ struct SchematicLayout {
         return CGSize(width: d.bounds.width / 100, height: d.bounds.height / 100)
     }
 
-    // MARK: - Physical layout (BFS, continuous)
+    // MARK: - Interpret: point → physical (the plane)
 
-    private static func physicalRects(_ eff: [DisplaySnapshot]) -> [CGDirectDisplayID: CGRect] {
+    /// Lay the committed point arrangement out on the physical plane: a BFS from
+    /// the main display docks each display to its parent and places it along the
+    /// seam via the seam map.
+    static func toPlane(_ eff: [DisplaySnapshot]) -> [CGDirectDisplayID: CGRect] {
         guard !eff.isEmpty else { return [:] }
         let byID = Dictionary(uniqueKeysWithValues: eff.map { ($0.id, $0) })
         let start = eff.first(where: { $0.isMain }) ?? eff[0]
@@ -104,13 +96,15 @@ struct SchematicLayout {
         return out
     }
 
-    /// Inverse of `physicalRects`: given the physical plane `rects` (and each
-    /// display's point size via `displays`), reconstruct a point arrangement.
-    /// BFS from the main; each child docked to a placed parent gets its
-    /// perpendicular point-flush and its along-seam point via the inverse seam
-    /// map. The main lands at (0,0) (the commit pins it there anyway).
-    static func pointArrangement(rects: [CGDirectDisplayID: CGRect],
-                                 displays: [DisplaySnapshot]) -> [CGDirectDisplayID: CGPoint] {
+    // MARK: - Commit: physical → point
+
+    /// Inverse of `toPlane`: given the physical plane `rects` (and each display's
+    /// point size via `displays`), reconstruct a point arrangement. BFS from the
+    /// main; each child docked to a placed parent gets its perpendicular
+    /// point-flush and its along-seam point via the inverse seam map. The main
+    /// lands at (0,0) (the commit pins it there anyway).
+    static func toPoints(rects: [CGDirectDisplayID: CGRect],
+                         displays: [DisplaySnapshot]) -> [CGDirectDisplayID: CGPoint] {
         guard !displays.isEmpty else { return [:] }
         let byID = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
         let start = displays.first(where: { $0.isMain }) ?? displays[0]
@@ -147,7 +141,7 @@ struct SchematicLayout {
             }
         }
         // Disconnected (e.g. Shift-dragged into a gap): place relative to the main
-        // at the main's density — the inverse of the physicalRects fallback.
+        // at the main's density — the inverse of the toPlane fallback.
         if let mr = rects[start.id] {
             let kx = start.bounds.width / max(mr.width, 0.01), ky = start.bounds.height / max(mr.height, 0.01)
             for d in displays where origins[d.id] == nil {

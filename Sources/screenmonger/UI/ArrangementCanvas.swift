@@ -7,7 +7,7 @@ import AppKit
 /// — is the source of truth: dragging moves a rect on the plane 1:1 with the
 /// cursor, and snapping/alignment are physical. Only when the manipulation ends
 /// (mouse up / modifier released) do we convert the plane back to a macOS *point*
-/// arrangement (via `SchematicLayout.pointArrangement`) and commit. The point↔
+/// arrangement (via `SchematicLayout.toPoints`) and commit. The point↔
 /// physical seam map is thus applied at exactly two boundaries — interpret the
 /// committed layout onto the plane, convert the plane back — never per frame.
 ///
@@ -16,9 +16,13 @@ import AppKit
 final class ArrangementCanvas: NSView {
 
     var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)?
-    var onPreview: (([DisplaySnapshot]) -> Void)?
+    /// The plane's reference bars, for the on-glass overlay — the same bars the
+    /// arranger draws, so the two are identical (no re-interpret, no round-trip).
+    var onPreview: (([SeamBar]) -> Void)?
     var onSetMain: ((CGDirectDisplayID) -> Void)?
-    var onSetMode: ((CGDirectDisplayID, CGDisplayMode) -> Void)?
+    /// Change a display's resolution *and* re-commit the arrangement so the physical
+    /// alignment along the seam is preserved at the new point size (keyboard + menu).
+    var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)?
     var onCalibrate: ((CGDirectDisplayID) -> Void)?
     var onCalibrateVisual: ((CGDirectDisplayID) -> Void)?
     var onResetCalibration: ((CGDirectDisplayID) -> Void)?
@@ -72,7 +76,7 @@ final class ArrangementCanvas: NSView {
         // Our own committed changes round-trip to the same arrangement, so we keep
         // the plane (no interpret, no round-trip drift).
         if !planeMatches(displays) {
-            plane = SchematicLayout(displays: displays).rects
+            plane = SchematicLayout.toPlane(displays)
         }
         pendingSize.removeAll()
         pendingMode = nil
@@ -96,7 +100,7 @@ final class ArrangementCanvas: NSView {
             let ps = SchematicLayout.physSize(d)
             guard let r = plane[d.id], abs(r.width - ps.width) < 0.05, abs(r.height - ps.height) < 0.05 else { return false }
         }
-        let ours = SchematicLayout.pointArrangement(rects: plane, displays: snapshot)
+        let ours = SchematicLayout.toPoints(rects: plane, displays: snapshot)
         for d in snapshot {
             guard let o = ours[d.id], abs(o.x - d.bounds.minX) < 1.5, abs(o.y - d.bounds.minY) < 1.5 else { return false }
         }
@@ -115,21 +119,18 @@ final class ArrangementCanvas: NSView {
 
     /// The plane is the persistent source of truth — render straight from it.
     private func currentRects() -> [CGDirectDisplayID: CGRect] { plane }
-    private func currentBars() -> [SeamBar] { SchematicLayout.seamBars(effDisplays(), rects: plane) }
+    /// The reference bars for the current plane (shared with the on-glass overlay).
+    func currentBars() -> [SeamBar] { SchematicLayout.seamBars(effDisplays(), rects: plane) }
 
     /// Convert the plane to a point arrangement and commit. The plane stays put;
     /// our commit round-trips, so the next `update` keeps it (see `planeMatches`).
     private func commitPlane() {
         guard !plane.isEmpty else { return }
-        onCommit?(SchematicLayout.pointArrangement(rects: plane, displays: effDisplays()))
+        onCommit?(SchematicLayout.toPoints(rects: plane, displays: effDisplays()))
     }
 
-    /// Push the prospective layout to the on-glass overlay (as point snapshots).
-    private func emitPreview() {
-        let origins = SchematicLayout.pointArrangement(rects: currentRects(), displays: effDisplays())
-        let snaps = effDisplays().map { $0.movedTo(origin: origins[$0.id] ?? $0.bounds.origin) }
-        onPreview?(snaps)
-    }
+    /// Push the plane's bars to the on-glass overlay so it tracks the manipulation.
+    private func emitPreview() { onPreview?(currentBars()) }
 
     // MARK: - View transform (fit the physical plane into the window)
 
@@ -296,8 +297,12 @@ final class ArrangementCanvas: NSView {
         if zoomPending, !f.contains(.command) {
             zoomPending = false
             let mode = pendingMode
-            pendingMode = nil; pendingSize.removeAll() // plane rebuilds on the resulting update
-            if let mode { onSetMode?(mode.id, mode.mode) }
+            // The plane (physical) is unchanged by a resolution change; commit the
+            // point arrangement that reproduces it at the new size, keeping the
+            // alignment. The plane stays put (our commit round-trips).
+            let origins = SchematicLayout.toPoints(rects: plane, displays: effDisplays())
+            pendingMode = nil; pendingSize.removeAll()
+            if let mode { onSetResolution?(mode.id, mode.mode, origins) }
         }
         super.flagsChanged(with: event)
     }
@@ -569,7 +574,12 @@ final class ArrangementCanvas: NSView {
     }
 
     @objc private func setMainFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { onSetMain?($0.uint32Value) } }
-    @objc private func setModeFromMenu(_ s: NSMenuItem) { (s.representedObject as? ModeChoice).map { onSetMode?($0.id, $0.mode) } }
+    @objc private func setModeFromMenu(_ s: NSMenuItem) {
+        guard let c = s.representedObject as? ModeChoice else { return }
+        let size = CGSize(width: CGFloat(c.mode.width), height: CGFloat(c.mode.height)) // "Looks like" points
+        let ds = displays.map { $0.id == c.id ? $0.with(bounds: CGRect(origin: $0.bounds.origin, size: size)) : $0 }
+        onSetResolution?(c.id, c.mode, SchematicLayout.toPoints(rects: plane, displays: ds))
+    }
     @objc private func calibrateFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { onCalibrate?($0.uint32Value) } }
     @objc private func calibrateVisualFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { onCalibrateVisual?($0.uint32Value) } }
     @objc private func resetCalibrationFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { onResetCalibration?($0.uint32Value) } }

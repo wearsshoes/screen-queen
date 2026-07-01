@@ -100,14 +100,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         canvas.onCommit = { [weak self] origins in
             self?.commitArrangement(origins)
         }
-        canvas.onPreview = { [weak self] snapshots in
-            self?.preview(snapshots)
+        canvas.onPreview = { [weak self] bars in
+            self?.preview(bars)
         }
         canvas.onSetMain = { [weak self] id in
             self?.setMainDisplay(id)
         }
-        canvas.onSetMode = { [weak self] id, mode in
-            self?.setMode(id, mode)
+        canvas.onSetResolution = { [weak self] id, mode, origins in
+            self?.setResolution(id, mode, origins)
         }
         canvas.onCalibrate = { [weak self] id in
             self?.calibrate(id)
@@ -172,24 +172,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh()
     }
 
-    /// Switch a display's resolution, then confirm-or-revert. The revert really
-    /// matters here: a bad mode can leave a screen black.
-    private func setMode(_ id: CGDirectDisplayID, _ mode: CGDisplayMode) {
-        isLiveDragging = false
-        if overlayAutoShown {
-            overlay.fadeOut()
-            overlayAutoShown = false
-        }
-        let previous = CGDisplayCopyDisplayMode(id)
-        guard DisplayManager.applyMode(mode, to: id) else {
-            refresh()
-            return
-        }
+    /// Apply a reconfiguration, then confirm-or-auto-revert — a bad mode/arrangement
+    /// can leave a screen black, so we always offer the countdown modal. `apply`
+    /// returns false if it couldn't even start (nothing to revert).
+    private func applyConfirmed(apply: () -> Bool, revert: () -> Void) {
+        guard apply() else { refresh(); return }
         refresh()
-        if !confirmKeep(), let previous {
-            DisplayManager.applyMode(previous, to: id)
-            refresh()
-        }
+        if !confirmKeep() { revert(); refresh() }
+        hideRevert()
+    }
+
+    /// Change a display's resolution, preserving alignment: apply the new mode
+    /// *and* re-set the arrangement so the display stays where the plane put it at
+    /// the new point size. Confirms, reverting both if the mode is bad (a bad mode
+    /// can leave a screen black).
+    private func setResolution(_ id: CGDirectDisplayID, _ mode: CGDisplayMode,
+                               _ origins: [CGDirectDisplayID: CGPoint]) {
+        isLiveDragging = false
+        if overlayAutoShown { overlay.fadeOut(); overlayAutoShown = false }
+        let snap = DisplayManager.snapshot()
+        let previousMode = CGDisplayCopyDisplayMode(id)
+        let previousOrigins = originMap(of: snap)
+        let mainID = snap.first(where: { $0.isMain })?.id
+        applyConfirmed(apply: {
+            guard DisplayManager.applyMode(mode, to: id) else { return false }
+            DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true)
+            return true
+        }, revert: {
+            if let previousMode { DisplayManager.applyMode(previousMode, to: id) }
+            DisplayManager.applyOrigins(previousOrigins, permanent: true)
+        })
     }
 
     /// Make `id` the main display by shifting the whole arrangement so that
@@ -205,14 +217,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let origins = Dictionary(uniqueKeysWithValues: snapshot.map {
             ($0.id, CGPoint(x: $0.bounds.origin.x + dx, y: $0.bounds.origin.y + dy))
         })
-
-        guard DisplayManager.applyOrigins(origins, permanent: true) else { refresh(); return }
-        refresh()
-        if !confirmKeep() {
-            DisplayManager.applyOrigins(before, permanent: true)
-            refresh()
-        }
-        hideRevert()
+        applyConfirmed(apply: { DisplayManager.applyOrigins(origins, permanent: true) },
+                       revert: { DisplayManager.applyOrigins(before, permanent: true) })
     }
 
     // MARK: - Arrangement commit
@@ -220,12 +226,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Preview a prospective layout (drag / nudge / align / zoom) on the on-glass
     /// reference bars, without reconfiguring hardware. The bars auto-appear while
     /// the manipulation is in progress and are restored on commit.
-    private func preview(_ snapshots: [DisplaySnapshot]) {
+    private func preview(_ bars: [SeamBar]) {
         isLiveDragging = true
         if overlay.isVisible {
-            overlay.update(with: snapshots)
+            overlay.update(bars: bars)
         } else {
-            overlay.show(with: snapshots)
+            overlay.show(bars: bars)
             overlayAutoShown = true
         }
     }
@@ -327,11 +333,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Mid-drag, the canvas owns its working state; don't clobber it. The
         // overlay still updates so the reference bars track live.
         if !isLiveDragging { canvas.update(with: displays, colors: DisplayGraph.colors(displays)) }
-        overlay.update(with: displays)
+        overlay.update(bars: canvas.currentBars())
     }
 
     @objc func toggleOverlays(_ sender: NSMenuItem) {
-        overlay.toggle(with: DisplayManager.snapshot())
+        overlay.toggle(bars: canvas.currentBars())
         sender.state = overlay.isVisible ? .on : .off
     }
 
