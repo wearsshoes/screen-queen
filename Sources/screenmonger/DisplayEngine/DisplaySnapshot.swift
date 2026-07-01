@@ -43,6 +43,11 @@ struct DisplaySnapshot: Identifiable, Equatable {
     let model: UInt32
     let serial: UInt32
 
+    /// A per-connection suffix (framebuffer location) that distinguishes this display
+    /// from another with an identical vendor/model/serial. Empty when there's no such
+    /// collision. See `Topology`.
+    var fingerprintSuffix: String = ""
+
     /// Refresh rate in Hz (0 if unknown, e.g. some built-in panels).
     let refreshHz: Double
 
@@ -70,11 +75,13 @@ struct DisplaySnapshot: Identifiable, Equatable {
         return Double(bounds.width) / inches
     }
 
-    /// Stable identity for a physical display across reconnects. Serial is 0 on some
-    /// panels; vendor+model still disambiguates most setups. (A full-EDID hash was
-    /// tried but adds nothing: when the serial is unique this already works, and two
-    /// truly-identical monitors have byte-identical EDIDs so a hash collides too.)
-    var fingerprint: String { "\(vendor)-\(model)-\(serial)" }
+    /// Stable identity for a physical display across reconnects: vendor/model/serial,
+    /// plus a per-connection topology suffix when two connected monitors would
+    /// otherwise share it (see `Topology`).
+    var fingerprint: String {
+        let base = "\(vendor)-\(model)-\(serial)"
+        return fingerprintSuffix.isEmpty ? base : "\(base)@\(fingerprintSuffix)"
+    }
 
     /// A stable, memorable nickname derived from the fingerprint (a temporary handle
     /// until the user can assign custom names).
@@ -88,7 +95,8 @@ struct DisplaySnapshot: Identifiable, Equatable {
             pixelSize: pixelSize, physicalSizeMM: physicalSizeMM,
             physicalSizeIsCalibrated: physicalSizeIsCalibrated,
             isMain: isMain, isBuiltin: isBuiltin,
-            vendor: vendor, model: model, serial: serial, refreshHz: refreshHz
+            vendor: vendor, model: model, serial: serial,
+            fingerprintSuffix: fingerprintSuffix, refreshHz: refreshHz
         )
     }
 

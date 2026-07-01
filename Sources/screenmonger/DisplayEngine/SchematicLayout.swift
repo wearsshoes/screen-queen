@@ -42,7 +42,7 @@ enum SchematicLayout {
     /// seam via the seam map.
     static func toPlane(_ eff: [DisplaySnapshot]) -> [CGDirectDisplayID: CGRect] {
         guard !eff.isEmpty else { return [:] }
-        let byID = Dictionary(uniqueKeysWithValues: eff.map { ($0.id, $0) })
+        let byID = Dictionary(eff.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let start = eff.first(where: { $0.isMain }) ?? eff[0]
         var out: [CGDirectDisplayID: CGRect] = [start.id: CGRect(origin: .zero, size: physSize(start))]
         var queue = [start.id]
@@ -92,10 +92,10 @@ enum SchematicLayout {
     static func toPoints(rects: [CGDirectDisplayID: CGRect],
                          displays: [DisplaySnapshot]) -> [CGDirectDisplayID: CGPoint] {
         guard !displays.isEmpty else { return [:] }
-        let byID = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
+        let byID = Dictionary(displays.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let start = displays.first(where: { $0.isMain }) ?? displays[0]
         guard rects[start.id] != nil else {
-            return Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0.bounds.origin) })
+            return Dictionary(displays.map { ($0.id, $0.bounds.origin) }, uniquingKeysWith: { a, _ in a })
         }
         var origins: [CGDirectDisplayID: CGPoint] = [start.id: .zero]
         var queue = [start.id]

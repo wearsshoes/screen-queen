@@ -13,6 +13,11 @@ enum CalibrationStore {
         UserDefaults.standard.dictionary(forKey: key) as? [String: [Double]] ?? [:]
     }
 
+    /// All stored calibrations (fingerprint → physical size in mm) — for the debug view.
+    static func allOverrides() -> [String: CGSize] {
+        all().compactMapValues { $0.count == 2 && $0[0] > 0 ? CGSize(width: $0[0], height: $0[1]) : nil }
+    }
+
     static func override(for fingerprint: String) -> CGSize? {
         guard let v = all()[fingerprint], v.count == 2, v[0] > 0 else { return nil }
         return CGSize(width: v[0], height: v[1])

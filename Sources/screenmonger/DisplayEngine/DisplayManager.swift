@@ -18,14 +18,18 @@ enum DisplayManager {
         guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else {
             return []
         }
-        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        guard CGGetActiveDisplayList(count, &ids, &count) == .success else {
+        var rawIDs = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &rawIDs, &count) == .success else {
             return []
         }
+        // Mid-hotplug the list can transiently repeat an id or list mirror members;
+        // dedupe so nothing downstream (id-keyed dicts) traps on a duplicate.
+        var seenIDs = Set<CGDirectDisplayID>()
+        let ids = rawIDs.filter { seenIDs.insert($0).inserted }
 
         let names = screenNamesByDisplayID()
 
-        return ids.map { id in
+        var snapshots = ids.map { id in
             let bounds = CGDisplayBounds(id)
             let mode = CGDisplayCopyDisplayMode(id)
             let pixelSize = CGSize(
@@ -36,13 +40,15 @@ enum DisplayManager {
             let vendor = CGDisplayVendorNumber(id)
             let model = CGDisplayModelNumber(id)
             let serial = CGDisplaySerialNumber(id)
-            let fingerprint = "\(vendor)-\(model)-\(serial)"
+            // Calibration keys on the *base* v/m/s (two identical monitors share a
+            // physical size, so calibration needn't distinguish them).
+            let base = "\(vendor)-\(model)-\(serial)"
 
             // Prefer a manual calibration over EDID, which some monitors fake — but
             // the built-in's EDID is authoritative, so it always uses EDID (ignoring
             // any stale override from before it was made non-calibratable).
             let isBuiltin = CGDisplayIsBuiltin(id) != 0
-            let override = isBuiltin ? nil : CalibrationStore.override(for: fingerprint)
+            let override = isBuiltin ? nil : CalibrationStore.override(for: base)
             let physMM = override ?? CGDisplayScreenSize(id)
 
             return DisplaySnapshot(
@@ -60,6 +66,19 @@ enum DisplayManager {
                 refreshHz: mode?.refreshRate ?? 0
             )
         }
+
+        // Disambiguate any monitors with an identical vendor/model/serial by their
+        // physical connection (framebuffer location), so their fingerprints differ.
+        var seen: [String: Int] = [:]   // base v/m/s → count so far
+        for i in snapshots.indices {
+            let d = snapshots[i]
+            let base = "\(d.vendor)-\(d.model)-\(d.serial)"
+            let order = seen[base, default: 0]; seen[base] = order + 1
+            if let suffix = Topology.locationSuffix(product: Int(d.model), serial: Int(d.serial), orderAmongIdentical: order) {
+                snapshots[i].fingerprintSuffix = suffix
+            }
+        }
+        return snapshots
     }
 
     // MARK: - Write path
