@@ -1,8 +1,17 @@
-~~* doesn't play nice with macbook notch / curved edges~~
-~~* when you move the screens and the display is on a non-main screen, the cursor jumps, that's weird.~~
-~~* could do some more fancy hotkeying.~~
-* ~~want to do it as a windowless popup.~~ done (per-screen arranger overlays)
-~~* some of the key actions are wrong.~~
-~~* rename to "screen queen" (?)~~ renamed to **Silkscreen**
-~~* show where the Dock will actually land~~ done (DockPredictor flows from
-  main toward the Dock edge across seams; mini-Dock indicator on the tile)
+# Soft launch (Show HN)
+
+**Blockers:**
+* demo GIF — record the arranger, save to docs/demo.gif, uncomment the README image line
+* run the notarized build (`NOTARIZE=1 NOTARY_PROFILE=silkscreen scripts/package.sh`)
+  and attach build/Silkscreen.dmg to a GitHub Release
+
+**Before strangers run it (recommended, not blocking):**
+* tests for the hotplug/profile logic (handleProfiles, repinSurvivors) — the code most
+  likely to silently scramble someone's monitors
+* first-launch onboarding: explain what it does + why it wants Accessibility
+
+**Post-launch (can wait):**
+* Homebrew cask
+* Sparkle auto-update
+* hardware matrix: Intel, clamshell, hub/dock, 3+ monitors, DisplayLink
+* revoke the app-specific password exposed in chat; keychain profile keeps working
