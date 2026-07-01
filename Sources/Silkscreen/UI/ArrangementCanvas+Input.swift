@@ -278,23 +278,20 @@ extension ArrangementCanvas {
             emitPreview()
             return
         }
-        guard let o = SchematicSnapping.plannedOrigin(id, dir, plane: plane, activeV: activeV, activeH: activeH) else { return }
+        // Same source the ghost preview reads, so what was previewed is what applies.
+        guard let o = SchematicSnapping.plannedMoves(id, plane: plane, activeV: activeV, activeH: activeH)[dir] else { return }
         plane[id] = CGRect(origin: o, size: plane[id]!.size)
         let m = SchematicSnapping.markerForJoin(id, plane: plane)
         activeV = m.v; activeH = m.h
         emitPreview()
     }
 
-    /// The valid ⌘⇧ arrow destinations (grey-ghosted while ⌘⇧ is held) for the
-    /// selected tile: each arrow's move direction and the physical rect it lands on
-    /// (skipping no-ops).
+    /// The valid ⌘⇧ arrow destinations (grey-ghosted while ⌘⇧ is held) for the selected
+    /// tile: each arrow's move direction and the physical rect it lands on. Reads the same
+    /// `plannedMoves` map that `stepAlignment` applies from.
     func alignGhosts() -> [(dir: MoveDirection, rect: CGRect)] {
-        guard let id = selectedID, let size = plane[id]?.size,
-              SchematicSnapping.currentJoin(id, plane: plane) != nil else { return [] }
-        return [MoveDirection.up, .down, .left, .right]
-            .compactMap { d in
-                SchematicSnapping.plannedOrigin(id, d, plane: plane, activeV: activeV, activeH: activeH)
-                    .map { (d, CGRect(origin: $0, size: size)) }
-            }
+        guard let id = selectedID, let size = plane[id]?.size else { return [] }
+        return SchematicSnapping.plannedMoves(id, plane: plane, activeV: activeV, activeH: activeH)
+            .map { (dir, origin) in (dir, CGRect(origin: origin, size: size)) }
     }
 }

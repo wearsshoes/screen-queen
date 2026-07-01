@@ -56,7 +56,7 @@ extension ArrangementCanvas {
         for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
         drawEdgeBars(bars, seamColor: seamColor)   // full-screen reference bars hugging this screen's real edges
         seamEmitters.commit()
-        drawScreenMarkers(activeMarkers(rects))   // alignment notches/arrows at this screen's real edges
+        drawScreenMarkers(markers)                // alignment notches/arrows at this screen's real edges
         drawMirrorColumn()                        // mirrored displays live in the right column
         drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution")
         if let p = draggingMenuBar {
