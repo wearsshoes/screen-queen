@@ -97,15 +97,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var statusMenu: NSMenu = {
         let menu = NSMenu()
         menu.addItem(withTitle: "Show Arrangement  (⌘⌥F1)", action: #selector(showWindow), keyEquivalent: "")
-        menu.addItem(withTitle: "Reset Saved Layouts", action: #selector(resetSavedLayouts), keyEquivalent: "")
+        menu.addItem(withTitle: "Debug…", action: #selector(showDebug), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit screenmonger", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu
     }()
 
-    @objc private func resetSavedLayouts() {
-        LayoutStore.clearAll()   // current set stays "known", so nothing re-pops
-    }
+    private let debugWindow = DebugWindow()
+    @objc private func showDebug() { debugWindow.show() }
 
     @objc private func statusItemClicked() {
         let rightClick = NSApp.currentEvent?.type == .rightMouseUp

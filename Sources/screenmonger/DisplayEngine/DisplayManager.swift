@@ -36,7 +36,9 @@ enum DisplayManager {
             let vendor = CGDisplayVendorNumber(id)
             let model = CGDisplayModelNumber(id)
             let serial = CGDisplaySerialNumber(id)
-            let fingerprint = "\(vendor)-\(model)-\(serial)"
+            let edidHash = EDID.hash(vendor: vendor, product: model, serial: serial)
+            // Same key `fingerprint` exposes: EDID hash if we have it, else vendor/model/serial.
+            let fingerprint = edidHash ?? "\(vendor)-\(model)-\(serial)"
 
             // Prefer a manual calibration over EDID, which some monitors fake — but
             // the built-in's EDID is authoritative, so it always uses EDID (ignoring
@@ -57,6 +59,7 @@ enum DisplayManager {
                 vendor: vendor,
                 model: model,
                 serial: serial,
+                edidHash: edidHash,
                 refreshHz: mode?.refreshRate ?? 0
             )
         }

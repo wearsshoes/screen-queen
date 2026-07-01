@@ -14,6 +14,7 @@ enum LayoutStore {
 
     /// One display's saved state.
     struct Entry: Codable, Equatable {
+        var name: String = ""   // for readability in the debug view
         var originX: Double
         var originY: Double
         var isMain: Bool
@@ -48,11 +49,15 @@ enum LayoutStore {
 
     // MARK: - API
 
+    /// Every saved profile, keyed by its set key — for the debug view.
+    static func allProfiles() -> [String: Profile] { all() }
+
     /// Build a profile capturing the current layout of `displays`.
     static func profile(from displays: [DisplaySnapshot]) -> Profile {
         var p: Profile = [:]
         for d in displays {
             p[d.fingerprint] = Entry(
+                name: d.name,
                 originX: Double(d.bounds.minX), originY: Double(d.bounds.minY),
                 isMain: d.isMain,
                 pixelWidth: Int(d.pixelSize.width), pixelHeight: Int(d.pixelSize.height),
