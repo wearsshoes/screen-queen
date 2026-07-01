@@ -111,8 +111,15 @@ enum SchematicLayout {
                 let cs = child.bounds.size, cPhys = physSize(child)
                 let yOv = min(pr.maxY, cr.maxY) - max(pr.minY, cr.minY)
                 let xOv = min(pr.maxX, cr.maxX) - max(pr.minX, cr.minX)
+                // The perpendicular flush is unambiguous; the *along-seam* inverse can be
+                // (a child taller/wider than this parent has a non-monotonic seam map). So
+                // resolve the along-coordinate against whichever *placed* neighbor gives an
+                // unambiguous inverse — the seam set as a whole pins the one true preimage,
+                // no exhaustive solve needed. Falls back to the parent's own (first) preimage.
                 func along(_ physAlong: CGFloat, _ vertical: Bool) -> CGFloat {
-                    seamPoint(physAlong, seamAnchors(child: child, cPhys, parentPoint: pp, parentPhys: pr, vertical: vertical))
+                    resolveAlong(child: child, cPhys: cPhys, physAlong: physAlong,
+                                 vertical: vertical, parent: parent, pp: pp, pr: pr,
+                                 origins: origins, rects: rects, byID: byID)
                 }
                 var origin: CGPoint?
                 if abs(cr.minX - pr.maxX) <= tol, yOv > -tol {
@@ -139,6 +146,39 @@ enum SchematicLayout {
         return origins
     }
 
+    /// Resolve `child`'s point along-coordinate from its physical `physAlong`, using
+    /// the seam set to disambiguate a non-monotonic inverse. Tries the docking parent
+    /// first; if that seam has multiple preimages, walks the other *already-placed*
+    /// neighbors sharing the same seam orientation for one that inverts unambiguously,
+    /// and takes that. Falls back to the parent's first preimage when none is cleaner.
+    private static func resolveAlong(child: DisplaySnapshot, cPhys: CGSize, physAlong: CGFloat,
+                                     vertical: Bool, parent: DisplaySnapshot, pp: CGRect, pr: CGRect,
+                                     origins: [CGDirectDisplayID: CGPoint],
+                                     rects: [CGDirectDisplayID: CGRect],
+                                     byID: [CGDirectDisplayID: DisplaySnapshot]) -> CGFloat {
+        let cr = rects[child.id]!
+        let base = seamPointResolved(physAlong, seamAnchors(child: child, cPhys, parentPoint: pp, parentPhys: pr, vertical: vertical))
+        if base.preimages <= 1 { return base.point }   // parent seam already unique
+
+        // Parent seam is ambiguous: find a placed neighbor whose seam (same orientation)
+        // the child also shares, and whose inverse is unambiguous.
+        let tol: CGFloat = 2
+        for (nid, no) in origins where nid != parent.id {
+            guard let n = byID[nid], let nr = rects[nid] else { continue }
+            // Same-orientation seam with the child, on the physical plane?
+            let shares = vertical
+                ? (abs(cr.minX - nr.maxX) <= tol || abs(cr.maxX - nr.minX) <= tol)
+                    && min(cr.maxY, nr.maxY) - max(cr.minY, nr.minY) > -tol
+                : (abs(cr.minY - nr.maxY) <= tol || abs(cr.maxY - nr.minY) <= tol)
+                    && min(cr.maxX, nr.maxX) - max(cr.minX, nr.minX) > -tol
+            guard shares else { continue }
+            let np = CGRect(origin: no, size: n.bounds.size)
+            let r = seamPointResolved(physAlong, seamAnchors(child: child, cPhys, parentPoint: np, parentPhys: nr, vertical: vertical))
+            if r.preimages == 1 { return r.point }
+        }
+        return base.point
+    }
+
     /// The child's physical coordinate along the seam, from its point coordinate via
     /// the four seam anchors.
     private static func alignedPerp(child: DisplaySnapshot, parent: DisplaySnapshot,
@@ -147,16 +187,49 @@ enum SchematicLayout {
         return seamPhysical(vertical ? child.bounds.minY : child.bounds.minX, anchors)
     }
 
-    /// Point-along → physical-along along a seam. The map can be non-monotonic (a
-    /// taller-and-narrower neighbor), which is fine: interpret and commit only
-    /// evaluate it *at* anchors, where it's exact.
+    /// Point-along → physical-along along a seam. The forward map is piecewise-linear
+    /// in *point* order (the anchors' point coordinates are monotonic).
     static func seamPhysical(_ pointAlong: CGFloat, _ anchors: [(CGFloat, CGFloat)]) -> CGFloat {
         piecewise(pointAlong, anchors)
     }
 
-    /// The inverse (physical-along → point-along) used at commit.
+    /// The inverse (physical-along → point-along) used at commit, with how many seam
+    /// segments the value could have come from — `preimages > 1` means this seam alone
+    /// can't disambiguate (see `seamPoint`); a caller can then try another seam.
+    ///
+    /// The physical anchor coordinates can be *non-monotonic* (a child physically
+    /// taller/wider than its parent puts the edge-alignment anchors outside the corner
+    /// anchors), so we can't just swap and re-sort — sorting by physical scrambles which
+    /// segment a value belongs to, and forward/inverse stop being inverses (a committed
+    /// layout drifts). Instead invert segment-by-segment in the forward's own point
+    /// order, so we land on the same segment the forward used.
+    static func seamPointResolved(_ physAlong: CGFloat,
+                                  _ anchors: [(CGFloat, CGFloat)]) -> (point: CGFloat, preimages: Int) {
+        let p = anchors.sorted { $0.0 < $1.0 }   // forward order: by point coordinate
+        func inv(_ a: (CGFloat, CGFloat), _ b: (CGFloat, CGFloat)) -> CGFloat {
+            guard b.1 != a.1 else { return (a.0 + b.0) / 2 }   // flat segment → point midpoint
+            return a.0 + (b.0 - a.0) / (b.1 - a.1) * (physAlong - a.1)
+        }
+        // Each segment [p[i], p[i+1]] covers physical range [p[i].1, p[i+1].1] (either
+        // orientation). Count the segments whose range contains `physAlong`; the first
+        // is the answer (forward's own point order), the count is the ambiguity.
+        var first: CGFloat?, count = 0
+        for i in 0..<(p.count - 1) {
+            let lo = min(p[i].1, p[i + 1].1), hi = max(p[i].1, p[i + 1].1)
+            if physAlong >= lo, physAlong <= hi { count += 1; if first == nil { first = inv(p[i], p[i + 1]) } }
+        }
+        if let first { return (first, count) }
+        // Outside all segments: extrapolate off whichever end is closer in physical.
+        let firstMid = (p[0].1 + p[1].1) / 2
+        let point = abs(physAlong - firstMid) <= abs(physAlong - (p[p.count - 2].1 + p[p.count - 1].1) / 2)
+            ? inv(p[0], p[1]) : inv(p[p.count - 2], p[p.count - 1])
+        return (point, 0)
+    }
+
+    /// The inverse (physical-along → point-along), taking the first (point-order)
+    /// preimage. See `seamPointResolved` for the ambiguity count.
     static func seamPoint(_ physAlong: CGFloat, _ anchors: [(CGFloat, CGFloat)]) -> CGFloat {
-        piecewise(physAlong, anchors.map { ($0.1, $0.0) })
+        seamPointResolved(physAlong, anchors).point
     }
 
     /// The four (point, physical) anchor pairs along the seam where the two metric

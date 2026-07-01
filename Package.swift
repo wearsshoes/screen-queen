@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "screenmonger",
             path: "Sources/screenmonger"
+        ),
+        .testTarget(
+            name: "screenmongerTests",
+            dependencies: ["screenmonger"],
+            path: "Tests/screenmongerTests"
         )
     ],
     // Phase 1 uses language mode 5 to keep the AppKit/C-callback glue simple.
