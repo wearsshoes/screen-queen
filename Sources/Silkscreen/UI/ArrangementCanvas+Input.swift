@@ -27,6 +27,10 @@ extension ArrangementCanvas {
         if let id = unmirrorButtonRects.first(where: { $0.value.contains(p) })?.key {
             onUnmirror?(id); return
         }
+        // The AirPlay card's "Open Settings" button hands off to Screen Mirroring.
+        if airplaySettingsButtonRect?.contains(p) == true {
+            onOpenAirPlaySettings?(); return
+        }
         // Grabbing the main tile's menu-bar strip starts a "move main" drag.
         if mainMenuBarViewRect()?.contains(p) == true { draggingMenuBar = p; needsDisplay = true; return }
         // Grabbing the selected tile's resolution slider starts a zoom drag (takes

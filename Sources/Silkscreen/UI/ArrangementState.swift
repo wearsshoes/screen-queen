@@ -19,6 +19,9 @@ final class ArrangementState {
     var onCalibrate: ((CGDirectDisplayID) -> Void)?
     var onCalibrateVisual: ((CGDirectDisplayID) -> Void)?
     var onResetCalibration: ((CGDirectDisplayID) -> Void)?
+    /// Open the system Screen Mirroring settings — the honest "manage it" action for a
+    /// macOS-managed AirPlay session (which we can detect but not cancel via public API).
+    var onOpenAirPlaySettings: (() -> Void)?
     var onDismiss: (() -> Void)?
     /// Restore everything to the state captured when the arranger was opened.
     var onReset: (() -> Void)?
@@ -28,6 +31,12 @@ final class ArrangementState {
 
     var displays: [DisplaySnapshot] = []
     var selectedID: CGDirectDisplayID?
+
+    /// A live macOS-managed AirPlay visual session (nil when none). Detected via a
+    /// power assertion, so it catches even the "Window or App" mode that has no
+    /// `CGDirectDisplayID` — see `AirPlayMonitor`. Shown as a read-only card in the
+    /// right column; we can surface it but not cancel it.
+    var airplaySession: AirPlaySession?
 
     /// The physical plane (inches) — the source of truth while manipulating.
     var plane: [CGDirectDisplayID: CGRect] = [:]
@@ -90,6 +99,7 @@ final class ArrangementState {
 
     func update(with displays: [DisplaySnapshot], force: Bool = false) {
         self.displays = displays
+        self.airplaySession = AirPlayMonitor.currentSession()
         let plane = displays.filter { !$0.isMirrored }
         if force || !planeMatches(plane) { self.plane = SchematicLayout.toPlane(plane) }
         pendingSize.removeAll()

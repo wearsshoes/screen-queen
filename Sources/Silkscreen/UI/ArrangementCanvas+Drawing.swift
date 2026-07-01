@@ -261,8 +261,9 @@ extension ArrangementCanvas {
     /// un-mirror button that returns it to the plane.
     private func drawMirrorColumn() {
         unmirrorButtonRects.removeAll()
+        airplaySettingsButtonRect = nil
         let mirrored = mirroredDisplays
-        guard !mirrored.isEmpty else { return }
+        guard !mirrored.isEmpty || airplaySession != nil else { return }
         let colW = mirrorColumnWidth
         let colX = bounds.width - colW
         let pad: CGFloat = 18
@@ -274,8 +275,11 @@ extension ArrangementCanvas {
             .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
             .foregroundColor: NSColor.secondaryLabelColor,
         ]
-        ("Mirrored" as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
-        y += 26
+
+        if !mirrored.isEmpty {
+            ("Mirrored" as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
+            y += 26
+        }
 
         for d in mirrored {
             // The card is a scaled rectangle of the real screen: fixed width, height from
@@ -325,6 +329,79 @@ extension ArrangementCanvas {
 
             y += cardH + gap
         }
+
+        if let session = airplaySession {
+            drawAirPlayCard(session, colX: colX, pad: pad, cardW: cardW, y: &y, hAttrs: hAttrs)
+        }
+    }
+
+    /// A read-only card for a macOS-managed AirPlay *visual* session — including the
+    /// "Window or App" mode that has no `CGDirectDisplay`, which is why it lives here
+    /// rather than as a plane tile. We can detect it (via `AirPlayMonitor`) but can't
+    /// cancel it through public API, so the action hands off to system settings.
+    private func drawAirPlayCard(
+        _ session: AirPlaySession, colX: CGFloat, pad: CGFloat, cardW: CGFloat,
+        y: inout CGFloat, hAttrs: [NSAttributedString.Key: Any]
+    ) {
+        ("AirPlay" as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
+        y += 26
+
+        let cardH: CGFloat = 140
+        let card = NSRect(x: colX + pad, y: y, width: cardW, height: cardH)
+        NSColor(white: 0.72, alpha: 0.85).setFill()
+        NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
+
+        let inner = card.insetBy(dx: 18, dy: 16)
+        var ty = inner.minY
+        func line(_ s: String, _ font: NSFont, _ color: NSColor) {
+            let a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            let bounding = (s as NSString).boundingRect(
+                with: CGSize(width: inner.width, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: a)
+            (s as NSString).draw(with: CGRect(x: inner.minX, y: ty, width: inner.width, height: bounding.height),
+                                 options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: a)
+            ty += bounding.height + 5
+        }
+
+        // Device name, with the AirPlay glyph inline before it (sized to the 20pt title
+        // and drawn as a template so it takes the label color).
+        let nameFont = NSFont.boldSystemFont(ofSize: 20)
+        var nameX = inner.minX
+        if let icon = NSImage(systemSymbolName: "airplayvideo", accessibilityDescription: "AirPlay") {
+            let cfg = NSImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            let glyph = (icon.withSymbolConfiguration(cfg) ?? icon)
+            glyph.isTemplate = true
+            let gh = glyph.size.height, gw = glyph.size.width
+            // Vertically center the glyph on the name's cap height.
+            let iconRect = NSRect(x: nameX, y: ty + (nameFont.ascender - gh) / 2 + 2, width: gw, height: gh)
+            NSColor.labelColor.set()
+            glyph.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1,
+                       respectFlipped: true, hints: nil)
+            nameX = iconRect.maxX + 8
+        }
+        let name = (session.receiverName ?? "AirPlay receiver") as NSString
+        let nameAttrs: [NSAttributedString.Key: Any] = [.font: nameFont, .foregroundColor: NSColor.labelColor]
+        name.draw(at: CGPoint(x: nameX, y: ty), withAttributes: nameAttrs)
+        ty += name.size(withAttributes: nameAttrs).height + 5
+        line("Mirroring a window or app", .systemFont(ofSize: 15), .labelColor)
+        line("Managed by macOS.",
+             .systemFont(ofSize: 13), .secondaryLabelColor)
+
+        // Hands off to the Control Center **Screen Mirroring** menu — the live control
+        // for an AirPlay session (Display Settings doesn't know about it), and the only
+        // way to change or end one we can see but can't cancel ourselves.
+        let btn = NSRect(x: inner.minX, y: ty + 6, width: 168, height: 28)
+        NSColor(white: 0.4, alpha: 0.9).setFill()
+        NSBezierPath(roundedRect: btn, xRadius: 6, yRadius: 6).fill()
+        let ba: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.white,
+        ]
+        let label = "Open Screen Mirroring" as NSString
+        let ls = label.size(withAttributes: ba)
+        label.draw(at: CGPoint(x: btn.midX - ls.width / 2, y: btn.midY - ls.height / 2), withAttributes: ba)
+        airplaySettingsButtonRect = btn
+
+        y += cardH + 16
     }
 
     private func drawTile(for display: DisplaySnapshot, in rect: NSRect, scale: CGFloat) {

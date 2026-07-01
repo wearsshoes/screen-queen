@@ -134,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.onCalibrate = { [weak self] id in self?.calibrate(id) }
         s.onCalibrateVisual = { [weak self] id in self?.calibrateVisual(id) }
         s.onResetCalibration = { [weak self] id in self?.resetCalibration(id) }
+        s.onOpenAirPlaySettings = { [weak self] in self?.openAirPlaySettings() }
         s.onDismiss = { [weak self] in self?.dismissArranger() }
         s.onReset = { [weak self] in self?.resetToBaseline() }
         // A live plane change (drag / nudge / align) marks the session live so the
@@ -199,6 +200,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let d = DisplayManager.snapshot().first(where: { $0.id == id }) else { return }
         CalibrationStore.clearOverride(for: d.fingerprint)
         refresh()
+    }
+
+    /// Open the Control Center **Screen Mirroring** menu — the honest "manage it" action
+    /// for a detected AirPlay session, since public API can't cancel one Silkscreen didn't
+    /// start. It has to be the Screen Mirroring menu specifically: Display *Settings*
+    /// doesn't know about AirPlay window/app sessions either. There's no public URL for
+    /// the Control Center module, so we click its menu-bar item via System Events (needs
+    /// Accessibility permission; brittle by nature, hence the best-effort try).
+    private func openAirPlaySettings() {
+        let script = """
+        tell application "System Events" to tell process "ControlCenter" ¬
+            to click (first menu bar item of menu bar 1 whose description is "Screen Mirroring")
+        """
+        var error: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
     }
 
     /// Apply a reconfiguration and offer a countdown "Revert" at the bottom of every

@@ -38,30 +38,102 @@ final class ArrangementCanvas: NSView {
         undoButton.target = self; undoButton.action = #selector(undoTapped)
         doneButton.target = self; doneButton.action = #selector(doneTapped)
         doneButton.keyEquivalent = "\r"   // primary action → renders blue (default button)
-        for b in [resetButton, undoButton, doneButton] { b.bezelStyle = .rounded }
+        for b in [resetButton, undoButton, doneButton] {
+            b.bezelStyle = .push
+            b.controlSize = .large
+        }
+        // Icon-only round glass buttons (like the Spotlight icon pills). Titles are
+        // dropped for the label; tooltips keep them identifiable.
+        resetButton.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Reset")
+        undoButton.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: "Undo")
+        doneButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Done")
+        let iconConfig = NSImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
+        resetButton.toolTip = "Reset"; undoButton.toolTip = "Undo"; doneButton.toolTip = "Done"
+        for b in [resetButton, undoButton, doneButton] {
+            b.image = b.image?.withSymbolConfiguration(iconConfig)
+            b.imagePosition = .imageOnly
+            b.title = ""
+        }
+        resetButton.image = resetButton.image?.rotatedCCW(degrees: 120, offset: CGSize(width: -1, height: 0))
 
-        let stack = NSStackView(views: [resetButton, undoButton, doneButton])
-        stack.orientation = .horizontal
-        stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        // Each button is its own glass capsule (like the Spotlight icon pills), grouped
+        // in a container so nearby glass samples the backdrop consistently and merges
+        // fluidly. On macOS 26+ (Tahoe) this is real Liquid Glass; older systems keep
+        // the ordinary buttons in a plain stack.
+        let container: NSView
+        if #available(macOS 26.0, *) {
+            // Chromeless buttons so the glass capsule *is* the surface; the label/icon
+            // still draws (border off ≠ content off).
+            for b in [resetButton, undoButton, doneButton] {
+                b.isBordered = false
+                b.contentTintColor = .labelColor
+            }
 
-        buttonBar.material = .hudWindow
-        buttonBar.blendingMode = .withinWindow
-        buttonBar.state = .active
-        buttonBar.wantsLayer = true
-        buttonBar.layer?.cornerRadius = 12
-        buttonBar.translatesAutoresizingMaskIntoConstraints = false
-        buttonBar.addSubview(stack)
-        addSubview(buttonBar)
+            // Wrap each button in a padding container, and set THAT as the glass view's
+            // contentView. (Adding a control directly to the glass view renders it blank
+            // — the glass only composites its `contentView`.)
+            let diameter: CGFloat = 56
+            let glassy = zip([resetButton, undoButton, doneButton], [false, false, true]).map {
+                (button, prominent) -> NSGlassEffectView in
+                // A square content box → the glass renders as a circle (radius = ½ side).
+                let pad = NSView()
+                pad.translatesAutoresizingMaskIntoConstraints = false
+                button.translatesAutoresizingMaskIntoConstraints = false
+                pad.addSubview(button)
+                NSLayoutConstraint.activate([
+                    pad.widthAnchor.constraint(equalToConstant: diameter),
+                    pad.heightAnchor.constraint(equalToConstant: diameter),
+                    button.centerXAnchor.constraint(equalTo: pad.centerXAnchor),
+                    button.centerYAnchor.constraint(equalTo: pad.centerYAnchor),
+                ])
 
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: buttonBar.topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(equalTo: buttonBar.bottomAnchor, constant: -12),
-            stack.leadingAnchor.constraint(equalTo: buttonBar.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: buttonBar.trailingAnchor, constant: -16),
-            buttonBar.centerXAnchor.constraint(equalTo: centerXAnchor),
-        ])
-        buttonBarBottom = buttonBar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -80)
+                // A lighter accent so the clear glass stays see-through on Done.
+                let base = prominent
+                    ? (NSColor.controlAccentColor.blended(withFraction: 0.72, of: .white)
+                        ?? .controlAccentColor).withAlphaComponent(0.35)
+                    : nil
+                let g = HoverGlassView(baseTint: base)
+                g.button = button         // hover only lights up while the button is enabled
+                g.cornerRadius = diameter / 2   // full circle
+                g.style = .clear          // high-transparency variant — see the backdrop through it
+                g.contentView = pad
+                return g
+            }
+            let stack = NSStackView(views: glassy)
+            stack.orientation = .horizontal
+            stack.spacing = 22
+            stack.translatesAutoresizingMaskIntoConstraints = false
+
+            let group = NSGlassEffectContainerView()
+            group.spacing = 14          // merge distance between neighboring glass shapes
+            group.contentView = stack
+            container = group
+        } else {
+            let stack = NSStackView(views: [resetButton, undoButton, doneButton])
+            stack.orientation = .horizontal
+            stack.spacing = 12
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            buttonBar.material = .hudWindow
+            buttonBar.blendingMode = .withinWindow
+            buttonBar.state = .active
+            buttonBar.wantsLayer = true
+            buttonBar.layer?.cornerRadius = 22
+            buttonBar.layer?.cornerCurve = .continuous
+            buttonBar.layer?.borderWidth = 0.5
+            buttonBar.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+            buttonBar.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.topAnchor.constraint(equalTo: buttonBar.topAnchor, constant: 12),
+                stack.bottomAnchor.constraint(equalTo: buttonBar.bottomAnchor, constant: -12),
+                stack.leadingAnchor.constraint(equalTo: buttonBar.leadingAnchor, constant: 16),
+                stack.trailingAnchor.constraint(equalTo: buttonBar.trailingAnchor, constant: -16),
+            ])
+            container = buttonBar
+        }
+        container.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(container)
+        container.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
+        buttonBarBottom = container.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -130)
         buttonBarBottom?.isActive = true
     }
 
@@ -75,7 +147,7 @@ final class ArrangementCanvas: NSView {
         if let screen = window?.screen {
             // Height the Dock lifts the visible area off the screen's bottom edge.
             let dockInset = max(0, screen.visibleFrame.minY - screen.frame.minY)
-            buttonBarBottom?.constant = -80 - dockInset
+            buttonBarBottom?.constant = -130 - dockInset
         }
     }
 
@@ -107,7 +179,10 @@ final class ArrangementCanvas: NSView {
     var onCalibrate: ((CGDirectDisplayID) -> Void)? { state.onCalibrate }
     var onCalibrateVisual: ((CGDirectDisplayID) -> Void)? { state.onCalibrateVisual }
     var onResetCalibration: ((CGDirectDisplayID) -> Void)? { state.onResetCalibration }
+    var onOpenAirPlaySettings: (() -> Void)? { state.onOpenAirPlaySettings }
     var onDismiss: (() -> Void)? { state.onDismiss }
+
+    var airplaySession: AirPlaySession? { state.airplaySession }
 
     // Mouse drag state (local to the canvas handling the gesture).
     var draggedID: CGDirectDisplayID?
@@ -151,12 +226,19 @@ final class ArrangementCanvas: NSView {
     let outerPadding: CGFloat = 32
     let tileCornerRadius: CGFloat = 8
 
-    /// Width of the right-hand mirror column overlay (0 when nothing is mirrored).
-    var mirrorColumnWidth: CGFloat { mirroredDisplays.isEmpty ? 0 : 360 }
+    /// Width of the right-hand column overlay (0 when it holds nothing). Home to both
+    /// mirrored-display cards and a macOS-managed AirPlay session card.
+    var mirrorColumnWidth: CGFloat {
+        mirroredDisplays.isEmpty && airplaySession == nil ? 0 : 360
+    }
 
     /// The un-mirror button rects from the most recent draw, per mirrored display id,
     /// for click hit-testing (view-local, so per-canvas).
     var unmirrorButtonRects: [CGDirectDisplayID: NSRect] = [:]
+
+    /// The "Open Settings" button rect on the AirPlay card from the most recent draw,
+    /// for click hit-testing. nil when no AirPlay card was drawn.
+    var airplaySettingsButtonRect: NSRect?
 
     /// Cached native pixel aspect per display (see `nativeAspect`). Fixed per physical
     /// panel, so a stale entry for a disconnected id is harmless.

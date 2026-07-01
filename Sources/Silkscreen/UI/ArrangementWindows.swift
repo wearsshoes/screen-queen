@@ -23,6 +23,17 @@ final class ArrangementWindows {
         rebuild()
         canvases.forEach { $0.refresh() }
         NSApp.activate(ignoringOtherApps: true)
+        // Activating alone doesn't make a borderless overlay key, so on hotkey-open the
+        // arranger takes no keyboard focus until clicked. Make the main display's window
+        // key so shortcuts (arrows, ⌘Z, ⌘Delete, Return) work immediately.
+        makeMainWindowKey()
+    }
+
+    /// Make the arranger window on the main display key (falling back to any window).
+    private func makeMainWindowKey() {
+        let mainID = state.displays.first(where: { $0.isMain })?.id
+        let window = mainID.flatMap { windows[$0] } ?? windows.values.first
+        window?.makeKeyAndOrderFront(nil)
     }
 
     func hide() {
