@@ -19,7 +19,7 @@ final class DebugWindow {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 460),
                          styleMask: [.titled, .closable, .resizable],
                          backing: .buffered, defer: false)
-        w.title = "screenmonger — Debug"
+        w.title = "Silkscreen — Debug"
         w.isReleasedWhenClosed = false
 
         let scroll = NSScrollView()

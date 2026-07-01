@@ -2,17 +2,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "screenmonger",
+    name: "Silkscreen",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "screenmonger",
-            path: "Sources/screenmonger"
+            name: "Silkscreen",
+            path: "Sources/Silkscreen"
         ),
         .testTarget(
-            name: "screenmongerTests",
-            dependencies: ["screenmonger"],
-            path: "Tests/screenmongerTests"
+            name: "SilkscreenTests",
+            dependencies: ["Silkscreen"],
+            path: "Tests/SilkscreenTests"
         )
     ],
     // Phase 1 uses language mode 5 to keep the AppKit/C-callback glue simple.

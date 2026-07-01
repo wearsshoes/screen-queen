@@ -19,6 +19,26 @@
             "target": "screenmonger",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release screenmonger"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:screenmonger}",
+            "name": "Debug Silkscreen",
+            "target": "Silkscreen",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Silkscreen"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:screenmonger}",
+            "name": "Release Silkscreen",
+            "target": "Silkscreen",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Silkscreen"
         }
     ]
 }

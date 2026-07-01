@@ -1,6 +1,6 @@
 import CoreGraphics
 import XCTest
-@testable import screenmonger
+@testable import Silkscreen
 
 /// Round-trip and seam-map invariants for `SchematicLayout`. The point↔physical
 /// seam map must be a faithful inverse pair so a committed layout doesn't drift
