@@ -43,11 +43,6 @@ struct DisplaySnapshot: Identifiable, Equatable {
     let model: UInt32
     let serial: UInt32
 
-    /// A hash of the full EDID (IOKit), when available. More unique than
-    /// vendor/model/serial — many panels report serial 0, so two identical monitors
-    /// would otherwise collide. `nil` when the EDID can't be read (e.g. the built-in).
-    let edidHash: String?
-
     /// Refresh rate in Hz (0 if unknown, e.g. some built-in panels).
     let refreshHz: Double
 
@@ -75,10 +70,15 @@ struct DisplaySnapshot: Identifiable, Equatable {
         return Double(bounds.width) / inches
     }
 
-    /// Stable identity for a physical display across reconnects. Prefer the full-EDID
-    /// hash (distinguishes two identical monitors that both report serial 0); fall
-    /// back to vendor/model/serial when the EDID is unavailable.
-    var fingerprint: String { edidHash ?? "\(vendor)-\(model)-\(serial)" }
+    /// Stable identity for a physical display across reconnects. Serial is 0 on some
+    /// panels; vendor+model still disambiguates most setups. (A full-EDID hash was
+    /// tried but adds nothing: when the serial is unique this already works, and two
+    /// truly-identical monitors have byte-identical EDIDs so a hash collides too.)
+    var fingerprint: String { "\(vendor)-\(model)-\(serial)" }
+
+    /// A stable, memorable nickname derived from the fingerprint (a temporary handle
+    /// until the user can assign custom names).
+    var nickname: String { Moniker.nickname(for: fingerprint) }
 
     /// A copy with new `bounds` — for building a *prospective* layout (drag or
     /// resolution preview) without actually reconfiguring the displays.
@@ -88,8 +88,7 @@ struct DisplaySnapshot: Identifiable, Equatable {
             pixelSize: pixelSize, physicalSizeMM: physicalSizeMM,
             physicalSizeIsCalibrated: physicalSizeIsCalibrated,
             isMain: isMain, isBuiltin: isBuiltin,
-            vendor: vendor, model: model, serial: serial, edidHash: edidHash,
-            refreshHz: refreshHz
+            vendor: vendor, model: model, serial: serial, refreshHz: refreshHz
         )
     }
 

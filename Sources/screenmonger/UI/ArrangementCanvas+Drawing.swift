@@ -135,22 +135,20 @@ extension ArrangementCanvas {
         path.lineWidth = selected ? 3 : 1.5; path.stroke()
         drawBoxing(for: display, in: inset, color: color)
         drawLabel(for: display, in: inset)
-        drawFingerprint(display, in: inset)
+        drawNickname(display, in: inset)
         // The main display carries a menu-bar strip (drag it to another tile to move main).
         if display.isMain, draggingMenuBar == nil { drawMenuBar(in: menuBarRect(inTile: inset)) }
     }
 
-    /// The first 5 chars of the display's EDID-hash fingerprint, faint at the tile
-    /// bottom — a quick way to see identical monitors are being told apart. Skipped
-    /// for the built-in (no EDID hash).
-    private func drawFingerprint(_ display: DisplaySnapshot, in rect: NSRect) {
-        guard let hash = display.edidHash else { return }
-        let text = String(hash.prefix(5))
+    /// The display's nickname (fingerprint-derived), faint at the tile bottom.
+    private func drawNickname(_ display: DisplaySnapshot, in rect: NSRect) {
+        let text = display.nickname
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .regular),
             .foregroundColor: NSColor.labelColor.withAlphaComponent(0.35),
         ]
         let s = (text as NSString).size(withAttributes: attrs)
+        guard s.width <= rect.width - 8 else { return }
         (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: rect.maxY - s.height - 4),
                                 withAttributes: attrs)   // flipped view: maxY is the bottom
     }

@@ -60,7 +60,7 @@ final class DebugWindow {
     private func refresh() {
         var s = "CONNECTED DISPLAYS\n\n"
         for d in DisplayManager.snapshot() {
-            s += "• \(d.name)\(d.isMain ? "  [main]" : "")\(d.isBuiltin ? "  [builtin]" : "")\n"
+            s += "• \(d.name)  “\(d.nickname)”\(d.isMain ? "  [main]" : "")\(d.isBuiltin ? "  [builtin]" : "")\n"
             s += "    fingerprint: \(d.fingerprint)\n"
             s += String(format: "    %.0f×%.0f pt · %.0f×%.0f px\n\n",
                         d.bounds.width, d.bounds.height, d.pixelSize.width, d.pixelSize.height)
