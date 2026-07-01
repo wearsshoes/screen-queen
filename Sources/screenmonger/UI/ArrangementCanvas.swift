@@ -15,32 +15,107 @@ import AppKit
 /// ⌘⇧+arrows/WASD step alignment; ⌘ +/−/0 change resolution.
 final class ArrangementCanvas: NSView {
 
-    var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)?
-    /// The plane's reference bars, for the on-glass overlay (the same bars the arranger draws).
-    var onPreview: (([SeamBar]) -> Void)?
-    var onSetMain: ((CGDirectDisplayID) -> Void)?
-    /// Change a display's resolution *and* re-commit the arrangement so the alignment
-    /// along the seam is preserved at the new point size.
-    var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)?
-    var onCalibrate: ((CGDirectDisplayID) -> Void)?
-    var onCalibrateVisual: ((CGDirectDisplayID) -> Void)?
-    var onResetCalibration: ((CGDirectDisplayID) -> Void)?
-    /// Dismiss the (windowless) arranger, e.g. on Escape.
-    var onDismiss: (() -> Void)?
+    /// Shared editing state — one instance across every per-screen canvas.
+    let state: ArrangementState
+    private let resetButton = NSButton(title: "Reset", target: nil, action: nil)
+    private let undoButton = NSButton(title: "Undo", target: nil, action: nil)
+    private let doneButton = NSButton(title: "Done", target: nil, action: nil)
+    private let buttonBar = NSVisualEffectView()
 
-    private var displays: [DisplaySnapshot] = []
-    private var colorFor: [CGDirectDisplayID: NSColor] = [:]
-    private var selectedID: CGDirectDisplayID?
+    init(state: ArrangementState, frame: NSRect) {
+        self.state = state
+        super.init(frame: frame)
+        setupButtonBar()
+    }
+    required init?(coder: NSCoder) { fatalError() }
 
-    /// Physical rects (inches) while manipulating. Empty ⇒ not manipulating.
-    private var plane: [CGDirectDisplayID: CGRect] = [:]
+    /// Idiomatic bottom button bar (Reset · Undo · Done) grouped in a rounded box,
+    /// on every screen, sitting above the Dock.
+    private func setupButtonBar() {
+        resetButton.keyEquivalent = "\u{8}"; resetButton.keyEquivalentModifierMask = .command  // ⌘Delete
+        resetButton.target = self; resetButton.action = #selector(resetTapped)
+        undoButton.keyEquivalent = "z"; undoButton.keyEquivalentModifierMask = .command
+        undoButton.target = self; undoButton.action = #selector(undoTapped)
+        doneButton.target = self; doneButton.action = #selector(doneTapped)  // Enter/⌘Enter via keyDown
+        for b in [resetButton, undoButton, doneButton] { b.bezelStyle = .rounded }
 
-    // Mouse drag state.
+        let stack = NSStackView(views: [resetButton, undoButton, doneButton])
+        stack.orientation = .horizontal
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        buttonBar.material = .hudWindow
+        buttonBar.blendingMode = .withinWindow
+        buttonBar.state = .active
+        buttonBar.wantsLayer = true
+        buttonBar.layer?.cornerRadius = 12
+        buttonBar.translatesAutoresizingMaskIntoConstraints = false
+        buttonBar.addSubview(stack)
+        addSubview(buttonBar)
+
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: buttonBar.topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(equalTo: buttonBar.bottomAnchor, constant: -12),
+            stack.leadingAnchor.constraint(equalTo: buttonBar.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: buttonBar.trailingAnchor, constant: -16),
+            buttonBar.centerXAnchor.constraint(equalTo: centerXAnchor),
+        ])
+        buttonBarBottom = buttonBar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -80)
+        buttonBarBottom?.isActive = true
+    }
+
+    private var buttonBarBottom: NSLayoutConstraint?
+
+    /// Keep the button bar above the Dock (which intrudes on visibleFrame, not the safe
+    /// area, for a full-screen borderless window) and clear of a bottom-edge alignment
+    /// arrow (which lives ~40–65px up from the screen bottom).
+    override func layout() {
+        super.layout()
+        if let screen = window?.screen {
+            // Height the Dock lifts the visible area off the screen's bottom edge.
+            let dockInset = max(0, screen.visibleFrame.minY - screen.frame.minY)
+            buttonBarBottom?.constant = -80 - dockInset
+        }
+    }
+
+    @objc private func resetTapped() { state.onReset?() }
+    @objc private func undoTapped() { state.undo() }
+    @objc private func doneTapped() { onDismiss?() }
+
+    /// Reflect undo availability (a plane edit or a pending revert) on the Undo button.
+    private func syncButtons() {
+        undoButton.isEnabled = state.canUndo
+    }
+
+    // Forwarding accessors so this view's methods read/write the shared state.
+    private var displays: [DisplaySnapshot] { get { state.displays } set { state.displays = newValue } }
+    private var colorFor: [CGDirectDisplayID: NSColor] { state.colorFor }
+    private var selectedID: CGDirectDisplayID? { get { state.selectedID } set { state.selectedID = newValue } }
+    private var plane: [CGDirectDisplayID: CGRect] { get { state.plane } set { state.plane = newValue } }
+    private var pendingSize: [CGDirectDisplayID: CGSize] { get { state.pendingSize } set { state.pendingSize = newValue } }
+    private var pendingMode: (id: CGDirectDisplayID, mode: CGDisplayMode)? { get { state.pendingMode } set { state.pendingMode = newValue } }
+    private var activeV: (selfA: VAnchor, otherA: VAnchor, otherID: CGDirectDisplayID)? { get { state.activeV } set { state.activeV = newValue } }
+    private var activeH: (selfA: HAnchor, otherA: HAnchor, otherID: CGDirectDisplayID)? { get { state.activeH } set { state.activeH = newValue } }
+    var extendedBuiltinModes: Bool { get { state.extendedBuiltinModes } set { state.extendedBuiltinModes = newValue } }
+
+    // Convenience forwards to the shared callbacks.
+    private var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)? { state.onCommit }
+    private var onSetMain: ((CGDirectDisplayID) -> Void)? { state.onSetMain }
+    private var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)? { state.onSetResolution }
+    private var onCalibrate: ((CGDirectDisplayID) -> Void)? { state.onCalibrate }
+    private var onCalibrateVisual: ((CGDirectDisplayID) -> Void)? { state.onCalibrateVisual }
+    private var onResetCalibration: ((CGDirectDisplayID) -> Void)? { state.onResetCalibration }
+    private var onDismiss: (() -> Void)? { state.onDismiss }
+
+    // Mouse drag state (local to the canvas handling the gesture).
     private var draggedID: CGDirectDisplayID?
     private var dragStartMouse: CGPoint = .zero
     private var dragStartPhys: CGPoint = .zero    // dragged tile's physical origin at grab
     private var dragTransform: Transform?         // frozen during a drag (stable cursor mapping)
     private var dragMoved = false
+
+    // Dragging the main display's menu-bar strip to move main to another tile.
+    private var draggingMenuBar: CGPoint?         // current cursor point while dragging
 
     // Keyboard continuous-move (nudge) state.
     private var heldDirections: Set<MoveDirection> = []
@@ -51,87 +126,36 @@ final class ArrangementCanvas: NSView {
     // One alignment step per ⌘⇧ press; commits when ⌘⇧ is released.
     private var alignPending = false
 
-    // Resolution: pending mode/size preview; commits the mode when ⌘ is released.
-    private var pendingSize: [CGDirectDisplayID: CGSize] = [:]
-    private var pendingMode: (id: CGDirectDisplayID, mode: CGDisplayMode)?
+    // Resolution preview flag (commits the pending mode when ⌘ is released).
     private var zoomPending = false
 
-    // Active alignment anchors, for the tile arrow markers.
-    private var activeV: (selfA: VAnchor, otherA: VAnchor, otherID: CGDirectDisplayID)?
-    private var activeH: (selfA: HAnchor, otherA: HAnchor, otherID: CGDirectDisplayID)?
-
-    /// Whether to show the built-in display's full (extended) resolution set.
-    var extendedBuiltinModes = false
+    /// The display this canvas's window sits on — its tile is centered in the view.
+    /// nil ⇒ center the main display (single-window fallback).
+    var centerID: CGDirectDisplayID?
 
     private let outerPadding: CGFloat = 32
     private let tileCornerRadius: CGFloat = 8
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    // Deliver clicks even when this window isn't key, so any screen's arranger reacts
+    // immediately (no activate-first click).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    func update(with displays: [DisplaySnapshot], colors: [CGDirectDisplayID: NSColor]) {
-        self.displays = displays
-        self.colorFor = colors
-        // Re-interpret only when the OS layout diverges from the plane — first load,
-        // hotplug, calibration, or an external rearrange. Our own commits round-trip,
-        // so the plane is kept.
-        if !planeMatches(displays) {
-            plane = SchematicLayout.toPlane(displays)
-        }
-        pendingSize.removeAll()
-        pendingMode = nil
-        zoomPending = false
-        draggedID = nil
-        if let sel = selectedID, !displays.contains(where: { $0.id == sel }) {
-            selectedID = nil; activeV = nil; activeH = nil
-        }
-        if selectedID == nil {
-            selectedID = displays.first(where: { $0.isMain })?.id ?? displays.first?.id
-        }
-        needsDisplay = true
-    }
+    /// Called by the state after a mutation so this view repaints.
+    func refresh() { syncButtons(); needsDisplay = true }
 
-    /// Whether the plane already represents `snapshot`: same displays and physical
-    /// sizes, and it converts back to the same point arrangement.
-    private func planeMatches(_ snapshot: [DisplaySnapshot]) -> Bool {
-        guard !plane.isEmpty, Set(snapshot.map(\.id)) == Set(plane.keys) else { return false }
-        for d in snapshot {
-            let ps = SchematicLayout.physSize(d)
-            guard let r = plane[d.id], abs(r.width - ps.width) < 0.05, abs(r.height - ps.height) < 0.05 else { return false }
-        }
-        let ours = SchematicLayout.toPoints(rects: plane, displays: snapshot)
-        for d in snapshot {
-            guard let o = ours[d.id], abs(o.x - d.bounds.minX) < 1.5, abs(o.y - d.bounds.minY) < 1.5 else { return false }
-        }
-        return true
-    }
-
-    // MARK: - Physical / point helpers
-
-    /// Effective point size (live during a zoom preview).
-    private func pointSize(_ d: DisplaySnapshot) -> CGSize { pendingSize[d.id] ?? d.bounds.size }
-
-    /// Displays with the effective point *size* applied (physical size unchanged),
-    /// keeping their committed origins. Enough for `toPoints`, which ignores origins.
-    private func sizedDisplays() -> [DisplaySnapshot] {
-        displays.map { $0.with(bounds: CGRect(origin: $0.bounds.origin, size: pointSize($0))) }
-    }
-
+    private func pointSize(_ d: DisplaySnapshot) -> CGSize { state.pointSize(d) }
+    private func sizedDisplays() -> [DisplaySnapshot] { state.sizedDisplays() }
     private func currentRects() -> [CGDirectDisplayID: CGRect] { plane }
-    /// The reference bars for the current plane (shared with the on-glass overlay).
-    /// Bar coordinates are screen-local, so the committed origins in `sizedDisplays()`
-    /// don't matter — only the plane rects and point sizes.
-    func currentBars() -> [SeamBar] { SchematicLayout.seamBars(sizedDisplays(), rects: plane) }
+    func currentBars() -> [SeamBar] { state.currentBars() }
 
-    /// Convert the plane to a point arrangement and commit. `toPoints` reads only the
-    /// displays' sizes and the plane, so the sized (un-reprojected) list is enough.
-    private func commitPlane() {
-        guard !plane.isEmpty else { return }
-        onCommit?(SchematicLayout.toPoints(rects: plane, displays: sizedDisplays()))
-    }
+    /// Commit the plane, then broadcast so every canvas redraws.
+    private func commitPlane() { state.commit() }
 
     /// Push the plane's bars to the on-glass overlay so it tracks the manipulation.
-    private func emitPreview() { onPreview?(currentBars()) }
+    /// Broadcast a plane change so every per-screen canvas redraws.
+    private func emitPreview() { state.notify() }
 
     // MARK: - View transform (fit the physical plane into the window)
 
@@ -155,9 +179,10 @@ final class ArrangementCanvas: NSView {
         let union = values.dropFirst().reduce(first) { $0.union($1) }
         guard union.width > 0, union.height > 0 else { return nil }
 
-        // Center the main display's tile at the view midpoint.
-        let mainRect = displays.first(where: { $0.isMain }).flatMap { rects[$0.id] } ?? union
-        let mainCenter = CGPoint(x: mainRect.midX, y: mainRect.midY)
+        // Center this screen's own tile (or the main, as a fallback) at the view midpoint.
+        let focusRect = (centerID.flatMap { rects[$0] })
+            ?? displays.first(where: { $0.isMain }).flatMap { rects[$0.id] } ?? union
+        let focus = CGPoint(x: focusRect.midX, y: focusRect.midY)
 
         let availW = bounds.width - outerPadding * 2, availH = bounds.height - outerPadding * 2
 
@@ -170,15 +195,15 @@ final class ArrangementCanvas: NSView {
                               availH / (3 * max(largestH, 0.0001)))
 
         // But never let the layout overflow: cap so the union fits with padding.
-        // The main is centered, so each axis is limited by the union's farther side.
-        let reachX = max(mainCenter.x - union.minX, union.maxX - mainCenter.x)
-        let reachY = max(mainCenter.y - union.minY, union.maxY - mainCenter.y)
+        // The focus tile is centered, so each axis is limited by the union's farther side.
+        let reachX = max(focus.x - union.minX, union.maxX - focus.x)
+        let reachY = max(focus.y - union.minY, union.maxY - focus.y)
         let fitScale = min(availW / 2 / max(reachX, 0.0001), availH / 2 / max(reachY, 0.0001))
         let scale = min(targetScale, fitScale)
 
-        // Offset so mainCenter lands at the view midpoint.
-        let offset = CGPoint(x: bounds.midX - (mainCenter.x - union.minX) * scale,
-                             y: bounds.midY - (mainCenter.y - union.minY) * scale)
+        // Offset so the focus tile lands at the view midpoint.
+        let offset = CGPoint(x: bounds.midX - (focus.x - union.minX) * scale,
+                             y: bounds.midY - (focus.y - union.minY) * scale)
         return Transform(scale: scale, offset: offset, unionOrigin: union.origin)
     }
 
@@ -190,9 +215,21 @@ final class ArrangementCanvas: NSView {
         return displays.reversed().first { rects[$0.id].map { t.viewRect($0).contains(p) } ?? false }
     }
 
+    /// The main display's menu-bar strip in view coordinates, if it's on-screen.
+    private func mainMenuBarViewRect() -> NSRect? {
+        guard let main = displays.first(where: { $0.isMain }), let r = plane[main.id],
+              let t = dragTransform ?? transform(plane) else { return nil }
+        return menuBarRect(inTile: t.viewRect(r).insetBy(dx: 1.5, dy: 1.5))
+    }
+
     override func mouseDown(with event: NSEvent) {
+        // Clicking any screen's arranger focuses it, so keyboard (zoom/align) follows
+        // the click without needing to activate the window first.
+        window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(self)
         let p = convert(event.locationInWindow, from: nil)
+        // Grabbing the main tile's menu-bar strip starts a "move main" drag.
+        if mainMenuBarViewRect()?.contains(p) == true { draggingMenuBar = p; needsDisplay = true; return }
         guard let d = display(at: p), plane[d.id] != nil else { return }
         draggedID = d.id
         selectedID = d.id
@@ -201,19 +238,21 @@ final class ArrangementCanvas: NSView {
         dragStartPhys = plane[d.id]?.origin ?? .zero
         dragMoved = false
         activeV = nil; activeH = nil
-        needsDisplay = true
+        emitPreview()
     }
 
     override func mouseDragged(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        if draggingMenuBar != nil { draggingMenuBar = p; needsDisplay = true; return }
         guard let id = draggedID, let dragged = displays.first(where: { $0.id == id }),
               let t = dragTransform ?? transform(plane) else { return }
-        let p = convert(event.locationInWindow, from: nil)
         // The tile tracks the cursor 1:1: view delta ÷ scale = physical delta.
         let free = CGPoint(x: dragStartPhys.x + (p.x - dragStartMouse.x) / t.scale,
                            y: dragStartPhys.y + (p.y - dragStartMouse.y) / t.scale)
         let snap = !event.modifierFlags.contains(.shift) // Shift cancels docking/snapping
         let resolved = dockAndSnap(dragged, free: free, scale: t.scale, snap: snap)
         guard resolved != plane[id]?.origin else { return }
+        if !dragMoved { state.pushUndo() }   // snapshot before the drag's first move
         plane[id] = CGRect(origin: resolved, size: SchematicLayout.physSize(dragged))
         dragMoved = true
         needsDisplay = true
@@ -221,7 +260,13 @@ final class ArrangementCanvas: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer { draggedID = nil; dragMoved = false; dragTransform = nil }
+        defer { draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil }
+        // Dropped the menu-bar strip: whichever tile it's over becomes main.
+        if let p = draggingMenuBar {
+            needsDisplay = true
+            if let d = display(at: p), !d.isMain { onSetMain?(d.id) }
+            return
+        }
         guard draggedID != nil else { return }
         guard dragMoved else { needsDisplay = true; return } // click, no move: plane unchanged
         commitPlane()
@@ -280,7 +325,8 @@ final class ArrangementCanvas: NSView {
         let flags = event.modifierFlags
         let cmd = flags.contains(.command), shift = flags.contains(.shift)
 
-        if event.keyCode == 53 { onDismiss?(); return }   // Escape dismisses the overlay
+        // Escape / Return / ⌘Return = Done (commit & exit).
+        if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 { onDismiss?(); return }
 
         if cmd, let ch = event.charactersIgnoringModifiers, "+=-_0".contains(ch) {
             if !event.isARepeat { handleResolutionKey(ch) }
@@ -315,7 +361,7 @@ final class ArrangementCanvas: NSView {
         let f = event.modifierFlags
         if alignPending, !(f.contains(.command) && f.contains(.shift)) {
             alignPending = false
-            needsDisplay = true
+            emitPreview()
             commitPlane()
         }
         if zoomPending, !f.contains(.command) {
@@ -357,6 +403,7 @@ final class ArrangementCanvas: NSView {
 
     private func beginContinuousMoveIfNeeded() {
         guard moveTimer == nil, let id = selectedID else { return }
+        state.pushUndo()   // snapshot before a nudge run
         nudgeAccum = plane[id]?.origin ?? .zero
         activeV = nil; activeH = nil
         lastTick = CACurrentMediaTime()
@@ -412,7 +459,7 @@ final class ArrangementCanvas: NSView {
         }) {
             selectedID = best.id
             activeV = nil; activeH = nil
-            needsDisplay = true
+            emitPreview()
         }
     }
 
@@ -437,6 +484,7 @@ final class ArrangementCanvas: NSView {
 
     private func stepAlignment(_ dir: MoveDirection) {
         guard let id = selectedID else { return }
+        state.pushUndo()   // snapshot before each alignment step
         guard let join = currentJoin(id) else {
             // Not docked yet: dock to the nearest neighbor (a join for the next press).
             if let sel = displays.first(where: { $0.id == id }) {
@@ -478,7 +526,7 @@ final class ArrangementCanvas: NSView {
             r.origin.x = t.along; plane[id] = r
             activeH = (t.selfAnchor, t.otherAnchor, oid); activeV = nil
         }
-        needsDisplay = true
+        emitPreview()
     }
 
     private func nearestIndex(_ values: [CGFloat], _ current: CGFloat) -> Int {
@@ -501,7 +549,7 @@ final class ArrangementCanvas: NSView {
             activeV = (.center, .center, oid); activeH = nil
         }
         plane[id] = r
-        needsDisplay = true
+        emitPreview()
     }
 
     // MARK: - Resolution
@@ -534,11 +582,26 @@ final class ArrangementCanvas: NSView {
 
     private func modesList(for d: DisplaySnapshot) -> [DisplayMode] {
         let all = ModeCatalog.menuModes(for: d.id)
-        if d.isBuiltin && !extendedBuiltinModes {
-            let standard = all.filter { $0.pixelWidth == 2 * $0.pointWidth }
-            return standard.isEmpty ? all : standard
+        guard d.isBuiltin, !extendedBuiltinModes else { return all }
+
+        // Standard = clean 2× Retina modes.
+        var filtered = all.filter { $0.pixelWidth == 2 * $0.pointWidth }
+        // On a notched display also hide the "notchless" (letterboxed, shorter)
+        // variants: for each width the notched mode is the tallest, so drop anything
+        // shorter than the tallest at that width.
+        if isNotched(d) {
+            var tallest: [Int: Int] = [:]
+            for m in filtered { tallest[m.pixelWidth] = max(tallest[m.pixelWidth] ?? 0, m.pixelHeight) }
+            filtered = filtered.filter { $0.pixelHeight == tallest[$0.pixelWidth] }
         }
-        return all
+        return filtered.isEmpty ? all : filtered
+    }
+
+    /// Whether `d` is a notched built-in display (its screen reserves a top safe area).
+    private func isNotched(_ d: DisplaySnapshot) -> Bool {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        let screen = NSScreen.screens.first { ($0.deviceDescription[key] as? NSNumber)?.uint32Value == d.id }
+        return (screen?.safeAreaInsets.top ?? 0) > 0
     }
 
     private func defaultMode(_ modes: [DisplayMode]) -> DisplayMode? {
@@ -554,11 +617,6 @@ final class ArrangementCanvas: NSView {
         let menu = NSMenu()
         menu.addItem(withTitle: d.name, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
-
-        let mainItem = NSMenuItem(title: "Set as Main Display", action: #selector(setMainFromMenu(_:)), keyEquivalent: "")
-        mainItem.target = self; mainItem.representedObject = NSNumber(value: d.id); mainItem.isEnabled = !d.isMain
-        menu.addItem(mainItem)
-
         menu.addItem(resolutionMenuItem(for: d))
         // The built-in display's EDID physical size is authoritative, so it's not
         // calibratable — offer no size overrides for it.
@@ -605,7 +663,7 @@ final class ArrangementCanvas: NSView {
 
     @objc private func toggleExtendedBuiltin(_ s: NSMenuItem) {
         extendedBuiltinModes.toggle()
-        needsDisplay = true
+        emitPreview()
     }
 
     private final class ModeChoice {
@@ -613,7 +671,6 @@ final class ArrangementCanvas: NSView {
         init(id: CGDirectDisplayID, mode: CGDisplayMode) { self.id = id; self.mode = mode }
     }
 
-    @objc private func setMainFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { onSetMain?($0.uint32Value) } }
     @objc private func setModeFromMenu(_ s: NSMenuItem) {
         guard let c = s.representedObject as? ModeChoice else { return }
         let size = CGSize(width: CGFloat(c.mode.width), height: CGFloat(c.mode.height)) // "Looks like" points
@@ -627,44 +684,119 @@ final class ArrangementCanvas: NSView {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        // Transparent: the glass overlay below owns the screen dimming; the arranger
-        // just draws the schematic.
+        // Each per-screen window owns its own dim backdrop.
+        NSColor.black.withAlphaComponent(0.4).setFill()
+        bounds.fill()
+
         let rects = currentRects()
         guard let t = dragTransform ?? transform(rects) else {
             drawCenteredMessage("No displays detected")
             return
         }
+        let bars = currentBars()
         for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!)) }
-        drawReferenceBars(currentBars(), t: t)
+        drawReferenceBars(bars, t: t)
         let markers = activeMarkers(rects)
         for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
-        drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution · esc to close")
+        drawEdgeBars(bars)      // full-screen reference bars hugging this screen's real edges
+        drawScreenMarkers(activeMarkers(rects))   // alignment notches/arrows at this screen's real edges
+        drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution")
+        if let p = draggingMenuBar {
+            // The strip follows the cursor; highlight the tile it would land on.
+            if let over = display(at: p), !over.isMain, let r = rects[over.id] {
+                let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
+                NSColor.white.withAlphaComponent(0.25).setFill()
+                NSBezierPath(roundedRect: vr, xRadius: tileCornerRadius, yRadius: tileCornerRadius).fill()
+            }
+            drawMenuBar(in: NSRect(x: p.x - 40, y: p.y - 8, width: 80, height: 16))
+        }
     }
 
     /// Reference bars at each seam, from the shared `SchematicLayout`: the reference
     /// window shown on each side in the facing color, at its own physical size (which
     /// differs by density — the size jump a window makes crossing the seam).
     private func drawReferenceBars(_ bars: [SeamBar], t: Transform) {
-        let thickness: CGFloat = 5
+        let thickness: CGFloat = 5, gap: CGFloat = 5   // inset each bar off the seam line
+        let trim: CGFloat = 8                          // shorten so ends clear the tile's rounded corners
         for bar in bars {
-            let lenA = bar.physLenInchesA * t.scale, lenB = bar.physLenInchesB * t.scale
+            let lenA = max(2, bar.physLenInchesA * t.scale - trim)
+            let lenB = max(2, bar.physLenInchesB * t.scale - trim)
             if bar.isVertical {
                 let cA = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongA))
                 let cB = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongB))
-                drawBar(NSRect(x: cA.x - thickness, y: cA.y - lenA / 2, width: thickness, height: lenA), colorFor[bar.bID])
-                drawBar(NSRect(x: cB.x, y: cB.y - lenB / 2, width: thickness, height: lenB), colorFor[bar.aID])
+                drawBar(NSRect(x: cA.x - thickness - gap, y: cA.y - lenA / 2, width: thickness, height: lenA))
+                drawBar(NSRect(x: cB.x + gap, y: cB.y - lenB / 2, width: thickness, height: lenB))
             } else {
                 let cA = t.viewPoint(CGPoint(x: bar.physAlongA, y: bar.physLine))
                 let cB = t.viewPoint(CGPoint(x: bar.physAlongB, y: bar.physLine))
-                drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y - thickness, width: lenA, height: thickness), colorFor[bar.bID])
-                drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y, width: lenB, height: thickness), colorFor[bar.aID])
+                drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y - thickness - gap, width: lenA, height: thickness))
+                drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y + gap, width: lenB, height: thickness))
             }
         }
     }
 
-    private func drawBar(_ rect: NSRect, _ color: NSColor?) {
-        (color ?? .systemGray).withAlphaComponent(0.7).setFill()
+    /// Mini-map reference bars are drawn fully white (the on-glass edge bars keep
+    /// each display's color).
+    private func drawBar(_ rect: NSRect) {
+        NSColor.white.setFill()
         NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
+    }
+
+    /// Full-screen reference bars hugging *this* screen's real edges (in its own
+    /// point coordinates), in the facing display's color — the on-glass depiction of
+    /// how big a window is as it crosses the seam. Drawn only on the window that sits
+    /// on the participating screen.
+    private func drawEdgeBars(_ bars: [SeamBar]) {
+        guard let me = centerID else { return }
+        let thickness: CGFloat = 9, endMargin: CGFloat = 6
+        // On a notched display, keep top-edge bars below the menu-bar/notch area.
+        let notch = window?.screen?.safeAreaInsets.top ?? 0
+        for bar in bars where bar.aID == me || bar.bID == me {
+            let weAreA = (bar.aID == me)
+            let facing = colorFor[weAreA ? bar.bID : bar.aID] ?? .systemGray
+            let along = weAreA ? bar.localAlongA : bar.localAlongB
+            let len = max(0, bar.windowPoints - 2 * endMargin)   // small margin at each end
+            let rect: NSRect
+            // `inward` is the side facing the screen center (rounded); the opposite,
+            // outward side sits flat against the screen edge.
+            let inward: RectEdge
+            if bar.isVertical {
+                let x = weAreA ? bounds.width - thickness : 0    // a = left display
+                rect = NSRect(x: x, y: along - len / 2, width: thickness, height: len)
+                inward = weAreA ? .minX : .maxX                  // a hugs the right edge → rounds left
+            } else {
+                let y = weAreA ? bounds.height - thickness : notch
+                rect = NSRect(x: along - len / 2, y: y, width: len, height: thickness)
+                inward = weAreA ? .minY : .maxY
+            }
+            facing.setFill()
+            dPath(rect, roundedOn: inward).fill()
+        }
+    }
+
+    private enum RectEdge { case minX, maxX, minY, maxY }
+
+    /// A rounded rect with only the two corners on the `inward` edge rounded (the
+    /// outward edge and its corners stay square). `appendArc(from:to:radius:)` rounds
+    /// each traversed corner; feeding radius 0 at the outward corners keeps them flat.
+    private func dPath(_ r: NSRect, roundedOn inward: RectEdge) -> NSBezierPath {
+        let cr = min(r.width, r.height) * 0.45   // corner radius on the inward side
+        // Corners in order (bl, br, tr, tl) with the radius to use at each.
+        let bl = CGPoint(x: r.minX, y: r.minY), br = CGPoint(x: r.maxX, y: r.minY)
+        let tr = CGPoint(x: r.maxX, y: r.maxY), tl = CGPoint(x: r.minX, y: r.maxY)
+        func rad(_ c: RectEdge...) -> CGFloat { c.contains(inward) ? cr : 0 }
+        // Radius per corner: a corner is rounded iff it lies on the inward edge.
+        let rBL = rad(.minX, .minY), rBR = rad(.maxX, .minY)
+        let rTR = rad(.maxX, .maxY), rTL = rad(.minX, .maxY)
+
+        let p = NSBezierPath()
+        p.move(to: CGPoint(x: (bl.x + br.x) / 2, y: bl.y))     // start mid-bottom (away from a corner)
+        p.appendArc(from: br, to: tr, radius: rBR)
+        p.appendArc(from: tr, to: tl, radius: rTR)
+        p.appendArc(from: tl, to: bl, radius: rTL)
+        p.appendArc(from: bl, to: br, radius: rBL)
+        p.close()
+        return p
     }
 
     private func drawTile(for display: DisplaySnapshot, in rect: NSRect) {
@@ -673,45 +805,133 @@ final class ArrangementCanvas: NSView {
         let inset = rect.insetBy(dx: 1.5, dy: 1.5)
         let path = NSBezierPath(roundedRect: inset, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
         color.withAlphaComponent(selected ? 0.95 : 0.8).setFill(); path.fill()
-        color.withAlphaComponent(1.0).setStroke()
+        // The selected tile is outlined white so it's clear which display a zoom /
+        // resolution change will affect.
+        (selected ? NSColor.white : color).setStroke()
         path.lineWidth = selected ? 3 : 1.5; path.stroke()
+        drawBoxing(for: display, in: inset, color: color)
         drawLabel(for: display, in: inset)
+        // The main display carries a menu-bar strip (drag it to another tile to move main).
+        if display.isMain, draggingMenuBar == nil { drawMenuBar(in: menuBarRect(inTile: inset)) }
+    }
+
+    /// If the current (or previewed) mode's aspect ratio doesn't match the panel's
+    /// physical shape, the image is letter-/pillar-boxed. Draw the actual image area as
+    /// an inset rectangle and hatch the black-bar regions so it's obvious.
+    private func drawBoxing(for display: DisplaySnapshot, in tile: NSRect, color: NSColor) {
+        // Image aspect from the current or pending pixel resolution.
+        let pending = pendingMode?.id == display.id ? pendingMode?.mode : nil
+        let imgW = Double(pending?.pixelWidth ?? Int(display.pixelSize.width))
+        let imgH = Double(pending?.pixelHeight ?? Int(display.pixelSize.height))
+        // Compare against the panel's *native pixel* aspect (not physical mm, which is
+        // imprecise and gives false positives on a full-panel mode).
+        guard imgW > 0, imgH > 0, let panAspect = nativeAspect(display.id) else { return }
+        let imgAspect = imgW / imgH
+        guard abs(imgAspect - panAspect) / panAspect > 0.02 else { return }   // fills the panel
+
+        // The image rect: the largest tile-centered rect with the image's aspect.
+        var img = tile.insetBy(dx: 2, dy: 2)
+        if imgAspect > panAspect {                 // wider than panel → letterbox (bars top/bottom)
+            let h = img.width / CGFloat(imgAspect)
+            img = NSRect(x: img.minX, y: img.midY - h / 2, width: img.width, height: h)
+        } else {                                   // narrower → pillarbox (bars left/right)
+            let w = img.height * CGFloat(imgAspect)
+            img = NSRect(x: img.midX - w / 2, y: img.minY, width: w, height: img.height)
+        }
+        // Outline the image area; hatch the boxed (black-bar) regions with diagonal lines.
+        NSColor.black.withAlphaComponent(0.35).setStroke()
+        let outline = NSBezierPath(rect: img); outline.lineWidth = 1; outline.stroke()
+        hatch(tile.insetBy(dx: 2, dy: 2), excluding: img, color: NSColor.black.withAlphaComponent(0.3))
+    }
+
+    /// Cached native pixel aspect per display (querying all modes is a CG call, too
+    /// heavy to repeat every draw). Native aspect is fixed per physical panel, so a
+    /// stale entry for a disconnected id is harmless.
+    private var nativeAspectCache: [CGDirectDisplayID: Double?] = [:]
+    private func nativeAspect(_ id: CGDirectDisplayID) -> Double? {
+        if let cached = nativeAspectCache[id] { return cached }
+        let a = ModeCatalog.nativeAspect(for: id)
+        nativeAspectCache[id] = a
+        return a
+    }
+
+    /// Fill the region of `rect` outside `hole` with faint diagonal hatch lines.
+    private func hatch(_ rect: NSRect, excluding hole: NSRect, color: NSColor) {
+        NSGraphicsContext.saveGraphicsState()
+        let clip = NSBezierPath(rect: rect)
+        clip.append(NSBezierPath(rect: hole).reversed)   // even-odd hole
+        clip.addClip()
+        color.setStroke()
+        let path = NSBezierPath(); path.lineWidth = 1
+        var x = rect.minX - rect.height
+        while x < rect.maxX {
+            path.move(to: CGPoint(x: x, y: rect.minY)); path.line(to: CGPoint(x: x + rect.height, y: rect.maxY))
+            x += 6
+        }
+        path.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// The menu-bar strip across the top of a tile (flipped view: min-y is the top).
+    /// Its full rect stays the drag target even where a reference bar draws over it.
+    private func menuBarRect(inTile tile: NSRect) -> NSRect {
+        return NSRect(x: tile.minX, y: tile.minY, width: tile.width, height: min(18, tile.height * 0.2))
+    }
+
+    private func drawMenuBar(in rect: NSRect) {
+        let clip = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
+        NSColor.white.withAlphaComponent(0.6).setFill(); clip.fill()
     }
 
     private func drawLabel(for display: DisplaySnapshot, in rect: NSRect) {
-        var lines: [(String, NSFont, NSColor)] = []
-        lines.append((display.name + (display.isMain ? "  ●" : ""), .boldSystemFont(ofSize: 12), .labelColor))
-
-        // Effective resolution, live during a zoom and italic while uncommitted.
         let sz = pointSize(display)
         let pending = pendingMode?.id == display.id ? pendingMode?.mode : nil
         let pixelW = pending?.pixelWidth ?? Int(display.pixelSize.width)
-        let pixelH = pending?.pixelHeight ?? Int(display.pixelSize.height)
-        let pts = "\(Int(sz.width))×\(Int(sz.height)) pt"
-        let px = "\(pixelW)×\(pixelH) px"
-        let resText = pixelW > Int(sz.width) ? "\(pts)  (HiDPI \(px))" : pts
-        let resFont: NSFont = pending != nil
-            ? NSFontManager.shared.convert(.systemFont(ofSize: 10), toHaveTrait: .italicFontMask)
-            : .systemFont(ofSize: 10)
-        lines.append((resText, resFont, .labelColor))
 
-        let trusted = display.physicalSizeIsCalibrated || display.isBuiltin
-        if let ppi = display.ppi, trusted {
-            let cal = display.physicalSizeIsCalibrated ? " (calibrated)" : ""
-            lines.append((String(format: "%.0f ppi · %.1f″%@", ppi, display.diagonalInches, cal), .systemFont(ofSize: 10), .labelColor))
-        } else if let ppi = display.ppi {
-            lines.append((String(format: "%.0f ppi · calibrate screen size?", ppi), .systemFont(ofSize: 10), .labelColor))
-        } else {
-            lines.append(("calibrate screen size?", .systemFont(ofSize: 10), .labelColor))
+        // Effective PPI (points per physical inch) — what governs apparent window/text
+        // size. Live via `pointSize`, so it tracks a zoom preview.
+        let effPPI = display.diagonalInches > 0 && sz.width > 0
+            ? Double(sz.width) / (Double(display.physicalSizeMM.width) / 25.4) : nil
+
+        // Scale the label so text on the tile is proportional to how big it appears on
+        // that screen: higher PPI (denser) → physically smaller → smaller tile text.
+        // Normalized around a typical ~110 ppi (with an overall +25% bump). Generous
+        // caps (up to ~4×) — the per-line width check below drops anything that still
+        // wouldn't fit, so we don't need a tight constant clamp.
+        let fontScale = CGFloat(max(0.5, min(4.0, 110.0 / (effPPI ?? 110)))) * 1.25
+        func f(_ size: CGFloat, bold: Bool = false, italic: Bool = false) -> NSFont {
+            let base = bold ? NSFont.boldSystemFont(ofSize: size * fontScale) : .systemFont(ofSize: size * fontScale)
+            return italic ? NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask) : base
         }
 
-        var y = rect.minY + 8
-        for (text, font, color) in lines {
-            let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-            let size = (text as NSString).size(withAttributes: attrs)
-            guard y + size.height <= rect.maxY - 4 else { break }
-            (text as NSString).draw(at: CGPoint(x: rect.minX + 8, y: y), withAttributes: attrs)
-            y += size.height + 2
+        var lines: [(String, NSFont, NSColor)] = []
+        lines.append((display.name, f(16, bold: true), .labelColor))
+
+        // Resolution "W×H" (points) with HiDPI tagged on; italic while a zoom mode is
+        // uncommitted.
+        let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
+        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13, italic: pending != nil), .labelColor))
+
+        // Diagonal inches then effective PPI.
+        let diag = display.diagonalInches > 0 ? String(format: "%.0f″ · ", display.diagonalInches) : ""
+        if let effPPI {
+            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), .secondaryLabelColor))
+        } else {
+            lines.append((diag + "calibrate?", f(13), .secondaryLabelColor))
+        }
+
+        // Center the block vertically and each line horizontally in the tile.
+        let attrsFor: (NSFont) -> [NSAttributedString.Key: Any] = { [.font: $0] }
+        let sizes = lines.map { ($0.0 as NSString).size(withAttributes: attrsFor($0.1)) }
+        let gap: CGFloat = 3
+        let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(lines.count - 1)
+        var y = rect.midY - total / 2
+        for (i, (text, font, color)) in lines.enumerated() {
+            let s = sizes[i]
+            guard s.width <= rect.width - 8 else { y += s.height + gap; continue }
+            (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: y),
+                                    withAttributes: [.font: font, .foregroundColor: color])
+            y += s.height + gap
         }
     }
 
@@ -747,24 +967,29 @@ final class ArrangementCanvas: NSView {
     /// Eight notch markers per tile; the two aligned anchors become arrows pointing
     /// at each other.
     private func drawAnchors(for display: DisplaySnapshot, in rect: NSRect, active: (pos: AnchorPos, dir: CGVector)?) {
-        let color = colorFor[display.id] ?? .systemGray
         let tile = rect.insetBy(dx: 1.5, dy: 1.5), r = tileCornerRadius
+        // Inset the markers further inward than the reference bars / menu strip so they
+        // never collide; corners move diagonally (their `inward` is (±1,±1)).
+        let marginTile = tile.insetBy(dx: 24, dy: 24)
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(roundedRect: tile, xRadius: r, yRadius: r).setClip()
         for pos in AnchorPos.allCases where active?.pos != pos {
-            drawNotch(at: notchPoint(pos, in: tile, radius: r), dir: pos.inward, color: color)
+            drawNotch(at: pos.point(in: marginTile), dir: pos.inward)
         }
         NSGraphicsContext.restoreGraphicsState()
-        if let active { drawArrow(at: active.pos.point(in: tile), dir: active.dir, color: color) }
+        if let active { drawArrow(at: active.pos.point(in: marginTile), dir: active.dir) }
     }
 
-    private func notchPoint(_ pos: AnchorPos, in r: NSRect, radius: CGFloat) -> CGPoint {
-        let p = pos.point(in: r), inward = pos.inward
-        if abs(inward.dx) > 0, abs(inward.dy) > 0 {
-            let n = unit(inward)
-            return CGPoint(x: p.x + n.dx * radius, y: p.y + n.dy * radius)
-        }
-        return p
+    /// The active alignment marker(s), drawn large at *this* screen's real edges (in
+    /// its own point coords) — the on-glass counterpart of the mini-map notches so the
+    /// alignment is visible on the physical display too.
+    private func drawScreenMarkers(_ markers: [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)]) {
+        guard let me = centerID, let active = markers[me] else { return }
+        // Inset from the screen edges (past the reference bars); dodge the notch on top.
+        let notch = window?.screen?.safeAreaInsets.top ?? 0
+        let area = NSRect(x: bounds.minX + 40, y: bounds.minY + 40 + notch,
+                          width: bounds.width - 80, height: bounds.height - 80 - notch)
+        drawArrow(at: active.pos.point(in: area), dir: active.dir, scale: 3)
     }
 
     /// Markers for the active alignment, read from the stored anchor pair; the
@@ -817,24 +1042,23 @@ final class ArrangementCanvas: NSView {
         return CGVector(dx: partner == .left ? -1 : 1, dy: pos.inward.dy)
     }
 
-    private func drawNotch(at p: CGPoint, dir: CGVector, color: NSColor) {
-        let n = unit(dir), len: CGFloat = 6
+    private func drawNotch(at p: CGPoint, dir: CGVector) {
+        let n = unit(dir), len: CGFloat = 4
         let path = NSBezierPath()
         path.move(to: p); path.line(to: CGPoint(x: p.x + n.dx * len, y: p.y + n.dy * len))
-        path.lineWidth = 2.5; path.lineCapStyle = .round
-        color.withAlphaComponent(0.9).setStroke(); path.stroke()
+        path.lineWidth = 2; path.lineCapStyle = .round
+        NSColor.white.withAlphaComponent(0.9).setStroke(); path.stroke()
     }
 
-    private func drawArrow(at p: CGPoint, dir: CGVector, color: NSColor) {
+    private func drawArrow(at p: CGPoint, dir: CGVector, scale: CGFloat = 1) {
         let inward = unit(dir), out = CGVector(dx: -inward.dx, dy: -inward.dy)
-        let len: CGFloat = 11, half: CGFloat = 6
+        let len: CGFloat = 7 * scale, half: CGFloat = 4 * scale
         let perp = CGVector(dx: -out.dy, dy: out.dx)
         let apex = CGPoint(x: p.x + out.dx * len, y: p.y + out.dy * len)
         let b1 = CGPoint(x: p.x + perp.dx * half, y: p.y + perp.dy * half)
         let b2 = CGPoint(x: p.x - perp.dx * half, y: p.y - perp.dy * half)
         let tri = NSBezierPath(); tri.move(to: apex); tri.line(to: b1); tri.line(to: b2); tri.close()
-        color.setFill(); tri.fill()
-        NSColor.white.setStroke(); tri.lineWidth = 1.5; tri.stroke()
+        NSColor.white.setFill(); tri.fill()
     }
 
     private func unit(_ v: CGVector) -> CGVector {

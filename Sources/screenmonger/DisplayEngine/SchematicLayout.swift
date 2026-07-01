@@ -290,7 +290,13 @@ enum SchematicLayout {
         }
         let g = barGeometry(small: span(sr), big: span(big), sPPI: sPPI, bigPPI: bigPPI)
 
-        let windowPoints = g.length * sPPI
+        // The same window renders at windowPoints/bigPPI inches on the bigger screen;
+        // cap so that can't exceed its physical edge. As a zoom preview raises the
+        // smaller screen's PPI (growing its point edge), the *facing* (bigger) bar
+        // shrinks instead of overflowing.
+        let bigPhysEdge = span(big).hi - span(big).lo
+        let physLen = min(g.length, bigPhysEdge * bigPPI / max(sPPI, 0.01))
+        let windowPoints = physLen * sPPI
         let alongA = aSmaller ? g.smallCenter : g.bigCenter
         let alongB = aSmaller ? g.bigCenter : g.smallCenter
 

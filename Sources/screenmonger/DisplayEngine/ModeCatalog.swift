@@ -50,6 +50,14 @@ enum ModeCatalog {
         return raw.filter { $0.isUsableForDesktopGUI() }.map(DisplayMode.init)
     }
 
+    /// The panel's native pixel aspect ratio (width / height), from its largest pixel
+    /// mode — the reference for detecting letter-/pillar-boxed modes. nil if unknown.
+    static func nativeAspect(for id: CGDirectDisplayID) -> Double? {
+        guard let native = modes(for: id).max(by: { $0.pixelWidth * $0.pixelHeight < $1.pixelWidth * $1.pixelHeight }),
+              native.pixelHeight > 0 else { return nil }
+        return Double(native.pixelWidth) / Double(native.pixelHeight)
+    }
+
     /// A deduped, sorted list suitable for a menu: one entry per "Looks like"
     /// size, preferring HiDPI and the highest refresh rate, largest first.
     static func menuModes(for id: CGDirectDisplayID) -> [DisplayMode] {
