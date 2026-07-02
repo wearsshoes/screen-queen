@@ -65,6 +65,17 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$APP_NAME"
 
+# The SPM resource bundle (fonts). `Bundle.module` fatalErrors at first use if it can't
+# find this next to Contents/Resources — the app then launches fine but dies the moment
+# the arranger opens. Fail loudly here rather than ship that.
+RES_BUNDLE="$(dirname "$BIN")/${PRODUCT_NAME}_${PRODUCT_NAME}.bundle"
+if [[ -d "$RES_BUNDLE" ]]; then
+	cp -R "$RES_BUNDLE" "$APP/Contents/Resources/"
+else
+	echo "✗ Missing SPM resource bundle: $RES_BUNDLE" >&2
+	exit 1
+fi
+
 # Info.plist: fill in the version placeholders.
 sed -e "s/__SHORT_VERSION__/$SHORT_VERSION/" \
     -e "s/__BUILD_VERSION__/$BUILD_VERSION/" \
