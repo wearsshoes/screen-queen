@@ -198,29 +198,7 @@ final class ArrangerState {
     }
 
     func currentBars() -> [SeamBar] {
-        let origins = pointOrigins()
-        let bars = SchematicLayout.seamBars(sizedDisplays(), rects: plane, origins: origins)
-        Self.debugLogLayout(plane: plane, points: origins, dragged: draggingDisplayID, bars: bars)   // DEBUG
-        return bars
-    }
-
-    // DEBUG (temporary): log plane (physical) + reconstructed point rects whenever the seam
-    // set changes, to see which display's reconstructed position flips. Remove once diagnosed.
-    nonisolated(unsafe) private static var lastLayoutSig = ""
-    private static func debugLogLayout(plane: [CGDirectDisplayID: CGRect], points: [CGDirectDisplayID: CGPoint],
-                                       dragged: CGDirectDisplayID?, bars: [SeamBar]) {
-        let seamSig = bars.map { "\($0.aID)-\($0.bID)\($0.isVertical ? "V" : "H")" }.sorted().joined(separator: ",")
-        guard seamSig != lastLayoutSig else { return }
-        lastLayoutSig = seamSig
-        var line = "── seams=[\(seamSig)] dragged=\(dragged.map(String.init) ?? "-")\n"
-        for id in plane.keys.sorted() {
-            let r = plane[id] ?? .zero, p = points[id] ?? .zero
-            line += String(format: "   %u phys=(%.1f,%.1f %.1fx%.1f) pt=(%.0f,%.0f)\n",
-                           id, r.minX, r.minY, r.width, r.height, p.x, p.y)
-        }
-        let path = "/tmp/screenqueen-layout.log"
-        if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close() }
-        else { try? line.write(toFile: path, atomically: true, encoding: .utf8) }
+        SchematicLayout.seamBars(sizedDisplays(), rects: plane, origins: pointOrigins())
     }
 
     /// The display macOS will put the Dock on for the arrangement currently on the plane
@@ -281,29 +259,8 @@ final class ArrangerState {
     func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] {
         let indices = DisplayGraph.seamColorIndices(bars.map { ($0.aID, $0.bID) },
                                                     previous: lastSeamIndices)
-        Self.debugLogColors(previous: lastSeamIndices, indices: indices)   // DEBUG
         lastSeamIndices = indices   // only surviving seams (the result drops vanished ones)
         return indices.mapValues { Self.seamPalette[$0 % Self.seamPalette.count] }
-    }
-
-    // DEBUG (temporary): append to a file (flushed) whenever the seam set OR any seam's color
-    // index changes, so we can tell churn (set changed) from a preservation failure (same set,
-    // index moved). Remove once diagnosed.
-    nonisolated(unsafe) private static var lastColorSig = ""
-    private static func debugLogColors(previous: [DisplayGraph.SeamKey: Int],
-                                       indices: [DisplayGraph.SeamKey: Int]) {
-        func sig(_ m: [DisplayGraph.SeamKey: Int]) -> String {
-            m.map { "\($0.key.a)-\($0.key.b):\($0.value)" }.sorted().joined(separator: " ")
-        }
-        let now = sig(indices)
-        guard now != lastColorSig else { return }
-        let setChanged = Set(previous.keys) != Set(indices.keys)
-        let recolored = indices.filter { previous[$0.key] != nil && previous[$0.key] != $0.value }
-        let line = "seams=[\(now)] setChanged=\(setChanged) recolored=[\(sig(recolored))]\n"
-        lastColorSig = now
-        let path = "/tmp/screenqueen-seamcolor.log"
-        if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close() }
-        else { try? line.write(toFile: path, atomically: true, encoding: .utf8) }
     }
 
     func commit() {
