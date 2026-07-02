@@ -1,35 +1,5 @@
 import AppKit
 
-/// Where a calibration bar sits on the screen it's drawn on: which edge it abuts
-/// and its center offset from that screen's leading edge along the seam axis.
-/// Derived from `SchematicLayout.Seam` so calibration and the arranger place bars
-/// the same way, with no per-screen coordinate flips.
-private struct BarPlacement {
-    enum Edge { case left, right, top, bottom }
-    let edge: Edge
-    let along: CGFloat          // center along the seam, in this screen's local frame (y-up)
-
-    /// A vertical seam (left/right edge) runs the bar vertically; horizontal runs it across.
-    var lengthIsVertical: Bool { edge == .left || edge == .right }
-
-    /// The bar's placement on the screen `frame` sharing seam `s` with a neighbor,
-    /// where `selfIsA` picks this screen's side of the seam (a = left/top).
-    /// AppKit is y-up; `SchematicLayout` (CG) is y-down, so the vertical-seam center
-    /// is flipped within the screen height.
-    init(seam s: SchematicLayout.Seam, screen frame: CGRect, selfIsA: Bool) {
-        let along = s.localCenter(on: frame)
-        if s.vertical {
-            edge = selfIsA ? .right : .left
-            self.along = frame.height - along     // CG y-down → AppKit y-up
-        } else {
-            edge = selfIsA ? .bottom : .top        // a is on top (CG maxY == b.minY)
-            self.along = along
-        }
-    }
-}
-
-private let barThickness: CGFloat = 28
-
 /// Visual "match the bars" calibration. Because pixels are square, PPI is the
 /// same in both axes, so a single length suffices — no need for a 2D box.
 ///
@@ -69,9 +39,9 @@ final class CalibrationController {
         self.refPPT = refPPT
 
         // Detect the shared seam once; both bars hug it (or center if not adjacent),
-        // placed via the shared descriptor so there's no per-screen coordinate flip.
+        // placed via the same `BarPlacement` descriptor so both sides agree.
         let seam = SchematicLayout.seam(reference.bounds, target.bounds)
-        let refIsA = seam.map { referenceIsA($0, reference.bounds) } ?? true
+        let refIsA = seam.map { CalibrationMath.referenceIsA($0, reference.bounds) } ?? true
         let refAnchor = seam.map { BarPlacement(seam: $0, screen: reference.bounds, selfIsA: refIsA) }
         let targetAnchor = seam.map { BarPlacement(seam: $0, screen: target.bounds, selfIsA: !refIsA) }
 
@@ -114,20 +84,15 @@ final class CalibrationController {
         target = nil
     }
 
-    /// The target PPI implied by the two current bar lengths: the reference bar's
-    /// known physical length (points ÷ trusted PPI) equals the target bar's.
+    /// The target PPI implied by the two current bar lengths.
     private func inferredTargetPPI() -> Double {
-        let refInches = Double(refLengthPoints) / refPPT
-        return refInches > 0 ? Double(targetLengthPoints) / refInches : 0
+        CalibrationMath.inferredTargetPPI(refLengthPoints: refLengthPoints, refPPI: refPPT,
+                                          targetLengthPoints: targetLengthPoints)
     }
 
     private func updateReadout() {
         guard let target else { return }
-        let ppt = inferredTargetPPI()
-        let diag = ppt > 0
-            ? (Double(target.bounds.width) * Double(target.bounds.width)
-               + Double(target.bounds.height) * Double(target.bounds.height)).squareRoot() / ppt
-            : 0
+        let diag = CalibrationMath.diagonalInches(pointSize: target.bounds.size, ppi: inferredTargetPPI())
         panel?.setInferredDiagonal(diag)
     }
 
@@ -140,14 +105,6 @@ final class CalibrationController {
                                      for: target.fingerprint)
         cancel()
         onComplete?()
-    }
-
-    // MARK: - Geometry
-
-    /// Whether `bounds` is on the a-side of `seam` (left for a vertical seam, top
-    /// for a horizontal one), matching `Seam`'s a = left/top convention.
-    private func referenceIsA(_ seam: SchematicLayout.Seam, _ bounds: CGRect) -> Bool {
-        seam.vertical ? abs(bounds.maxX - seam.line) < 1 : abs(bounds.maxY - seam.line) < 1
     }
 
     // MARK: - Window/screen helpers
@@ -294,22 +251,22 @@ final class CalibrationPanel: NSPanel {
         var origin = NSPoint(x: vis.midX - frame.width / 2, y: vis.maxY - frame.height - 60)
 
         if let a = anchor {
-            // `a.along` is the bar's center in the screen's local y-up frame; convert to
-            // global. The bar hugs `a.edge` (inset by `barEdgeInset`); place the panel
-            // just inward of it, aligned to the bar's midpoint.
+            // `a.along` is the bar's center in the screen's local frame; convert to global.
+            // The bar hugs `a.edge` (inset from it); place the panel just inward of the bar,
+            // aligned to its midpoint.
             let f = screen.frame
             switch a.edge {
             case .right:
-                let barX = f.maxX - barEdgeInset - BarView.thickness
+                let barX = f.maxX - CalibrationMath.barEdgeInset - BarView.thickness
                 origin = NSPoint(x: barX - frame.width - gap, y: f.minY + a.along - frame.height / 2)
             case .left:
-                let barX = f.minX + barEdgeInset + BarView.thickness
+                let barX = f.minX + CalibrationMath.barEdgeInset + BarView.thickness
                 origin = NSPoint(x: barX + gap, y: f.minY + a.along - frame.height / 2)
             case .top:
-                let barY = f.maxY - barEdgeInset - BarView.thickness
+                let barY = f.maxY - CalibrationMath.barEdgeInset - BarView.thickness
                 origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY - frame.height - gap)
             case .bottom:
-                let barY = f.minY + barEdgeInset + BarView.thickness
+                let barY = f.minY + CalibrationMath.barEdgeInset + BarView.thickness
                 origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY + gap)
             }
         }
@@ -328,28 +285,6 @@ final class CalibrationPanel: NSPanel {
 
     @objc private func saveTapped() { onSave?() }
     @objc private func cancelTapped() { onCancel?() }
-}
-
-/// Distance the bar is inset from the screen edge it hugs, so it reads as a floating
-/// control rather than something glued to the bezel.
-private let barEdgeInset: CGFloat = 22
-
-/// Rect for a bar of the given length, hugging an optional seam placement (or a
-/// horizontal bar centered in `bounds` when there's no seam). `offset` slides the
-/// bar's center along the seam from its anchor; `thickness` sets its cross size.
-private func barRect(length: CGFloat, offset: CGFloat, thickness t: CGFloat,
-                     anchor: BarPlacement?, in bounds: NSRect) -> NSRect {
-    guard let a = anchor else {
-        return NSRect(x: bounds.midX - length / 2, y: bounds.midY - t / 2, width: length, height: t)
-    }
-    let along = a.along + offset
-    let inset = barEdgeInset
-    switch a.edge {
-    case .right:  return NSRect(x: bounds.maxX - t - inset, y: along - length / 2, width: t, height: length)
-    case .left:   return NSRect(x: bounds.minX + inset,     y: along - length / 2, width: t, height: length)
-    case .top:    return NSRect(x: along - length / 2, y: bounds.maxY - t - inset, width: length, height: t)
-    case .bottom: return NSRect(x: along - length / 2, y: bounds.minY + inset,     width: length, height: t)
-    }
 }
 
 /// A rounded orange bar hugging the seam, inset from the edge. Three circular
@@ -399,7 +334,7 @@ private final class BarView: NSView {
     }
 
     private func rect() -> NSRect {
-        barRect(length: length, offset: offset, thickness: Self.thickness, anchor: anchor, in: bounds)
+        CalibrationMath.barRect(length: length, offset: offset, thickness: Self.thickness, anchor: anchor, in: bounds)
     }
 
     /// Centers of the three draggers: [endA, midpoint, endB], along the bar's axis.
