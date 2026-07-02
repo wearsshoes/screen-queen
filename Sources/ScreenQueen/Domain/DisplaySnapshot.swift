@@ -30,9 +30,26 @@ struct DisplaySnapshot: Identifiable, Equatable {
     /// Whether `physicalSizeMM` came from a manual calibration rather than EDID.
     let physicalSizeIsCalibrated: Bool
 
+    /// What the monitor itself claims over EDID, in millimeters — kept even when a
+    /// calibration override wins, because the claim is part of the story (the
+    /// match-calibration tape is deliberately ruled in these, her "inches").
+    var edidSizeMM: CGSize = .zero
+
+    /// `pointsPerInch` as the EDID claim tells it. `nil` when there is no claim.
+    var edidPointsPerInch: Double? {
+        guard edidSizeMM.width > 1 else { return nil }
+        return Double(bounds.width) / (Double(edidSizeMM.width) / 25.4)
+    }
+
     /// Diagonal of the physical size, in inches (0 if size unknown).
     var diagonalInches: Double {
         let w = Double(physicalSizeMM.width), h = Double(physicalSizeMM.height)
+        return (w * w + h * h).squareRoot() / 25.4
+    }
+
+    /// Diagonal of the EDID claim, in inches (0 if she isn't even claiming).
+    var edidDiagonalInches: Double {
+        let w = Double(edidSizeMM.width), h = Double(edidSizeMM.height)
         return (w * w + h * h).squareRoot() / 25.4
     }
 
@@ -106,6 +123,7 @@ struct DisplaySnapshot: Identifiable, Equatable {
             id: id, name: name, bounds: bounds,
             pixelSize: pixelSize, physicalSizeMM: physicalSizeMM,
             physicalSizeIsCalibrated: physicalSizeIsCalibrated,
+            edidSizeMM: edidSizeMM,
             isMain: isMain, isBuiltin: isBuiltin,
             mirrorMaster: mirrorMaster,
             vendor: vendor, model: model, serial: serial,

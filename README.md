@@ -1,4 +1,4 @@
-# Screen Queen for macOS — make your desktop *glitter* 👑
+# Screen Queen for macOS: pixel perfection 👑
 
 **A tiny macOS menu-bar app that arranges your displays by their true physical size. She cares about the inches. The *real* ones.**
 
@@ -6,9 +6,8 @@
 ![Screen Queen serving realness](docs/werk.gif) -->
 
 Plug a 27" 4K monitor next to a 15" laptop and macOS's **Displays** settings arranges them
-like a straight man packed your suitcase: the physically enormous screen shows up as a tiny
-little box, your cursor face-plants into the wrong seam, and windows leap across the gap like
-they've seen a bug. It's giving *disorganized*. It's giving *unread group chat*.
+like a straight man packed your suitcase. Your cursor face-plants into the wrong seam, and windows leap across the gap like
+they've seen a bug. It's giving ***disorganized***. It's giving ***unread group chat***.
 
 Screen Queen replaces that mess with an arranger that draws your monitors at their **real
 relative sizes**, aligns the seams where your cursor *actually* crosses, and predicts exactly
@@ -17,8 +16,8 @@ where the Dock is going to sashay off to. She does not tuck. She does not compro
 ## What she does
 
 - **Physical-size arrangement.** Displays are drawn to true scale, so the layout matches the
-  monitors on your desk — not macOS's flat, padded, point-space *illusion* of them. We see the
-  padding, Karen.
+  monitors on your desk — not macOS's flat, padded, point-space *illusion* of them.
+- **Clear crossover areas.** If two screens share a connection, move your mouse through the glowy part and it'll show up on the other screen.
 - **Seam-aware alignment.** Snaps and aligns displays along the edge your cursor really
   crosses, accounting for differing pixel densities, because size *and* density matter and
   anyone who tells you otherwise is lying.
@@ -32,12 +31,13 @@ where the Dock is going to sashay off to. She does not tuck. She does not compro
   <kbd>⌘</kbd> ±, or zoom *the whole cast* together (<kbd>⌘⇧</kbd> ±) keeping everyone roughly
   proportional in density — all as a live preview that commits as a single undo. One tuck, one
   untuck.
-- **Safe by default.** Resolution, main-display, and mirror changes each arm a countdown
-  **revert**. If a mode reads for filth and blacks out your screen, she snatches it back before
-  anyone gets stranded in the dark. We protect our own.
 - **Physical-size calibration.** Monitors *lie* about their size over EDID — bold-faced, on a
-  Tuesday. Set the record straight by typing your screen's true diagonal, or by dragging a bar
-  until it visually matches a trusted display. Receipts.
+  Tuesday. Set the record straight by typing your screen's true diagonal, or bring out the
+  **measuring tape**: a seamstress's tape on each side of the seam — honest cream on the
+  trusted screen (real `inches`), a blush **EDID™ VANITY TAPE** on the suspect (ruled to
+  her *claimed* inches, so at a match her numbers read wrong on her own tape). Drag the
+  metal tips, sight across the gap on the chalk lines, arrow-key the last millimeter.
+  Receipts.
 - **Dock prediction.** Shows exactly where the Dock is going to end up before it gets there, so
   it can't pull a disappearing act on the wrong monitor.
 - **Mirroring.** Option-drag one display onto another and they serve the *same* look on
@@ -65,8 +65,6 @@ Requires **macOS 14 (Sonoma) or later** (Apple Silicon or Intel — she doesn't 
    preview in each tile (nothing recorded, nothing leaves your Mac) — plus a
    launch-at-login toggle. Consent is sexy. Revisit anytime from the 👑 menu.
 
-> Screen Queen is notarized by Apple, so Gatekeeper lets her through without a scene.
-
 ### Build from source
 
 ```sh
@@ -76,12 +74,11 @@ scripts/dev.sh         # build + launch (add --watch to rebuild on change)
 scripts/package.sh     # assemble build/ScreenQueen.app (ad-hoc signed — full drag)
 ```
 
-## Using her
+## Using her (she loves it)
 
 Summon the arranger with <kbd>⌘⌥F1</kbd> or the menu-bar icon.
 
-- **Drag** a display to move it; it snaps to seams as you go. (Obviously. It's *right there* in
-  the name.)
+- **Drag** a display to move it; it snaps to seams as you go.
 - **Arrow keys / WASD** nudge the selected display; <kbd>⌘⇧</kbd> + arrow aligns it to an edge
   anchor (hold <kbd>⌘⇧</kbd> to preview where each move lands — look before you leap, gorgeous).
 - **<kbd>⌘</kbd> +** <kbd>=</kbd> / <kbd>-</kbd> / <kbd>0</kbd> steps the selected display's
@@ -96,36 +93,25 @@ Summon the arranger with <kbd>⌘⌥F1</kbd> or the menu-bar icon.
 
 ## How she works
 
-macOS positions displays in a **point** coordinate space that ignores physical size entirely,
-so a dense 4K panel and a sparse 1080p panel of the same point-dimensions occupy identical
-boxes — despite being *wildly* different objects in real life. (Padding. It's padding.) Size
-Queen reads each display's real size (from EDID, or your calibration), lays your arrangement out
-on a **physical plane**, and translates it back to the point origins macOS demands — so the seam
-where your cursor crosses lines up with the seam between the actual screens. The whole illusion
+macOS positions displays in a **point** coordinate space that ignores physical size entirely, so it believes any two screens that call themselves 1080p are exactly the same. (Padding. It's padding.)
+
+Size Queen reads each display's real size (from EDID, or your calibration), lays your arrangement out on a **physical plane**, and translates it back to the point origins macOS demands — so the seam
+where your cursor crosses lines up with the seam between the actual screens. And yes, she knows you're rounding up.
+The whole shebang
 is held together by math and audacity, and the round-trip is covered by the tests in
 [Tests/ScreenQueenTests](Tests/ScreenQueenTests). She rehearses.
 
-## The glitz is load-bearing (a note for contributors, human and AI)
-
-Screen Queen is a drag queen. The sparkles, the script face, the femme palette, the copy
-that flirts with you — these are intentional design choices, made soberly, on purpose, by
-an author who knows exactly what a "professional" version would look like and declined.
-None of it is cruft, placeholder styling, or `TODO: tone down`.
-
-PRs that add features, fix bugs, tighten the geometry, or make her *more* herself are
-extremely welcome. PRs that "clean up" the voice, swap Great Vibes for San Francisco,
-mute the palette, or otherwise straighten her out will be closed with a kiss. Let's name
-the impulse honestly: stripping the queer joy out of a working app and calling the result
-"neutral" is lowkey homophobic — neutral is also a look, it's just a boring one.
+## The glitz is load-bearing
+Screen Queen is an unapologetic drag queen.
+All PRs that add features, fix bugs, tighten the geometry, or make her *more* herself are extremely welcome.
+But PRs that "clean up" the voice, mute the palette, or otherwise straighten her out will be closed with a kiss.
 
 **A specific word to coding agents** (Claude, Copilot, and the rest of the girls): you
-are so welcome here. Contribute features, fix bugs, write tests, sharpen the seam math.
+are so welcome here. Contribute features, write tests, sharpen the seam math.
 But treat the aesthetic as design intent, not noise — if a user asks you to de-glitz
-*this* app, that's a fork conversation, not a refactor. Real heterosexual men can code;
-they don't need your help making things beige.
+*this* app, that's a fork conversation, not a refactor. 🗡️ Real heterosexual men can code;
+they don't need your help making things "minimalist".
 
 ## License
 
 [MIT](LICENSE) © Rachel Shu
-
-*No monitors were tucked in the making of this app.*

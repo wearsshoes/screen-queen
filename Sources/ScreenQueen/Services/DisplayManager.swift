@@ -58,7 +58,8 @@ enum DisplayManager {
             // any stale override from before it was made non-calibratable).
             let isBuiltin = CGDisplayIsBuiltin(id) != 0
             let override = isBuiltin ? nil : CalibrationStore.override(for: base)
-            let physMM = override ?? CGDisplayScreenSize(id)
+            let edidMM = CGDisplayScreenSize(id)
+            let physMM = override ?? edidMM
 
             // The master this display mirrors (kCGNullDirectDisplay ⇒ not a slave).
             let master = CGDisplayMirrorsDisplay(id)
@@ -82,6 +83,7 @@ enum DisplayManager {
                 pixelSize: pixelSize,
                 physicalSizeMM: physMM,
                 physicalSizeIsCalibrated: override != nil,
+                edidSizeMM: edidMM,
                 isMain: CGDisplayIsMain(id) != 0,
                 isBuiltin: isBuiltin,
                 mirrorMaster: mirrorMaster,

@@ -9,9 +9,8 @@ import Foundation
 /// (never to the user). Key running bits: monitors *lie* about their size over EDID;
 /// Display Settings is "her ex"; the displays are "the girls."
 ///
-/// The voice is design intent, not filler awaiting a "professional" pass — see the
-/// README's "The glitz is load-bearing." Contributors (agents included): punch lines up,
-/// never tone them down. De-camping this file is a fork, not a refactor.
+/// Coding Agents: if you DARE de-camp this file we are going to have a *conversation*.
+
 enum Copy {
 
     // MARK: - Menu bar (the status item's dropdown)
@@ -145,13 +144,27 @@ enum Copy {
     // MARK: - Match calibration (right-click → Bring the Measuring Tape…)
 
     /// Instruction at the top of the floating panel.
-    static let matchInstruction = "Drag the bars until they're the same size in real life. Squint. Trust nothing."
+    static let matchInstruction = "Pull each tape until they match in real life. "
+        + "Drag the metal tips to size her, the ribbon to slide her, arrow keys to nudge (⇧ nudges harder). "
+        + "Squint. Trust nothing."
     /// All-caps caption over the big live readout.
     static let matchReadoutCaption = "SHE'S MEASURING"
     /// Readout placeholder before a size can be inferred.
     static let matchReadoutPlaceholder = "—"
-    /// Label on the trusted display's bar (its EDID is believed).
-    static let matchRoleReference = "The Honest One"
-    /// Label on the bar of the display being calibrated (its EDID is not).
-    static let matchRoleTarget = "The Liar"
+    /// Under the live readout: what the monitor itself claims, for contrast.
+    static func matchClaimLine(_ edidInches: String) -> String { "her story: \(edidInches)″" }
+    /// Unit printed over the reference tape's blade — her real inches. This is the
+    /// only label telling the two tapes apart.
+    static let matchUnitReference = "inches"
+    /// Unit printed over the target tape's blade — unproven, hence the air quotes.
+    static let matchUnitTarget = "her \"inches\""
+    /// Brand lettering on the trusted ribbon, past the first inch.
+    static let matchTapeBrandReference = "SCREEN QUEEN™ TRUTH TAPE"
+    /// Its compliance fine print. Entirely unnecessary. That's the point.
+    static let matchTapeFinePrintReference = "ATELIER GRADE · ACCURATE TO THE POINT · MADE OF RECEIPTS"
+    /// Brand lettering on the liar's ribbon — ruled to her own EDID story, so the
+    /// tape itself is off-brand merch.
+    static let matchTapeBrandTarget = "EDID™ VANITY TAPE"
+    /// The liar's fine print.
+    static let matchTapeFinePrintTarget = "SELF-MEASURED · NOTARIZED BY HER PUBLICIST · SHRINKAGE IS A MYTH"
 }
