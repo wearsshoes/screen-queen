@@ -41,7 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 666])
         DragFont.register()   // the marquee typeface — not doing this in San Francisco
         PrefsMigration.migrateIfNeeded()   // carry over profiles/calibration from the old bundle id
-        requestAccessibilityIfNeeded()   // needed to see the global ⌘⌥F1 hotkey
         setupMenuBar()
         setupArranger()
         setupHotkey()
@@ -50,19 +49,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CGDisplayRegisterReconfigurationCallback(displayReconfigCallback, context)
 
         refresh()
-        showWindow()
+
+        // First run: the Backstage Pass — every permission in one sitting, each with its
+        // why, instead of macOS ambushing the user with prompts as features are touched.
+        // The arranger's entrance waits until the pass is done; afterwards it's always a
+        // menu item away and we never ambush again.
+        if !UserDefaults.standard.bool(forKey: Self.didShowSetupKey) {
+            UserDefaults.standard.set(true, forKey: Self.didShowSetupKey)
+            setupWindow.onDismiss = { [weak self] in
+                self?.setupWindow.onDismiss = nil
+                self?.showWindow()
+            }
+            setupWindow.show()
+        } else {
+            showWindow()
+        }
     }
 
-    // TODO: a first-run *setup screen* that walks through every permission in one sitting —
-    // Accessibility (the global hotkey) and Screen Recording (the live tile feed) — with a
-    // line each on why she's asking and a live granted/denied readout, instead of macOS
-    // ambushing the user with system prompts one at a time as features are first touched.
-    // Consent is sexy; surprise dialogs are not.
-    /// Prompt for Accessibility permission (once), which macOS requires for the global
-    /// key monitor to observe the hotkey while other apps are focused.
-    private func requestAccessibilityIfNeeded() {
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        AXIsProcessTrustedWithOptions(opts)
+    private static let didShowSetupKey = "didShowSetup"
+    private let setupWindow = SetupWindow()
+
+    /// Open the Backstage Pass; the arranger overlay would sit above a normal window,
+    /// so take a bow first.
+    @objc private func showSetup() {
+        dismissArranger()
+        setupWindow.show()
     }
 
     /// ⌘⌥ + Brightness-Down (the F1 key on Mac keyboards) toggles the arranger from
@@ -108,8 +119,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var statusMenu: NSMenu = {
         let menu = NSMenu()
         menu.addItem(withTitle: Copy.menuShowArranger, action: #selector(showWindow), keyEquivalent: "")
+        menu.addItem(withTitle: Copy.menuSetup, action: #selector(showSetup), keyEquivalent: "")
         menu.addItem(withTitle: Copy.menuDebug, action: #selector(showDebug), keyEquivalent: "")
         menu.addItem(.separator())
+        // Version line (disabled): only the bundled app has an Info.plist to read.
+        if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+           let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+            let item = NSMenuItem(title: "Screen Queen \(v) (\(b))", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
         menu.addItem(withTitle: Copy.menuQuit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu
     }()

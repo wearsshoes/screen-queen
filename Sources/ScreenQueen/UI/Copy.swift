@@ -16,10 +16,37 @@ enum Copy {
     static let menuBarGlyph = "👑"
     /// First menu item; opens the arranger on every screen at once. It's an entrance.
     static let menuShowArranger = "Places, Everyone  (⌘⌥F1)"
+    /// The permissions/setup window (see `SetupWindow`).
+    static let menuSetup = "Backstage Pass…"
     /// Dev inspector window.
     static let menuDebug = "Backstage…"
     /// Quit item at the bottom of the menu.
     static let menuQuit = "And… Scene."
+
+    // MARK: - "Backstage Pass" (the one-sitting permissions setup screen)
+
+    /// Window title bar + headline (the headline renders in the script face).
+    static let setupTitle = "Backstage Pass"
+    /// One-line intro under the headline: why she's asking, all at once, up front.
+    static let setupIntro = "Two keys run this house. Here's exactly what each one unlocks — consent is sexy."
+    /// Accessibility row: name, why, and what she does NOT do.
+    static let setupAXName = "Accessibility"
+    static let setupAXWhy = "So ⌘⌥F1 reaches her from anywhere, even while another app has the spotlight. That hotkey is the only thing she listens for."
+    /// Screen Recording row.
+    static let setupSRName = "Screen Recording"
+    static let setupSRWhy = "For the live preview inside each tile, so you can tell your girls apart at a glance. Nothing is recorded; nothing leaves this Mac."
+    /// Status readouts (live, next to each permission's name).
+    static let setupGranted = "✓ granted"
+    static let setupNotYet = "○ not yet"
+    /// The grant button per row (opens the system prompt and the right Settings pane).
+    static let setupGrant = "Grant…"
+    /// Launch-at-login checkbox.
+    static let setupLoginToggle = "Take the stage at login"
+    /// Shown when a permission was granted while the window is open — macOS often only
+    /// honors new permissions after a restart of the app.
+    static let setupRelaunch = "Quick costume change (relaunch)"
+    /// Close button. On first run this also raises the curtain (opens the arranger).
+    static let setupDone = "Places!"
 
     // MARK: - Arranger overlay chrome
 

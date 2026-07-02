@@ -59,9 +59,11 @@ Requires **macOS 14 (Sonoma) or later** (Apple Silicon or Intel — she doesn't 
    bit. Stay with me.)
 3. Launch her. She lives in the menu bar (👑) — no Dock icon, no window, no clutter. A lady
    travels light.
-4. On first launch macOS asks for **Accessibility** permission. She uses it *only* to hear the
-   global <kbd>⌘⌥F1</kbd> hotkey while other apps have the spotlight. Grant it in
-   **System Settings → Privacy & Security → Accessibility**. Consent is sexy.
+4. On first launch she hands you a **Backstage Pass**: every permission on one screen, each
+   with exactly why she's asking — **Accessibility** *only* to hear the global <kbd>⌘⌥F1</kbd>
+   hotkey while other apps have the spotlight, **Screen Recording** *only* for the live
+   preview in each tile (nothing recorded, nothing leaves your Mac) — plus a
+   launch-at-login toggle. Consent is sexy. Revisit anytime from the 👑 menu.
 
 > Screen Queen is notarized by Apple, so Gatekeeper lets her through without a scene.
 
