@@ -11,6 +11,14 @@ struct BarPlacement {
     /// A vertical seam (left/right edge) runs the bar vertically; horizontal runs it across.
     var lengthIsVertical: Bool { edge == .left || edge == .right }
 
+    /// A placement stated directly: hug `edge`, centered at `along` in the
+    /// screen's local (y-up) frame. For bars that aren't tied to a seam overlap —
+    /// e.g. a tape spanning a full screen edge.
+    init(edge: Edge, along: CGFloat) {
+        self.edge = edge
+        self.along = along
+    }
+
     /// The bar's placement on `frame` for the seam `s` shared with a neighbor, where
     /// `selfIsA` picks this screen's side (a = left/top). `SchematicLayout.Seam` is in the
     /// OS's y-down space; the drawing frame is y-up, so a vertical seam's along-center is

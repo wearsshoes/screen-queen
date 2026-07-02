@@ -1,17 +1,21 @@
 import AppKit
 
-/// Visual "match the bars" calibration. Because pixels are square, PPI is the
-/// same in both axes, so a single length suffices — no need for a 2D box.
+/// Visual "match the tapes" calibration.
 ///
-/// Two resizable bars hug the shared seam, one per display, starting at the full
-/// shared edge. The user drags either until they look the same real length. The
-/// reference display is trusted (its EDID PPI), so its bar's physical length
-/// (points ÷ refPPI) is known; at a match the target's bar is that same length, so:
+/// Each display wears two tapes: one along its edge nearest the other display
+/// (spanning the full edge — the seam picks the edge but doesn't cap the tape),
+/// and one along a perpendicular edge — the bottom, except a built-in laptop
+/// panel uses its top, since the laptop sits on the desk with its screen below
+/// the monitor's. The two pairs are matched independently, one per axis: the
+/// primary pair sizes one dimension, the perpendicular pair the other — she
+/// doesn't assume square pixels, she checks. (Rotated screens would swap her
+/// axes, but the user should know better than to flip their screen.) The
+/// reference display is trusted (its EDID PPI), so each of its tapes' physical
+/// length (points ÷ refPPI) is known; at a match, per axis:
 ///
-///   pointsPerInch_target = targetBarPoints / (refBarPoints / refPPI)
+///   pointsPerInch_target = targetTapePoints / (refTapePoints / refPPI)
 ///
-/// Starting both at the full seam overlap makes the bars as long as possible, so
-/// the user's matching error is a smaller fraction of the length.
+/// ⏎ saves and ⎋ cancels from anywhere — the panel or either tape.
 @MainActor
 final class CalibrationController {
 
@@ -23,8 +27,15 @@ final class CalibrationController {
     private var keyObservers: [NSObjectProtocol] = []   // panel key-status → tape glow
 
     private var refPPT: Double = 0             // trusted reference PPI (source of truth)
-    private var refLengthPoints: CGFloat = 0   // live reference bar length
-    private var targetLengthPoints: CGFloat = 0 // live target bar length
+    // Live tape lengths, one per axis per screen: the primary pair (seam-facing
+    // edges) measures one axis, the perpendicular pair the other.
+    private var refPrimaryLen: CGFloat = 0
+    private var refPerpLen: CGFloat = 0
+    private var targetPrimaryLen: CGFloat = 0
+    private var targetPerpLen: CGFloat = 0
+    /// Whether the primary pair runs vertically (side-by-side displays) — it then
+    /// measures the y axis and the perpendicular pair the x axis; else swapped.
+    private var primaryIsVertical = true
 
     /// Called after a save or cancel so the owner can refresh.
     var onComplete: (() -> Void)?
@@ -40,44 +51,70 @@ final class CalibrationController {
         self.target = target
         self.refPPT = refPPT
 
-        // Detect the shared seam once; both bars hug it (or center if not adjacent),
-        // placed via the same `BarPlacement` descriptor so both sides agree.
+        // The seam picks each screen's *edge* facing the other display; it no longer
+        // caps the tape, which spans that full edge. Without a seam (non-adjacent),
+        // fall back to the perpendicular-edge convention for the primary too.
         let seam = SchematicLayout.seam(reference.bounds, target.bounds)
         let refIsA = seam.map { CalibrationMath.referenceIsA($0, reference.bounds) } ?? true
-        let refAnchor = seam.map { BarPlacement(seam: $0, screen: reference.bounds, selfIsA: refIsA) }
-        let targetAnchor = seam.map { BarPlacement(seam: $0, screen: target.bounds, selfIsA: !refIsA) }
+        let refEdge = seam.map { BarPlacement(seam: $0, screen: reference.bounds, selfIsA: refIsA).edge }
+            ?? deskEdge(for: reference)
+        let targetEdge = seam.map { BarPlacement(seam: $0, screen: target.bounds, selfIsA: !refIsA).edge }
+            ?? deskEdge(for: target)
 
-        // Both bars are windows crossing the seam. They start at the full shared edge
-        // (the overlap, in each screen's own points), as long as possible for accurate
-        // matching; the user drags either to make them physically equal. The overlap is
-        // the same point count on both screens; only its physical size differs.
-        let overlapPoints = seam.map { $0.hi - $0.lo } ?? CGFloat(10.0 / 2.54 * refPPT)
-        refLengthPoints = overlapPoints
-        targetLengthPoints = overlapPoints
+        // Two tapes per screen: the seam-facing edge, plus a perpendicular one —
+        // the bottom by convention, except a laptop panel uses its top (the laptop
+        // is on the desk; its top edge is the one near the monitor's bottom). Each
+        // pair is an independent axis measurement.
+        let (refPlace, refFull) = fullEdgePlacement(refEdge, on: refScreen)
+        let (refPerpPlace, refPerpFull) = fullEdgePlacement(perpendicularEdge(to: refEdge, for: reference), on: refScreen)
+        let (targetPlace, targetFull) = fullEdgePlacement(targetEdge, on: targetScreen)
+        let (targetPerpPlace, targetPerpFull) = fullEdgePlacement(perpendicularEdge(to: targetEdge, for: target), on: targetScreen)
+        refPrimaryLen = refFull
+        refPerpLen = refPerpFull
+        targetPrimaryLen = targetFull
+        targetPerpLen = targetPerpFull
+        primaryIsVertical = targetPlace.lengthIsVertical
 
         // Both tapes wear the same look; the unit printed on the blade — "inches"
-        // vs her "inches" — is what tells them apart. Reference tape (trusted
-        // screen): a pure measuring affordance, no controls.
-        let refView = BarView(length: overlapPoints, anchor: refAnchor,
+        // vs her "inches" — is what tells them apart. Reference tapes (trusted
+        // screen): pure measuring affordances, no controls.
+        let refView = BarView(length: refFull, anchor: refPlace,
                               pointsPerInch: refPPT, unitLabel: Copy.matchUnitReference,
                               brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
                               palette: .honest)
-        refView.onResize = { [weak self] len in self?.refLengthPoints = len; self?.updateReadout() }
-        refWindow = makeWindow(screen: refScreen, view: refView, interactive: true)
+        let refPerpView = BarView(length: refPerpFull, anchor: refPerpPlace,
+                                  pointsPerInch: refPPT, unitLabel: Copy.matchUnitReference,
+                                  brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
+                                  palette: .honest)
+        refView.onResize = { [weak self] len in self?.refPrimaryLen = len; self?.updateReadout() }
+        refPerpView.onResize = { [weak self] len in self?.refPerpLen = len; self?.updateReadout() }
+        refWindow = makeWindow(screen: refScreen, views: [refView, refPerpView], interactive: true)
 
-        // Target tape (target screen). Its ribbon is ruled at the pitch the display
-        // *claims* over EDID — even when a previous calibration knows better — so
-        // when the two tapes physically match, hers reads a different number than
-        // the honest one. The lie, printed on the tape. (The ruling is purely
-        // cosmetic; the actual inference below uses point lengths against the
-        // reference's trusted PPI.)
-        let calView = BarView(length: overlapPoints, anchor: targetAnchor,
-                              pointsPerInch: target.edidPointsPerInch ?? refPPT, unitLabel: Copy.matchUnitTarget,
+        // Target tapes (target screen). Their ribbons are ruled at the pitch the
+        // display *claims* over EDID — even when a previous calibration knows
+        // better — so when the two sides physically match, hers reads a different
+        // number than the honest one. The lie, printed on the tape. (The ruling is
+        // purely cosmetic; the actual inference below uses point lengths against
+        // the reference's trusted PPI.)
+        let targetPPI = target.edidPointsPerInch ?? refPPT
+        let calView = BarView(length: targetFull, anchor: targetPlace,
+                              pointsPerInch: targetPPI, unitLabel: Copy.matchUnitTarget,
                               brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
                               palette: .vanity)
-        calView.onResize = { [weak self] len in self?.targetLengthPoints = len; self?.updateReadout() }
-        targetWindow = makeWindow(screen: targetScreen, view: calView, interactive: true)
+        let calPerpView = BarView(length: targetPerpFull, anchor: targetPerpPlace,
+                                  pointsPerInch: targetPPI, unitLabel: Copy.matchUnitTarget,
+                                  brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
+                                  palette: .vanity)
+        calView.onResize = { [weak self] len in self?.targetPrimaryLen = len; self?.updateReadout() }
+        calPerpView.onResize = { [weak self] len in self?.targetPerpLen = len; self?.updateReadout() }
+        targetWindow = makeWindow(screen: targetScreen, views: [calView, calPerpView], interactive: true)
         targetBar = calView
+
+        // ⏎ / ⎋ work from any tape, not just while the panel is key.
+        for tape in [refView, refPerpView, calView, calPerpView] {
+            tape.onCommit = { [weak self] in self?.save() }
+            tape.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
+        }
 
         // A native floating panel on the target screen holds the instruction, the live
         // inferred-size readout, and Save/Cancel — instead of controls floating on the dim.
@@ -85,7 +122,7 @@ final class CalibrationController {
         panel.onSave = { [weak self] in self?.save() }
         panel.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
         panel.onNudge = { [weak self] delta in self?.targetBar?.nudge(delta) }
-        panel.present(on: targetScreen, near: targetAnchor)
+        panel.present(on: targetScreen, near: targetPlace)
         self.panel = panel
 
         // The panel opens key with its arrows routed to the liar's tape; keep her
@@ -114,48 +151,89 @@ final class CalibrationController {
         target = nil
     }
 
-    /// The target PPI implied by the two current bar lengths.
-    private func inferredTargetPPI() -> Double {
-        CalibrationMath.inferredTargetPPI(refLengthPoints: refLengthPoints, refPPI: refPPT,
-                                          targetLengthPoints: targetLengthPoints)
+    /// The target's physical size in inches, one axis per tape pair: the primary
+    /// pair sizes the axis it runs along, the perpendicular pair the other. `nil`
+    /// until both axes are determined.
+    private func inferredSizeInches() -> CGSize? {
+        guard let target else { return nil }
+        let ppiPrimary = CalibrationMath.inferredTargetPPI(refLengthPoints: refPrimaryLen, refPPI: refPPT,
+                                                           targetLengthPoints: targetPrimaryLen)
+        let ppiPerp = CalibrationMath.inferredTargetPPI(refLengthPoints: refPerpLen, refPPI: refPPT,
+                                                        targetLengthPoints: targetPerpLen)
+        guard ppiPrimary > 0, ppiPerp > 0 else { return nil }
+        let ppiX = primaryIsVertical ? ppiPerp : ppiPrimary
+        let ppiY = primaryIsVertical ? ppiPrimary : ppiPerp
+        return CGSize(width: Double(target.bounds.width) / ppiX,
+                      height: Double(target.bounds.height) / ppiY)
     }
 
     private func updateReadout() {
-        guard let target else { return }
-        let diag = CalibrationMath.diagonalInches(pointSize: target.bounds.size, ppi: inferredTargetPPI())
+        let diag = inferredSizeInches().map { hypot(Double($0.width), Double($0.height)) } ?? 0
         panel?.setInferredDiagonal(diag)
     }
 
     private func save() {
-        let ppt = inferredTargetPPI()
-        guard let target, ppt > 0 else { cancel(); onComplete?(); return }
-        let inchesW = Double(target.bounds.width) / ppt
-        let inchesH = Double(target.bounds.height) / ppt
-        CalibrationStore.setOverride(CGSize(width: inchesW * 25.4, height: inchesH * 25.4),
+        guard let target, let size = inferredSizeInches() else { cancel(); onComplete?(); return }
+        CalibrationStore.setOverride(CGSize(width: size.width * 25.4, height: size.height * 25.4),
                                      for: target.fingerprint)
         cancel()
         onComplete?()
     }
 
+    // MARK: - Placement helpers
+
+    /// The perpendicular-tape edge for a display that isn't constrained by a seam:
+    /// the bottom by convention, but a built-in laptop panel uses its top — the
+    /// laptop is on the desk, so its top edge is the one living near the monitor.
+    private func deskEdge(for d: DisplaySnapshot) -> BarPlacement.Edge {
+        d.isBuiltin ? .top : .bottom
+    }
+
+    /// The edge for a display's second tape, perpendicular to its primary. For a
+    /// vertical primary (side-by-side displays) that's the desk convention above;
+    /// for a horizontal primary (stacked displays) both screens use the left edge
+    /// so the pair can still be sighted across the gap.
+    private func perpendicularEdge(to primary: BarPlacement.Edge, for d: DisplaySnapshot) -> BarPlacement.Edge {
+        switch primary {
+        case .left, .right: return deskEdge(for: d)
+        case .top, .bottom: return .left
+        }
+    }
+
+    /// A placement hugging `edge` and centered on it, plus that edge's full extent
+    /// in the screen's points — the tape's starting length.
+    private func fullEdgePlacement(_ edge: BarPlacement.Edge, on screen: NSScreen) -> (BarPlacement, CGFloat) {
+        let size = screen.frame.size
+        let vertical = edge == .left || edge == .right
+        let extent = vertical ? size.height : size.width
+        return (BarPlacement(edge: edge, along: extent / 2), extent)
+    }
+
     // MARK: - Window/screen helpers
 
-    private func makeWindow(screen: NSScreen, view: NSView, interactive: Bool) -> NSWindow {
+    private func makeWindow(screen: NSScreen, views: [NSView], interactive: Bool) -> NSWindow {
         let window = interactive
             ? KeyableBorderlessWindow(contentRect: screen.frame, styleMask: .borderless,
                                       backing: .buffered, defer: false)
             : NSWindow(contentRect: screen.frame, styleMask: .borderless,
                        backing: .buffered, defer: false)
         window.isOpaque = false
-        window.backgroundColor = .clear
+        // The soft scrim lives on the window so the tapes stacked in it don't
+        // each darken the screen again.
+        window.backgroundColor = NSColor.black.withAlphaComponent(0.12)
         window.hasShadow = false
         // Above the menu bar so a bar hugging the top edge is still grabbable.
         window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
         window.ignoresMouseEvents = !interactive
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
-        view.frame = CGRect(origin: .zero, size: screen.frame.size)
-        view.autoresizingMask = [.width, .height]
-        window.contentView = view
+        let container = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
+        for view in views {
+            view.frame = container.bounds
+            view.autoresizingMask = [.width, .height]
+            container.addSubview(view)
+        }
+        window.contentView = container
         window.orderFrontRegardless()
         return window
     }
@@ -343,12 +421,12 @@ final class CalibrationPanel: NSPanel {
 
 /// A seamstress's measuring tape hugging the seam: a soft cream ribbon ruled in
 /// inches along one edge (down to eighths) and centimeters along the other —
-/// dual-scale, like every tailor's tape since forever — with a small brass crimp
+/// dual-scale, like every tailor's tape since forever — with a small metal crimp
 /// tab at each end. The honest tape is ruled at the reference's true pitch; the
 /// liar's at her EDID-claimed pitch, so a physical match reads as two different
 /// numbers. Drag either tab to let tape out or take it in; grab the ribbon
 /// anywhere to slide the whole thing along the seam; arrow keys nudge the length
-/// for the final millimeter. Hot-pink chalk lines struck perpendicular from both
+/// for the final millimeter. Chalk lines (pink for x tapes, yellow for y) struck perpendicular from both
 /// ends let the two tapes be sighted across the gap. The only label is the unit
 /// printed over the ribbon — "inches" on the trusted tape, her "inches" on the
 /// one being measured. Reports its live length so the controller can infer the
@@ -356,6 +434,10 @@ final class CalibrationPanel: NSPanel {
 /// floating panel.
 private final class BarView: NSView {
     var onResize: ((CGFloat) -> Void)?
+    /// ⏎ pressed while this tape has keys: save the calibration.
+    var onCommit: (() -> Void)?
+    /// ⎋ pressed while this tape has keys: cancel out.
+    var onCancel: (() -> Void)?
 
     private var length: CGFloat
     private var offset: CGFloat = 0        // slide of the bar's center along the seam
@@ -388,7 +470,7 @@ private final class BarView: NSView {
         let tipDark: NSColor
         let crest: String        // printed beside the brand
 
-        /// Warm cream vinyl, black-ish ink, red metric, brass tips — a tape that's
+        /// Warm cream vinyl, black-ish ink, red metric, silver tips — a tape that's
         /// lived an honest life in a sewing box.
         static let honest = Palette(
             ribbon: NSColor(calibratedRed: 0.99, green: 0.97, blue: 0.91, alpha: 0.97),
@@ -398,20 +480,21 @@ private final class BarView: NSView {
             stitch: NSColor(calibratedRed: 0.75, green: 0.65, blue: 0.5, alpha: 0.6),
             brandColor: .systemOrange,
             finePrintColor: NSColor(calibratedRed: 0.35, green: 0.3, blue: 0.25, alpha: 1),
-            tipLight: NSColor(calibratedRed: 0.93, green: 0.82, blue: 0.55, alpha: 1),
-            tipDark: NSColor(calibratedRed: 0.72, green: 0.58, blue: 0.32, alpha: 1),
+            tipLight: NSColor(calibratedRed: 0.93, green: 0.94, blue: 0.96, alpha: 1),
+            tipDark: NSColor(calibratedRed: 0.6, green: 0.62, blue: 0.66, alpha: 1),
             crest: "👑")
 
-        /// Blush satin, plum ink, gold metric, rose-gold tips, kiss-mark crest —
-        /// the tape she bought herself. It flatters. That's its job.
+        /// Royal purple satin, everything printed in gold, rose-gold tips,
+        /// kiss-mark crest — the tape she bought herself. It flatters. That's
+        /// its job.
         static let vanity = Palette(
-            ribbon: NSColor(calibratedRed: 1.0, green: 0.87, blue: 0.93, alpha: 0.97),
-            edge: NSColor(calibratedRed: 0.6, green: 0.3, blue: 0.45, alpha: 0.5),
-            ink: NSColor(calibratedRed: 0.42, green: 0.08, blue: 0.3, alpha: 1),
-            accent: NSColor(calibratedRed: 0.72, green: 0.54, blue: 0.12, alpha: 1),
-            stitch: NSColor(calibratedRed: 0.88, green: 0.7, blue: 0.35, alpha: 0.7),
-            brandColor: NSColor(calibratedRed: 0.85, green: 0.15, blue: 0.55, alpha: 1),
-            finePrintColor: NSColor(calibratedRed: 0.5, green: 0.25, blue: 0.4, alpha: 1),
+            ribbon: NSColor(calibratedRed: 0.34, green: 0.12, blue: 0.58, alpha: 0.97),
+            edge: NSColor(calibratedRed: 0.17, green: 0.05, blue: 0.32, alpha: 0.6),
+            ink: NSColor(calibratedRed: 0.96, green: 0.8, blue: 0.38, alpha: 1),
+            accent: NSColor(calibratedRed: 0.85, green: 0.66, blue: 0.28, alpha: 1),
+            stitch: NSColor(calibratedRed: 0.9, green: 0.74, blue: 0.4, alpha: 0.7),
+            brandColor: NSColor(calibratedRed: 1.0, green: 0.85, blue: 0.45, alpha: 1),
+            finePrintColor: NSColor(calibratedRed: 0.88, green: 0.72, blue: 0.42, alpha: 1),
             tipLight: NSColor(calibratedRed: 0.98, green: 0.8, blue: 0.74, alpha: 1),
             tipDark: NSColor(calibratedRed: 0.78, green: 0.5, blue: 0.44, alpha: 1),
             crest: "💋")
@@ -420,7 +503,7 @@ private final class BarView: NSView {
     static let thickness: CGFloat = 26
     /// Shortest the tape folds down to.
     private static let minLength: CGFloat = 60
-    /// The brass crimp tab at each end: its reach along the ribbon.
+    /// The metal crimp tab at each end: its reach along the ribbon.
     private static let tipAlong: CGFloat = 13
 
     init(length: CGFloat, anchor: BarPlacement?, pointsPerInch: CGFloat, unitLabel: String,
@@ -475,7 +558,7 @@ private final class BarView: NSView {
     private func along(_ p: CGPoint) -> CGFloat { lengthIsVertical ? p.y : p.x }
     private var maxAlong: CGFloat { lengthIsVertical ? bounds.height : bounds.width }
 
-    /// Grab regions in view coordinates: a brass tab at each end (drag to let tape
+    /// Grab regions in view coordinates: a metal tab at each end (drag to let tape
     /// out or take it in) and the ribbon between them (slide the whole tape).
     private func grabRects(_ r: NSRect) -> (lowTip: NSRect, highTip: NSRect, ribbon: NSRect) {
         let tipSpan = Self.tipAlong + 28      // the tab plus a forgiving halo
@@ -522,6 +605,16 @@ private final class BarView: NSView {
     }
     override func mouseUp(with event: NSEvent) { grab = .none; needsDisplay = true }
 
+    /// Two tapes share each screen as full-frame siblings; only claim clicks that
+    /// actually land on this tape's grab regions so the rest fall through to the
+    /// other tape.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let p = convert(point, from: superview)
+        let (lowR, highR, ribbonR) = grabRects(rect())
+        return (lowR.contains(p) || highR.contains(p) || ribbonR.contains(p)) ? self : nil
+    }
+
+
     private func apply(_ p: CGPoint) {
         let a = along(p)
         var start = anchorAlong() + offset - length / 2
@@ -555,6 +648,8 @@ private final class BarView: NSView {
         switch event.keyCode {
         case 124, 126: nudge(step)     // → / ↑
         case 123, 125: nudge(-step)    // ← / ↓
+        case 36, 76: onCommit?()       // ⏎ / keypad enter
+        case 53: onCancel?()           // ⎋
         default: super.keyDown(with: event)
         }
     }
@@ -587,9 +682,8 @@ private final class BarView: NSView {
     // MARK: Draw
 
     override func draw(_ dirtyRect: NSRect) {
-        // A soft scrim on both screens so the tape reads cleanly over content.
-        NSColor.black.withAlphaComponent(0.12).setFill(); bounds.fill()
-
+        // (The soft scrim lives on the window — two sibling tapes shouldn't each
+        // darken the screen again.)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let r = rect()
 
@@ -622,14 +716,22 @@ private final class BarView: NSView {
         }
     }
 
-    /// Hot-pink tailor's chalk lines struck perpendicular from both ends of the
-    /// ribbon, all the way across the screen — she marks before she cuts. Does what
-    /// the laser level would, but this is an atelier. Layered dashed passes fake
-    /// the grain of a struck line; the thin final pass keeps a crisp core to
+    /// This tape's chalk: yellow for the y-measuring (vertical) tapes, hot pink
+    /// for x — two axes, two sticks of tailor's chalk, no cross-axis confusion.
+    private var chalkColor: NSColor {
+        lengthIsVertical
+            ? NSColor(calibratedRed: 1.0, green: 0.86, blue: 0.25, alpha: 1)
+            : NSColor(calibratedRed: 1.0, green: 0.35, blue: 0.66, alpha: 1)
+    }
+
+    /// Tailor's chalk lines struck perpendicular from both ends of the ribbon,
+    /// all the way across the screen — she marks before she cuts. Does what the
+    /// laser level would, but this is an atelier. Layered dashed passes fake the
+    /// grain of a struck line; the thin final pass keeps a crisp core to
     /// actually sight against.
     private func drawChalk() {
         let reach = max(bounds.width, bounds.height) * 2
-        let chalk = NSColor(calibratedRed: 1.0, green: 0.35, blue: 0.66, alpha: 1)
+        let chalk = chalkColor
         let passes: [(width: CGFloat, alpha: CGFloat, dash: [CGFloat], phase: CGFloat)] = [
             (9,   0.10, [],     0),   // powder halo
             (3.4, 0.28, [9, 3], 0),   // grain
@@ -755,9 +857,9 @@ private final class BarView: NSView {
     }
 
     /// The metal crimp tab at each end of the ribbon — folded metal, two crimp
-    /// teeth, and a hang hole on the zero end for the sewing-box nail it will
-    /// never see. The tab that would move right now — the one being dragged, or
-    /// the far tip while arrow keys are live — wears a chalk-pink glow.
+    /// teeth, and a hang hole at each end for sewing-box nails it will never
+    /// see. The tab that would move right now — the one being dragged, or the
+    /// far tip while arrow keys are live — wears a glow in the tape's chalk color.
     private func drawTips() {
         let metal = NSGradient(colors: [palette.tipLight, palette.tipDark])
         let metalEdge = palette.tipDark.blended(withFraction: 0.5, of: .black) ?? palette.tipDark
@@ -771,12 +873,16 @@ private final class BarView: NSView {
         }
 
         for (x0, isZeroEnd) in [(-1.5, true), (length - Self.tipAlong + 1.5, false)] {
-            let tab = NSRect(x: x0, y: -2.5, width: Self.tipAlong, height: Self.thickness + 5)
-            let path = NSBezierPath(roundedRect: tab, xRadius: 2.5, yRadius: 2.5)
+            // The tab barely overhangs the ribbon's edges — crimped metal sits
+            // nearly flush, it doesn't wear shoulder pads.
+            let tab = NSRect(x: x0, y: -1, width: Self.tipAlong, height: Self.thickness + 2)
+            // Rounded only at the outer end; the tape-facing edge is a square
+            // crimp, the way folded metal actually bites a ribbon.
+            let path = tipPath(tab, roundedEndIsMax: !isZeroEnd)
 
             if glowZeroEnd == isZeroEnd {
-                // Chalk-pink halo, widening and fading outward.
-                let glow = NSColor(calibratedRed: 1.0, green: 0.35, blue: 0.66, alpha: 1)
+                // Halo in this tape's chalk color, widening and fading outward.
+                let glow = chalkColor
                 for (inset, alpha, width): (CGFloat, CGFloat, CGFloat) in [(-2, 0.55, 2), (-5, 0.28, 3), (-8, 0.12, 4)] {
                     let halo = NSBezierPath(roundedRect: tab.insetBy(dx: inset, dy: inset),
                                             xRadius: 2.5 - inset, yRadius: 2.5 - inset)
@@ -796,11 +902,41 @@ private final class BarView: NSView {
             crimp.move(to: CGPoint(x: crimpX2, y: tab.minY + 2)); crimp.line(to: CGPoint(x: crimpX2, y: tab.maxY - 2))
             metalEdge.withAlphaComponent(0.7).setStroke(); crimp.stroke()
 
-            if isZeroEnd {   // hang hole
-                let hole = NSBezierPath(ovalIn: NSRect(x: tab.minX + 3, y: tab.midY - 2, width: 4, height: 4))
-                NSColor.black.withAlphaComponent(0.45).setFill(); hole.fill()
-            }
+            // Hang hole near the outer (rounded) end of each tab — one per end,
+            // because the sewing box has two nails and she's not choosing.
+            let holeX = isZeroEnd ? tab.minX + 3 : tab.maxX - 7
+            let hole = NSBezierPath(ovalIn: NSRect(x: holeX, y: tab.midY - 2, width: 4, height: 4))
+            NSColor.black.withAlphaComponent(0.45).setFill(); hole.fill()
         }
+    }
+
+    /// A crimp-tab outline rounded only at one end along the x axis: the outer
+    /// (`roundedEndIsMax` picks which) — the other end stays square where the
+    /// metal folds over the ribbon.
+    private func tipPath(_ r: NSRect, roundedEndIsMax: Bool) -> NSBezierPath {
+        let rad: CGFloat = 2.5
+        let p = NSBezierPath()
+        if roundedEndIsMax {
+            p.move(to: CGPoint(x: r.minX, y: r.minY))
+            p.line(to: CGPoint(x: r.maxX - rad, y: r.minY))
+            p.appendArc(withCenter: CGPoint(x: r.maxX - rad, y: r.minY + rad),
+                        radius: rad, startAngle: -90, endAngle: 0)
+            p.line(to: CGPoint(x: r.maxX, y: r.maxY - rad))
+            p.appendArc(withCenter: CGPoint(x: r.maxX - rad, y: r.maxY - rad),
+                        radius: rad, startAngle: 0, endAngle: 90)
+            p.line(to: CGPoint(x: r.minX, y: r.maxY))
+        } else {
+            p.move(to: CGPoint(x: r.maxX, y: r.maxY))
+            p.line(to: CGPoint(x: r.minX + rad, y: r.maxY))
+            p.appendArc(withCenter: CGPoint(x: r.minX + rad, y: r.maxY - rad),
+                        radius: rad, startAngle: 90, endAngle: 180)
+            p.line(to: CGPoint(x: r.minX, y: r.minY + rad))
+            p.appendArc(withCenter: CGPoint(x: r.minX + rad, y: r.minY + rad),
+                        radius: rad, startAngle: 180, endAngle: 270)
+            p.line(to: CGPoint(x: r.maxX, y: r.minY))
+        }
+        p.close()
+        return p
     }
 
     /// The tape's name — "inches" or her "inches" — in white over the blade's
