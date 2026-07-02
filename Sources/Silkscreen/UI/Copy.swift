@@ -4,105 +4,112 @@ import Foundation
 /// without spelunking through view code. Each entry says where it appears and when.
 /// Dynamic strings are functions; everything else is a constant. Dev-facing text
 /// (DebugWindow, log messages) intentionally lives elsewhere.
+///
+/// House voice: she's a drag queen. Confident, affectionate, a little mean to macOS
+/// (never to the user). Key running bits: monitors *lie* about their size over EDID;
+/// Display Settings is "her ex"; the displays are "the girls."
 enum Copy {
 
     // MARK: - Menu bar (the 🖥 status item's dropdown)
 
-    /// First menu item; opens the arranger on every screen.
-    static let menuShowArranger = "Show Arrangement  (⌘⌥F1)"
+    /// First menu item; opens the arranger on every screen at once. It's an entrance.
+    static let menuShowArranger = "Places, Everyone  (⌘⌥F1)"
     /// Dev inspector window.
-    static let menuDebug = "Debug…"
+    static let menuDebug = "Backstage…"
     /// Quit item at the bottom of the menu.
-    static let menuQuit = "Quit Silkscreen"
+    static let menuQuit = "And… Scene."
 
     // MARK: - Arranger overlay chrome
 
     /// One-line help footer centered at the bottom of every arranger screen.
-    static let footer = "Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution"
+    /// Keep the keyboard hints legible — flavor goes between them, not instead of them.
+    static let footer = "Drag her into place · ⌘/arrows pick a girl · arrows nudge · ⌘⇧ shows the choreography · ⌘ ± 0 resolution"
     /// Centered message when there are no displays to arrange (shouldn't happen, but).
-    static let emptyState = "No displays detected"
+    static let emptyState = "No girls in the building. Plug something in, honey."
     /// Highlight hint over the target tile while Option-dragging one display onto another.
-    static let mirrorDropHint = "Mirror here"
+    static let mirrorDropHint = "Twin her"
     /// Third line of a tile's label when the display has no physical size yet
     /// (in place of the PPI readout). Invites the right-click calibration flow.
-    static let calibratePrompt = "calibrate?"
+    static let calibratePrompt = "won't say her size"
 
     // MARK: - Bottom button bar (tooltips; the buttons themselves are icon-only)
 
     /// Reset button (⌘⌫): restore the layout captured when the arranger opened.
-    static let resetTooltip = "Reset"
+    static let resetTooltip = "Start over, bestie"
     /// Undo button (⌘Z): steps back one plane edit, or fires a pending Revert.
-    static let undoTooltip = "Undo"
-    /// Done button (⏎): commit and dismiss.
-    static let doneTooltip = "Done"
+    static let undoTooltip = "Take it back"
+    /// Done button (⏎): commit and dismiss. She's the finale.
+    static let doneTooltip = "Serve it"
     /// The A ↔ a resolution slider in the glass pill.
-    static let sliderTooltip = "Resolution"
+    static let sliderTooltip = "Resolution (bigger everything ↔ more space)"
     /// Feed toggle while the live screen feed is running (figure.run icon).
-    static let feedOnTooltip = "Stop live preview"
+    static let feedOnTooltip = "Cut the feed"
     /// Feed toggle while the feed is off (figure.stand icon).
-    static let feedOffTooltip = "Show live preview"
+    static let feedOffTooltip = "Go live"
     /// Scope toggle while the slider zooms every display proportionally.
-    static let scopeAllTooltip = "Zoom all displays proportionally"
+    static let scopeAllTooltip = "Zoom the whole cast together"
     /// Scope toggle while the slider zooms only the selected display.
-    static let scopeOneTooltip = "Zoom the selected display only"
+    static let scopeOneTooltip = "Zoom just this one diva"
 
     // MARK: - Tile right-click menu
 
-    /// Submenu holding the display's resolution ladder.
+    /// Submenu holding the display's resolution ladder. (Stays a plain noun —
+    /// a submenu you can't find isn't camp, it's a support ticket.)
     static let menuResolution = "Resolution"
     /// Opens the type-a-diagonal calibration alert (external displays only).
-    static let menuInputSize = "Input Size…"
+    static let menuInputSize = "Tell Me Her Real Size…"
     /// Opens the visual match-the-bars calibration (needs ≥2 displays).
-    static let menuManualCalibration = "Manual Calibration…"
+    static let menuManualCalibration = "Bring the Measuring Tape…"
     /// Clears a manual size override, returning to what the monitor reports.
-    static let menuResetSizeToEDID = "Reset Size to EDID"
+    static let menuResetSizeToEDID = "Believe Her Lies Again (EDID)"
     /// Built-in display only: reveal the full mode list beyond the clean 2× ladder.
-    static let menuShowExtendedResolutions = "Show Extended Resolutions"
+    static let menuShowExtendedResolutions = "Show the Full Wardrobe"
 
     // MARK: - Right-hand sidebar (mirrored displays + AirPlay)
 
     /// Section header above the mirrored-display cards.
-    static let mirroredHeader = "Mirrored"
-    /// Section header above the AirPlay session card.
+    static let mirroredHeader = "The Twins"
+    /// Section header above the AirPlay session card. (Proper noun; reads like a
+    /// stage name anyway.)
     static let airplayHeader = "AirPlay"
-    /// "⤷ mirrors <name>" line on a mirrored display's card.
-    static func mirrorsLine(_ masterName: String) -> String { "⤷ mirrors \(masterName)" }
+    /// "⤷ …" line on a mirrored display's card, naming who she's copying.
+    static func mirrorsLine(_ masterName: String) -> String { "⤷ twinning with \(masterName)" }
     /// Fallback for the mirror master's name when it can't be resolved.
-    static let unknownDisplayName = "another display"
+    static let unknownDisplayName = "some other girl"
     /// Fallback for the AirPlay receiver's name when it can't be resolved.
-    static let unknownAirPlayReceiver = "AirPlay receiver"
+    static let unknownAirPlayReceiver = "a mystery venue"
     /// AirPlay card body: what the session is doing.
-    static let airplayBody = "Mirroring a window or app"
+    static let airplayBody = "Beaming a window or app somewhere fabulous"
     /// AirPlay card fine print: we can see the session but not control it.
-    static let airplayFinePrint = "Managed by macOS."
+    static let airplayFinePrint = "macOS is running this one. We're watching. 👁"
     /// AirPlay card button: opens Control Center's Screen Mirroring menu
     /// (the only place an AirPlay session can actually be changed or ended).
-    static let airplayOpenSettings = "Open Screen Mirroring"
+    static let airplayOpenSettings = "Take It Up with Control Center"
 
-    // MARK: - Type-in calibration alert (right-click → Input Size…)
+    // MARK: - Type-in calibration alert (right-click → Tell Me Her Real Size…)
 
     /// Alert title. `name` is the display's name.
-    static func calibrateTitle(_ name: String) -> String { "Calibrate \(name)" }
+    static func calibrateTitle(_ name: String) -> String { "Measuring \(name)" }
     /// Alert body. `edidInches` is what the monitor currently claims, e.g. "27.2".
     static func calibrateBody(edidInches: String) -> String {
-        "Enter the screen's diagonal size in inches (corner to corner of the visible area). "
-        + "EDID currently reports \(edidInches)\"."
+        "What's her actual diagonal, in inches, corner to corner of the glass? "
+        + "She claims \(edidInches)\" over EDID. Monitors lie."
     }
     /// Confirm button (shared with the match-calibration panel).
-    static let save = "Save"
+    static let save = "Make It Canon"
     /// Dismiss button (shared with the match-calibration panel).
-    static let cancel = "Cancel"
+    static let cancel = "Never Mind"
 
-    // MARK: - Match calibration (right-click → Manual Calibration…)
+    // MARK: - Match calibration (right-click → Bring the Measuring Tape…)
 
     /// Instruction at the top of the floating panel.
-    static let matchInstruction = "Drag the bars until they look the same real size."
+    static let matchInstruction = "Drag the bars until they're the same size in real life. Squint. Trust nothing."
     /// All-caps caption over the big live readout.
-    static let matchReadoutCaption = "INFERRED DIAGONAL"
+    static let matchReadoutCaption = "SHE'S MEASURING"
     /// Readout placeholder before a size can be inferred.
     static let matchReadoutPlaceholder = "—"
-    /// Label on the trusted display's bar.
-    static let matchRoleReference = "Reference"
-    /// Label on the bar of the display being calibrated.
-    static let matchRoleTarget = "This display"
+    /// Label on the trusted display's bar (its EDID is believed).
+    static let matchRoleReference = "The Honest One"
+    /// Label on the bar of the display being calibrated (its EDID is not).
+    static let matchRoleTarget = "The Liar"
 }
