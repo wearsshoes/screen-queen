@@ -85,8 +85,8 @@ extension Arranger {
 
                 // A lighter accent so the clear glass stays see-through on Done.
                 let base = prominent
-                    ? (NSColor.controlAccentColor.blended(withFraction: 0.72, of: .white)
-                        ?? .controlAccentColor).withAlphaComponent(0.35)
+                    ? (NSColor.systemPink.blended(withFraction: 0.6, of: .white)
+                        ?? .systemPink).withAlphaComponent(0.4)
                     : nil
                 let g = HoverGlassView(baseTint: base)
                 g.button = button         // hover only lights up while the button is enabled
@@ -258,7 +258,7 @@ extension Arranger {
         let scopeSymbol = state.sliderScope == .all ? "rectangle.on.rectangle" : "rectangle"
         scopeButton.image = NSImage(systemSymbolName: scopeSymbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(scopeCfg)
-        scopeButton.contentTintColor = state.sliderScope == .all ? .controlAccentColor : .secondaryLabelColor
+        scopeButton.contentTintColor = state.sliderScope == .all ? .systemPink : .secondaryLabelColor
         scopeButton.toolTip = state.sliderScope == .all
             ? Copy.scopeAllTooltip : Copy.scopeOneTooltip
 

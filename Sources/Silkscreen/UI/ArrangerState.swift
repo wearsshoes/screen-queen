@@ -213,8 +213,14 @@ final class ArrangerState {
     /// The seam palette. `DisplayGraph` assigns each seam an index (pure edge-coloring);
     /// the actual colors are a presentation choice and live here.
     static let seamPalette: [NSColor] = [
-        .systemPink, .systemGreen, .systemBlue, .systemOrange,
-        .systemPurple, .systemTeal, .systemYellow, .systemRed,
+        NSColor(srgbRed: 1.00, green: 0.41, blue: 0.71, alpha: 1),  // hot pink (the lead)
+        NSColor(srgbRed: 0.93, green: 0.23, blue: 0.85, alpha: 1),  // fuchsia
+        NSColor(srgbRed: 1.00, green: 0.80, blue: 0.20, alpha: 1),  // gold
+        NSColor(srgbRed: 0.25, green: 0.85, blue: 0.95, alpha: 1),  // electric cyan
+        NSColor(srgbRed: 0.72, green: 0.45, blue: 1.00, alpha: 1),  // lavender
+        NSColor(srgbRed: 1.00, green: 0.45, blue: 0.35, alpha: 1),  // coral
+        NSColor(srgbRed: 0.45, green: 0.95, blue: 0.65, alpha: 1),  // mint (range, honey)
+        NSColor(srgbRed: 0.95, green: 0.20, blue: 0.30, alpha: 1),  // classic red lip
     ]
 
     /// Colors keyed by seam (unordered display pair), derived from the current bars so

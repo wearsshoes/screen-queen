@@ -71,8 +71,8 @@ final class SeamEmitters {
         dot.velocityRange = speed * 0.3
         dot.emissionLongitude = angle               // global inward direction (y-up frame)
         dot.emissionRange = 0.15                     // tight fan → clearly perpendicular
-        dot.scale = 0.14 * sizeScale
-        dot.scaleRange = 0.06 * sizeScale
+        dot.scale = 0.2 * sizeScale
+        dot.scaleRange = 0.08 * sizeScale
         layer.emitterCells = [dot]
         CATransaction.commit()
     }
@@ -98,7 +98,7 @@ final class SeamEmitters {
         // y-up frame — so no layer rotation, and direction is a plain global angle.
         e.emitterShape = .rectangle
         e.emitterMode = .volume
-        e.renderMode = .unordered         // distinct circles, no additive blow-out
+        e.renderMode = .unordered         // distinct sparkles, no additive blow-out
         e.emitterCells = [makeCell()]
         host.addSublayer(e)
         layers[id] = e
@@ -116,8 +116,8 @@ final class SeamEmitters {
         return cell
     }
 
-    /// A crisp round dot (hard edge, slight anti-alias) — distinct circles so the motion
-    /// reads clearly, rather than a soft glow that smears.
+    /// A four-point sparkle (concave star: tips at N/E/S/W, quad curves pinched through
+    /// the center) — the seams don't glow, they *shimmer*.
     private static func makeDotSprite() -> CGImage {
         let size = 32
         let space = CGColorSpaceCreateDeviceRGB()
@@ -126,9 +126,14 @@ final class SeamEmitters {
                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         let c = CGFloat(size) / 2
         ctx.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-        // Inset a touch so the circle edge anti-aliases instead of clipping at the bitmap.
-        ctx.fillEllipse(in: CGRect(x: 2, y: 2, width: CGFloat(size) - 4, height: CGFloat(size) - 4))
-        _ = c
+        let r = c - 1
+        let center = CGPoint(x: c, y: c)
+        ctx.move(to: CGPoint(x: c, y: c + r))                                  // top tip
+        ctx.addQuadCurve(to: CGPoint(x: c + r, y: c), control: center)         // → right
+        ctx.addQuadCurve(to: CGPoint(x: c, y: c - r), control: center)         // → bottom
+        ctx.addQuadCurve(to: CGPoint(x: c - r, y: c), control: center)         // → left
+        ctx.addQuadCurve(to: CGPoint(x: c, y: c + r), control: center)         // → close
+        ctx.fillPath()
         return ctx.makeImage()!
     }
 }

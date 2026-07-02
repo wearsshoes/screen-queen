@@ -15,7 +15,7 @@ extension Arranger {
         if beingDragged {
             // Wash the whole screen in the system accent (darkened a touch so tiles/bars
             // still read on top) — the same accent used for the selected tile.
-            (NSColor.controlAccentColor.blended(withFraction: 0.35, of: .black) ?? .controlAccentColor)
+            (NSColor.systemPink.blended(withFraction: 0.2, of: .black) ?? .systemPink)
                 .withAlphaComponent(0.75).setFill()
         } else {
             // A behind-window blur sits under this wash; keep it fairly dark for a moody,
@@ -71,10 +71,10 @@ extension Arranger {
         // Option-mirror drag: highlight the tile the dragged display would mirror onto.
         if let p = mirrorDragPoint, let over = display(at: p), over.id != draggedID, let r = rects[over.id] {
             let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
-            NSColor.controlAccentColor.withAlphaComponent(0.35).setFill()
+            NSColor.systemPink.withAlphaComponent(0.35).setFill()
             let path = NSBezierPath(roundedRect: vr, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
             path.fill()
-            NSColor.controlAccentColor.setStroke(); path.lineWidth = 2; path.stroke()
+            NSColor.systemPink.setStroke(); path.lineWidth = 2; path.stroke()
             let hint = Copy.mirrorDropHint
             let a: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.white]
             let hs = (hint as NSString).size(withAttributes: a)
@@ -124,8 +124,8 @@ extension Arranger {
     private func drawBar(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
         color.setFill()
         dPath(rect, roundedOn: inward).fill()
-        // seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: color,
-        //                  id: "mini-\(barID(rect, inward))", sizeScale: 1)
+        seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: color,
+                         id: "mini-\(barID(rect, inward))", sizeScale: 1)
     }
 
     /// The direction particles drift: toward the display center = the `inward` edge. View is
@@ -194,8 +194,8 @@ extension Arranger {
             facing.setFill()
             dPath(rect, roundedOn: inward).fill()
             // Edge bars are full-screen scale → larger particles than the mini-map bars.
-            // seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: facing,
-            //                  id: "edge-\(barID(rect, inward))", sizeScale: 2.6)
+            seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: facing,
+                             id: "edge-\(barID(rect, inward))", sizeScale: 2.6)
         }
     }
 
@@ -229,8 +229,8 @@ extension Arranger {
     private func drawSelectedShadow(_ tileRect: NSRect) {
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.45)
-        shadow.shadowBlurRadius = 8
+        shadow.shadowColor = NSColor.systemPink.withAlphaComponent(0.85)
+        shadow.shadowBlurRadius = 14
         shadow.shadowOffset = NSSize(width: 0, height: -3)   // -y casts the shadow downward
         shadow.set()
         let path = NSBezierPath(roundedRect: tileRect.insetBy(dx: 1.5, dy: 1.5),
@@ -315,7 +315,7 @@ extension Arranger {
         // takes a light wash of the *system accent* and lifts via `drawSelectedShadow`.
         let selected = display.id == selectedID
         let color = selected
-            ? NSColor.controlAccentColor.blended(withFraction: 0.78, of: .white) ?? .white
+            ? NSColor.systemPink.blended(withFraction: 0.75, of: .white) ?? .white
             : NSColor(white: 0.72, alpha: 0.85)
         let inset = rect.insetBy(dx: 1.5, dy: 1.5)
         let path = NSBezierPath(roundedRect: inset, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
@@ -478,7 +478,7 @@ extension Arranger {
 
         // On the selected (accent-tinted) tile, text is a deep saturated accent so it
         // stays legible against the blue-white and reads as "active" — not white-on-white.
-        let accent = NSColor.controlAccentColor
+        let accent = NSColor.systemPink
         let primary = selected ? (accent.blended(withFraction: 0.72, of: .black) ?? accent) : .labelColor
         let secondary = selected ? (accent.blended(withFraction: 0.55, of: .black) ?? accent) : .secondaryLabelColor
 
