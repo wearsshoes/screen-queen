@@ -92,6 +92,28 @@ enum Copy {
     /// Scope toggle while the slider zooms only the selected display.
     static let scopeOneTooltip = "Zoom just this one diva"
 
+    // MARK: - Countdown banners (top of every screen; non-modal — she never blocks)
+
+    /// Revert banner after a whole-cast resolution change (every display at once, so
+    /// every screen might have gone dark). `s` = seconds until she snatches it back.
+    static func revertCountdown(_ s: Int) -> String {
+        "The whole cast changed looks at once. If anyone went dark, she's snatching it back in \(s)…"
+    }
+    /// Bless the new modes; the countdown stands down (⌘Z still works after).
+    static let revertKeep = "Keep the Look"
+    /// Revert immediately, without waiting out the countdown.
+    static let revertNow = "Snatch It Back"
+
+    /// Feed-guard banner when going live on a big cast (4+ screens — enough capture
+    /// to bog the whole show down). `n` = screen count, `s` = seconds until she cuts it.
+    static func feedGuardCountdown(_ n: Int, _ s: Int) -> String {
+        "Live on \(n) screens is a lot of production. She cuts the feed in \(s) unless you insist…"
+    }
+    /// Keep the feed running; the guard stands down.
+    static let feedKeep = "The Show Goes On"
+    /// Cut the feed immediately.
+    static let feedCutNow = "Cut the Feed"
+
     // MARK: - Tile right-click menu
 
     /// Submenu holding the display's resolution ladder. (Stays a plain noun —

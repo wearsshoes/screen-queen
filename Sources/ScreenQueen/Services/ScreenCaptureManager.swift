@@ -22,6 +22,12 @@ final class ScreenCaptureManager: NSObject {
 
     private var streams: [CGDirectDisplayID: SCStream] = [:]
     private var outputs: [CGDirectDisplayID: FrameOutput] = [:]
+
+    /// The live streams, readable off the main actor — for the feed-guard watchdog:
+    /// if capture load wedges the main thread, the watchdog stops these directly
+    /// (`SCStream.stopCapture` is safe to call from any thread).
+    nonisolated var watchdogStreams: [SCStream] { streamBox.get() }
+    private nonisolated let streamBox = LockedStreams()
     private let ciContext = CIContext(options: nil)
     /// Tiles are small; capture at a modest size and frame rate to keep this cheap.
     private let captureHeight = 400
@@ -66,6 +72,7 @@ final class ScreenCaptureManager: NSObject {
         }
         streams.removeAll()
         outputs.removeAll()
+        streamBox.set([])
     }
 
     private func startStreams() async {
@@ -102,6 +109,7 @@ final class ScreenCaptureManager: NSObject {
                 // Permission not yet granted, or the display went away mid-start — skip it.
             }
         }
+        streamBox.set(Array(streams.values))
     }
 
     /// Called off the main actor by a stream output; converts and stores the frame.
@@ -114,6 +122,14 @@ final class ScreenCaptureManager: NSObject {
             self.onFrame?()
         }
     }
+}
+
+/// A lock around the stream list so the feed-guard watchdog can read it off-main.
+private final class LockedStreams: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: [SCStream] = []
+    func get() -> [SCStream] { lock.lock(); defer { lock.unlock() }; return value }
+    func set(_ new: [SCStream]) { lock.lock(); defer { lock.unlock() }; value = new }
 }
 
 /// Per-display stream output: forwards screen frames to the manager.

@@ -247,16 +247,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSAppleScript(source: script)?.executeAndReturnError(&error)
     }
 
-    /// Apply a reconfiguration and offer a countdown "Revert" at the bottom of every
-    /// screen (the arranger is on all of them, so there's no unusable state to trap
-    /// the user). `apply` returns false if it couldn't even start.
-    private func applyRevertable(apply: () -> Bool, revert: @escaping () -> Void) {
-        guard preservingCursor(apply) else { refresh(); return }
+    /// Apply a reconfiguration and arm a silent Revert behind Undo (the arranger is
+    /// on every screen, so a partial change can't trap the user). Returns whether
+    /// `apply` took; a whole-cast resolution change should follow up with
+    /// `armRevertCountdown()` — see `affectsEveryDisplay`.
+    @discardableResult
+    private func applyRevertable(apply: () -> Bool, revert: @escaping () -> Void) -> Bool {
+        // A new change retires any counting-down predecessor as kept: `pendingRevert`
+        // is about to point at *this* change, and an old countdown firing it would
+        // revert the wrong thing.
+        arranger.state.resolveCountdown(.revertModes, keep: true)
+        guard preservingCursor(apply) else { refresh(); return false }
         refresh()
         arranger.state.pendingRevert = { [weak self] in
             self?.preservingCursor { revert(); return true }; self?.refresh()
         }
         arranger.state.notify()
+        return true
+    }
+
+    /// Whether a change to `changed` touched *every* connected display — the one case
+    /// with no safe screen left to fix things from (a single-display setup counts by
+    /// construction). Mirrored slaves ride their master's mode, so they don't count.
+    private func affectsEveryDisplay(_ changed: Set<CGDirectDisplayID>) -> Bool {
+        RevertPolicy.coversEveryDisplay(
+            changed: changed,
+            all: Set(DisplayManager.snapshot().filter { !$0.isMirrored }.map(\.id)))
+    }
+
+    /// Arm the auto-revert countdown (the banner at the top of every screen): unless
+    /// the user says keep, the pending revert fires itself. 12 seconds, like the old
+    /// modal `confirmKeep` this replaces — but nothing blocks and nothing steals focus.
+    private func armRevertCountdown(seconds: Int = 12) {
+        arranger.state.armCountdown(.revertModes, seconds: seconds) { [weak self] in
+            guard let self else { return }
+            // The notify() fan-out marks the session live, which gates `refresh()`;
+            // this *is* the session's safety net, so let the refresh through.
+            self.isLiveDragging = false
+            guard let revert = self.arranger.state.pendingRevert else { return }
+            self.arranger.state.pendingRevert = nil
+            revert()
+        }
     }
 
     // MARK: - Cursor preservation
@@ -301,7 +332,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let previousMode = CGDisplayCopyDisplayMode(id)
         let previousOrigins = originMap(of: snap)
         let mainID = snap.first(where: { $0.isMain })?.id
-        applyRevertable(apply: {
+        let applied = applyRevertable(apply: {
             guard DisplayManager.applyMode(mode, to: id) else { return false }
             DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true)
             return true
@@ -309,6 +340,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let previousMode { DisplayManager.applyMode(previousMode, to: id) }
             DisplayManager.applyOrigins(previousOrigins, permanent: true)
         })
+        // One display *is* every display on a single-screen setup — the only case
+        // where this change can leave no live arranger to recover from.
+        if applied, affectsEveryDisplay([id]) { armRevertCountdown() }
     }
 
     /// Apply a resolution change to several displays at once (the `.all`-scope slider),
@@ -322,7 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             modes.keys.compactMap { id in CGDisplayCopyDisplayMode(id).map { (id, $0) } })
         let previousOrigins = originMap(of: snap)
         let mainID = snap.first(where: { $0.isMain })?.id
-        applyRevertable(apply: {
+        let applied = applyRevertable(apply: {
             for (id, mode) in modes { _ = DisplayManager.applyMode(mode, to: id) }
             DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true)
             return true
@@ -330,6 +364,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for (id, mode) in previousModes { DisplayManager.applyMode(mode, to: id) }
             DisplayManager.applyOrigins(previousOrigins, permanent: true)
         })
+        // The whole cast changed looks at once → every screen might be dark → the
+        // change must be able to snatch itself back.
+        if applied, affectsEveryDisplay(Set(modes.keys)) { armRevertCountdown() }
     }
 
     /// Make `id` the main display. The arrangement geometry is the current plane; we
@@ -602,6 +639,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Restore positions, resolutions, and main to the baseline captured on open.
     private func resetToBaseline() {
         arranger.state.pendingRevert = nil
+        arranger.state.resolveCountdown(.revertModes, keep: true)   // Reset outranks it
         arranger.state.clearUndo()
         preservingCursor {
             for (id, mode) in baselineModes { DisplayManager.applyMode(mode, to: id) }
@@ -614,6 +652,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func dismissArranger() {
+        // Dismissing is an intentional act — someone who can find Done/Esc can see
+        // their screens, so any live countdown resolves as "keep".
+        arranger.state.resolveCountdown(.revertModes, keep: true)
+        arranger.state.resolveCountdown(.feedGuard, keep: true)
         arranger.hide()
     }
 }

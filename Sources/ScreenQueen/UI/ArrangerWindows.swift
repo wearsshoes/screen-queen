@@ -14,19 +14,68 @@ final class ArrangerWindows {
 
     private let capture = ScreenCaptureManager()
 
+    /// Mouse-move monitors feeding the beacon / ghost cursor (see VirtualMouse.swift);
+    /// installed while visible, empty otherwise.
+    private var mouseMonitors: [Any] = []
+
+    /// At this many screens the live feed is a production number: it defaults off, and
+    /// switching it on arms the feed-guard countdown + watchdog.
+    static let bigCastThreshold = 4
+    /// Off-main insurance for the feed guard — see `armFeedGuardIfBigCast`.
+    private var feedWatchdog: DispatchWorkItem?
+
     init() {
         state.changed = { [weak self] in self?.canvases.forEach { $0.refresh() } }
         state.capture = capture
         // A new frame from any display just repaints the tiles (coalesced by AppKit).
         capture.onFrame = { [weak self] in self?.canvases.forEach { $0.needsDisplay = true } }
         state.onToggleFeed = { [weak self] on in self?.setFeed(on) }
+        // However a feed-guard countdown ends (keep, cut-now, expiry), the watchdog
+        // stands down with it.
+        state.onCountdownResolved = { [weak self] kind in
+            if kind == .feedGuard { self?.cancelFeedWatchdog() }
+        }
     }
 
     /// Turn the live per-display feed on or off (from the toggle button).
     private func setFeed(_ on: Bool) {
         state.feedEnabled = on
-        if on { capture.start() } else { capture.stop() }
+        if on {
+            capture.start()
+            armFeedGuardIfBigCast()
+        } else {
+            capture.stop()
+            // No-op unless a guard was running (its own expiry lands here too).
+            state.resolveCountdown(.feedGuard, keep: true)
+        }
         canvases.forEach { $0.refresh() }
+    }
+
+    /// Going live on `bigCastThreshold`+ screens arms an auto-off: the feed cuts
+    /// itself after the countdown unless the user says keep (the banner, Arranger+
+    /// Banner.swift). Belt: if the capture load wedges the main thread, that Timer
+    /// never fires — so a detached watchdog can still stop the streams directly
+    /// (`SCStream.stopCapture` is safe off-main) a grace period later, then settle
+    /// the UI state once the main thread breathes again.
+    private func armFeedGuardIfBigCast() {
+        guard NSScreen.screens.count >= Self.bigCastThreshold else { return }
+        let seconds = 12
+        state.armCountdown(.feedGuard, seconds: seconds) { [weak self] in self?.setFeed(false) }
+
+        feedWatchdog?.cancel()
+        let capture = self.capture
+        let item = DispatchWorkItem { [weak self] in
+            for stream in capture.watchdogStreams { stream.stopCapture { _ in } }
+            DispatchQueue.main.async { self?.setFeed(false) }
+        }
+        feedWatchdog = item
+        DispatchQueue.global(qos: .userInitiated)
+            .asyncAfter(deadline: .now() + .seconds(seconds + 5), execute: item)
+    }
+
+    private func cancelFeedWatchdog() {
+        feedWatchdog?.cancel()
+        feedWatchdog = nil
     }
 
     /// Show an arranger on every screen (rebuilding to match the current screen set),
@@ -41,10 +90,15 @@ final class ArrangerWindows {
         // key so shortcuts (arrows, ⌘Z, ⌘Delete, Return) work immediately.
         makeMainWindowKey()
         // Default the live feed on unless the machine is already busy (>50% CPU) — a
-        // heavy box shouldn't get a surprise capture load. The user can toggle it with the
-        // leftmost button. Our overlays exist now, so capture can exclude them.
+        // heavy box shouldn't get a surprise capture load — or the cast is big (4+
+        // screens: that much cross-streaming can bog the whole show down). The user
+        // can toggle it with the leftmost button; on a big cast that arms the feed
+        // guard. Our overlays exist now, so capture can exclude them.
         let busy = (ScreenCaptureManager.systemCPUUsage() ?? 0) > 0.5
-        setFeed(!busy)
+        let bigCast = NSScreen.screens.count >= Self.bigCastThreshold
+        setFeed(!busy && !bigCast)
+        installMouseMonitors()
+        mouseDidMove()   // seed the beacon/ghost before the first move
     }
 
     /// Make the arranger window on the main display key (falling back to any window).
@@ -56,9 +110,50 @@ final class ArrangerWindows {
 
     func hide() {
         capture.stop()
+        cancelFeedWatchdog()
+        mouseMonitors.forEach { NSEvent.removeMonitor($0) }
+        mouseMonitors.removeAll()
         windows.values.forEach { $0.orderOut(nil) }
         windows.removeAll()
         canvases.removeAll()
+    }
+
+    // MARK: - Virtual mouse feed (see VirtualMouse.swift for the aids themselves)
+
+    /// Follow the real mouse while visible. A global monitor covers moves over other
+    /// apps' screens; a local one covers our own overlays (which accept mouseMoved).
+    private func installMouseMonitors() {
+        guard VirtualMouse.planeMarkerEnabled || VirtualMouse.ghostCursorEnabled,
+              mouseMonitors.isEmpty else { return }
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged,
+                                           .rightMouseDragged, .otherMouseDragged]
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            self?.mouseDidMove()
+        }) { mouseMonitors.append(g) }
+        if let l = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            self?.mouseDidMove()
+            return event
+        }) { mouseMonitors.append(l) }
+    }
+
+    /// One global cursor sample fanned out to every canvas — each places its own
+    /// beacon/ghost through its own transform (scale/offset differ per screen).
+    private func mouseDidMove() {
+        guard isVisible else { return }
+        let cursor = CGEvent(source: nil)?.location ?? .zero
+        // Prefer plane displays: a mirrored slave shares its master's global bounds,
+        // and the ghost needs the canvas that actually exists.
+        let hostID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
+            ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
+        let host = hostID.flatMap { id in canvases.first { $0.centerID == id } }
+        var hostPoint: CGPoint?
+        if host != nil, let hostID, let window = windows[hostID] {
+            let loc = NSEvent.mouseLocation   // Cocoa global (y-up); the canvas fills the window
+            hostPoint = CGPoint(x: loc.x - window.frame.minX, y: loc.y - window.frame.minY)
+        }
+        for canvas in canvases {
+            canvas.updateMouseOverlays(cursor: cursor, hostID: hostID, host: host, hostPoint: hostPoint)
+        }
     }
 
     /// Re-interpret the OS layout into the shared plane and repaint (external change).
@@ -109,6 +204,9 @@ final class ArrangerWindows {
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) - 1)
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         window.isReleasedWhenClosed = false
+        // mouseMoved events aren't generated for a window that doesn't ask; the local
+        // mouse monitor (the beacon/ghost feed) needs them while the cursor is on us.
+        window.acceptsMouseMovedEvents = true
 
         // The backdrop softens the desktop/apps showing through the transparent overlay
         // while the arranger is active. On macOS 26 use native Liquid Glass (clear

@@ -44,6 +44,22 @@ final class Arranger: NSView {
     /// The button bar's bottom constraint, re-tuned in `layout()` to sit above the Dock.
     var buttonBarBottom: NSLayoutConstraint?
 
+    /// The button bar's outermost container (glass group on macOS 26, the HUD box
+    /// otherwise) — kept so the ghost cursor can map bar-relative positions across
+    /// canvases (see VirtualMouse.swift).
+    weak var barContainer: NSView?
+
+    /// Virtual-mouse overlay layers (built on demand in VirtualMouse.swift; nil while
+    /// unused or when their feature flags are off).
+    var planeMarkerLayer: PlaneMouseMarkerLayer?
+    var ghostCursorLayer: GhostCursorLayer?
+
+    /// The top-of-screen countdown banner (auto-revert / feed guard) — built on demand
+    /// and driven in Arranger+Banner.swift. nil until a countdown first appears.
+    var banner: CountdownBanner?
+    /// The banner's top constraint, re-tuned in `layout()` to clear the menu bar.
+    var bannerTop: NSLayoutConstraint?
+
     init(state: ArrangerState, frame: NSRect) {
         self.state = state
         super.init(frame: frame)
@@ -188,7 +204,7 @@ final class Arranger: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     /// Called by the state after a mutation so this view repaints.
-    func refresh() { syncButtons(); needsDisplay = true }
+    func refresh() { syncButtons(); syncBanner(); needsDisplay = true }
 
     func pointSize(_ d: DisplaySnapshot) -> CGSize { state.pointSize(d) }
     func sizedDisplays() -> [DisplaySnapshot] { state.sizedDisplays() }
@@ -229,6 +245,12 @@ final class Arranger: NSView {
         func viewPoint(_ g: CGPoint) -> CGPoint {
             CGPoint(x: offset.x + (g.x - unionOrigin.x) * scale,
                     y: flipY(offset.y + (g.y - unionOrigin.y) * scale))
+        }
+        /// Inverse of `viewPoint` — a view point back onto the physical plane. Rides the
+        /// same single y-flip gate (`flipY` is its own inverse), so the round-trip is exact.
+        func planePoint(_ v: CGPoint) -> CGPoint {
+            CGPoint(x: (v.x - offset.x) / scale + unionOrigin.x,
+                    y: (flipY(v.y) - offset.y) / scale + unionOrigin.y)
         }
     }
 

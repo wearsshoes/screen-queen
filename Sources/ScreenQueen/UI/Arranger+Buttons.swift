@@ -137,6 +137,7 @@ extension Arranger {
         container.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
         buttonBarBottom = container.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -baseBottomMargin)
         buttonBarBottom?.isActive = true
+        barContainer = container   // for the ghost cursor's bar-relative mapping
     }
 
 
@@ -186,6 +187,9 @@ extension Arranger {
             // Height the Dock lifts the visible area off the screen's bottom edge.
             let dockInset = max(0, screen.visibleFrame.minY - screen.frame.minY)
             buttonBarBottom?.constant = -baseBottomMargin - dockInset
+            // And the menu bar's claim on the top edge, for the countdown banner.
+            let menuInset = max(0, screen.frame.maxY - screen.visibleFrame.maxY)
+            bannerTop?.constant = menuInset + 12
         }
     }
 

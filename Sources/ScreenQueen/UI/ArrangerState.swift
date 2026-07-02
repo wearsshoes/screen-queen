@@ -104,6 +104,69 @@ final class ArrangerState {
     /// Undo once the plane-edit stack is exhausted; set by the AppDelegate.
     var pendingRevert: (() -> Void)?
 
+    // MARK: - Countdowns (the top-of-screen banner)
+
+    /// The two safety countdowns. `.revertModes`: a whole-cast resolution change might
+    /// have blacked out *every* screen, so it un-does itself unless the user says keep.
+    /// `.feedGuard`: going live on a big cast might wedge the machine, so the feed cuts
+    /// itself unless the user says keep. Independent — both can run at once.
+    enum CountdownKind: Hashable, CaseIterable { case revertModes, feedGuard }
+    struct Countdown {
+        var remaining: Int
+        let onExpire: () -> Void
+    }
+
+    /// Live countdowns by kind (empty ⇒ no banner). Every canvas's banner renders this.
+    private(set) var countdowns: [CountdownKind: Countdown] = [:]
+    private var countdownTimer: Timer?
+    /// Fires whenever a countdown leaves the table for any reason (keep, act-now,
+    /// expiry) — lets ArrangerWindows stand down the feed-guard watchdog.
+    var onCountdownResolved: ((CountdownKind) -> Void)?
+
+    /// Start (or restart) a countdown. `onExpire` runs exactly once, at zero or via
+    /// `resolveCountdown(_:keep: false)`.
+    func armCountdown(_ kind: CountdownKind, seconds: Int, onExpire: @escaping () -> Void) {
+        countdowns[kind] = Countdown(remaining: seconds, onExpire: onExpire)
+        if countdownTimer == nil {
+            countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                // The timer is scheduled on the main run loop, so this is main-thread.
+                MainActor.assumeIsolated { self?.tickCountdowns() }
+            }
+        }
+        notify()
+    }
+
+    /// End a countdown early: `keep` = the user blessed the new state (just stand
+    /// down); `!keep` = act now (run the expiry action immediately).
+    func resolveCountdown(_ kind: CountdownKind, keep: Bool) {
+        guard let c = countdowns.removeValue(forKey: kind) else { return }
+        stopCountdownTimerIfIdle()
+        onCountdownResolved?(kind)
+        if !keep { c.onExpire() }
+        notify()
+    }
+
+    private func tickCountdowns() {
+        for (kind, var c) in countdowns {
+            c.remaining -= 1
+            if c.remaining <= 0 {
+                countdowns[kind] = nil
+                onCountdownResolved?(kind)
+                c.onExpire()
+            } else {
+                countdowns[kind] = c
+            }
+        }
+        stopCountdownTimerIfIdle()
+        notify()
+    }
+
+    private func stopCountdownTimerIfIdle() {
+        guard countdowns.isEmpty else { return }
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+    }
+
     /// Plane snapshots for undoing drag/snap/nudge/align edits (most recent last).
     private var undoStack: [[CGDirectDisplayID: CGRect]] = []
 
@@ -127,6 +190,7 @@ final class ArrangerState {
             notify()
         } else if let revert = pendingRevert {
             pendingRevert = nil
+            resolveCountdown(.revertModes, keep: true)   // ⌘Z *is* the revert — no double-fire
             revert()
             notify()
         }
@@ -237,8 +301,7 @@ final class ArrangerState {
     /// The seam palette. `DisplayGraph` assigns each seam an index (pure edge-coloring);
     /// the actual colors are a presentation choice and live here.
     ///
-    /// And the choice is *femme on purpose* — hot pink leads. Muting this to grays and
-    /// system blues isn't neutralizing it, it's just a different (worse) costume. See the
+    /// Please do not send your princess to deconversion therapy camp. See the
     /// README's "The glitz is load-bearing" before reaching for the beige.
     static let seamPalette: [NSColor] = [
         NSColor(srgbRed: 1.00, green: 0.41, blue: 0.71, alpha: 1),  // hot pink (the lead)
