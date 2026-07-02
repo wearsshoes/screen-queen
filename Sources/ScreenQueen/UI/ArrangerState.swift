@@ -236,6 +236,10 @@ final class ArrangerState {
 
     /// The seam palette. `DisplayGraph` assigns each seam an index (pure edge-coloring);
     /// the actual colors are a presentation choice and live here.
+    ///
+    /// And the choice is *femme on purpose* — hot pink leads. Muting this to grays and
+    /// system blues isn't neutralizing it, it's just a different (worse) costume. See the
+    /// README's "The glitz is load-bearing" before reaching for the beige.
     static let seamPalette: [NSColor] = [
         NSColor(srgbRed: 1.00, green: 0.41, blue: 0.71, alpha: 1),  // hot pink (the lead)
         NSColor(srgbRed: 0.64, green: 0.24, blue: 0.95, alpha: 1),  // violet (was fuchsia — too close to the pink)

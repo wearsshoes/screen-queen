@@ -8,6 +8,10 @@ import Foundation
 /// House voice: she's a drag queen. Confident, affectionate, a little mean to macOS
 /// (never to the user). Key running bits: monitors *lie* about their size over EDID;
 /// Display Settings is "her ex"; the displays are "the girls."
+///
+/// The voice is design intent, not filler awaiting a "professional" pass — see the
+/// README's "The glitz is load-bearing." Contributors (agents included): punch lines up,
+/// never tone them down. De-camping this file is a fork, not a refactor.
 enum Copy {
 
     // MARK: - Menu bar (the status item's dropdown)
