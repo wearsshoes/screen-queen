@@ -1,15 +1,17 @@
 #!/bin/bash
-# Build Silkscreen as a release .app bundle and codesign it.
+# Build Size Queen as a release .app bundle and codesign it.
+# (The SPM product/module is still named Silkscreen — her government name.)
 #
 #   scripts/package.sh                 # ad-hoc signed (local use)
 #   CODESIGN_IDENTITY="Developer ID Application: …" scripts/package.sh
 #
-# Output: build/Silkscreen.app
+# Output: build/SizeQueen.app
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP_NAME="Silkscreen"
+PRODUCT_NAME="Silkscreen"   # SPM product (unchanged)
+APP_NAME="SizeQueen"        # the marquee
 BUNDLE_ID="com.moxsf.silkscreen"
 SHORT_VERSION="${SHORT_VERSION:-1.0}"
 BUILD_VERSION="${BUILD_VERSION:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
@@ -53,8 +55,8 @@ make_dmg() {
 }
 
 echo "▸ Building release binary…"
-swift build -c release --product "$APP_NAME"
-BIN="$(swift build -c release --product "$APP_NAME" --show-bin-path)/$APP_NAME"
+swift build -c release --product "$PRODUCT_NAME"
+BIN="$(swift build -c release --product "$PRODUCT_NAME" --show-bin-path)/$PRODUCT_NAME"
 
 echo "▸ Assembling ${APP}…"
 rm -rf "$APP"

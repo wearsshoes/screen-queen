@@ -88,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "🖥"
+        statusItem.button?.title = Copy.menuBarGlyph
         // Left-click opens the arranger; right-click shows a menu (just Quit).
         statusItem.button?.target = self
         statusItem.button?.action = #selector(statusItemClicked)

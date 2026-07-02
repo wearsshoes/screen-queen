@@ -10,8 +10,10 @@ import Foundation
 /// Display Settings is "her ex"; the displays are "the girls."
 enum Copy {
 
-    // MARK: - Menu bar (the 🖥 status item's dropdown)
+    // MARK: - Menu bar (the status item's dropdown)
 
+    /// The status-item glyph itself — she lives in the menu bar, this is her face.
+    static let menuBarGlyph = "👑"
     /// First menu item; opens the arranger on every screen at once. It's an entrance.
     static let menuShowArranger = "Places, Everyone  (⌘⌥F1)"
     /// Dev inspector window.

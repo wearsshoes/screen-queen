@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Silkscreen</string>
+	<string>Size Queen</string>
 	<key>CFBundleDisplayName</key>
-	<string>Silkscreen</string>
+	<string>Size Queen</string>
 	<key>CFBundleExecutable</key>
-	<string>Silkscreen</string>
+	<string>SizeQueen</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.moxsf.silkscreen</string>
 	<key>CFBundlePackageType</key>
@@ -26,6 +26,6 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Silkscreen shows a live preview of each display's contents inside its tile in the arranger.</string>
+	<string>Size Queen shows a live preview of each display's contents inside its tile in the arranger.</string>
 </dict>
 </plist>
