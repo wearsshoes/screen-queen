@@ -35,6 +35,9 @@ fi
 
 BUILD_DIR="build"
 APP="$BUILD_DIR/$APP_NAME.app"
+# Capture the DMG=1 request before DMG is reused as the output path below (the path
+# assignment used to clobber the flag, so the non-notarized DMG could never build).
+WANT_DMG="${DMG:-0}"
 DMG="$BUILD_DIR/$APP_NAME.dmg"
 
 # Build a drag-to-Applications DMG from the assembled .app. Uses only hdiutil (no
@@ -94,7 +97,7 @@ fi
 # Signed with a real identity but not notarizing: still emit a DMG on request
 # (DMG=1), e.g. for a quick internal hand-off. Skipped when NOTARIZE=1, which
 # builds the DMG from the *stapled* app further down.
-if [[ "${DMG:-0}" == "1" && "${NOTARIZE:-0}" != "1" ]]; then
+if [[ "$WANT_DMG" == "1" && "${NOTARIZE:-0}" != "1" ]]; then
 	make_dmg
 fi
 
