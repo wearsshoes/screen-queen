@@ -1,14 +1,5 @@
 import AppKit
 
-/// The marquee typeface: Great Vibes (a script/cursive face, OFL-licensed, bundled in
-/// `Fonts/`) — because a drag name in San Francisco is not a drag name. Used for tile
-/// headlines and card titles; the technical readouts (resolution, ppi, tooltips) stay in
-/// the system font on purpose, for neutral legibility at small sizes. Single static
-/// weight — no weight axis, no separate italic (a script face doesn't need one).
-///
-/// Swapping this for the system font is a design regression, not a cleanup — the split
-/// (script for *identity*, system for *instruments*) is the whole typographic idea. See
-/// the README's "The glitz is load-bearing."
 enum DragFont {
     private static let family = "Great Vibes"
     /// The PostScript name read straight from the registered font file, kept as a backup
