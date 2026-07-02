@@ -130,39 +130,81 @@ final class ArrangerWindows {
 
     // MARK: - Virtual mouse feed (see VirtualMouse.swift for the aids themselves)
 
+    /// The control a press began on, frozen for the press's duration — the
+    /// "outside of a drag action" gate: while a button is held the halo never
+    /// retargets (a slider scrub keeps its twin lit and mirrors the fraction; a
+    /// tile drag that began off-target shows no halo at all).
+    private var ghostPressTarget: GhostTarget?
+
     /// Follow the real mouse while visible. A global monitor covers moves over other
     /// apps' screens; a local one covers our own overlays (which accept mouseMoved).
     private func installMouseMonitors() {
         guard VirtualMouse.planeMarkerEnabled || VirtualMouse.ghostCursorEnabled,
               mouseMonitors.isEmpty else { return }
-        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged,
-                                           .rightMouseDragged, .otherMouseDragged]
-        if let g = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
-            self?.mouseDidMove()
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged,
+                                           .otherMouseDragged, .leftMouseDown, .leftMouseUp]
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            self?.handleMouse(event)
         }) { mouseMonitors.append(g) }
         if let l = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
-            self?.mouseDidMove()
+            self?.handleMouse(event)
             return event
         }) { mouseMonitors.append(l) }
     }
 
-    /// One global cursor sample fanned out to every canvas — each places its own
-    /// beacon/ghost through its own transform (scale/offset differ per screen).
+    private func handleMouse(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown: pressBegan()
+        case .leftMouseUp: ghostPressTarget = nil
+        default: break
+        }
+        mouseDidMove()
+    }
+
+    /// Freeze the pressed control (if any) for the drag's duration, and echo the
+    /// press on every other canvas's halo — the click, made visible everywhere.
+    private func pressBegan() {
+        let ctx = cursorContext()
+        guard isVisible, let host = ctx.host, let p = ctx.hostPoint else { ghostPressTarget = nil; return }
+        ghostPressTarget = host.ghostTarget(at: p)
+        guard ghostPressTarget != nil else { return }
+        for canvas in canvases where canvas !== host { canvas.flashGhostHighlight() }
+    }
+
+    /// One global cursor sample: where the cursor is, which display holds it (even a
+    /// canvas-less one — a mirrored slave shares her master's global bounds, and the
+    /// beacon still wants her id), and the canvas + view point when we have one there.
+    private func cursorContext() -> (cursor: CGPoint, displayID: CGDirectDisplayID?,
+                                     host: Arranger?, hostPoint: CGPoint?) {
+        let cursor = CGEvent(source: nil)?.location ?? .zero
+        // Prefer plane displays so the id resolves to a canvas when both match.
+        let displayID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
+            ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
+        guard let displayID, let host = canvases.first(where: { $0.centerID == displayID }),
+              let window = windows[displayID] else { return (cursor, displayID, nil, nil) }
+        let loc = NSEvent.mouseLocation   // Cocoa global (y-up); the canvas fills the window
+        return (cursor, displayID, host,
+                CGPoint(x: loc.x - window.frame.minX, y: loc.y - window.frame.minY))
+    }
+
+    /// Fan the cursor sample out to every canvas — each places its own beacon/ghost/
+    /// halo and chrome presence through its own geometry. The target (control under
+    /// the cursor) is computed ONCE here, host-side.
     private func mouseDidMove() {
         guard isVisible else { return }
-        let cursor = CGEvent(source: nil)?.location ?? .zero
-        // Prefer plane displays: a mirrored slave shares its master's global bounds,
-        // and the ghost needs the canvas that actually exists.
-        let hostID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
-            ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
-        let host = hostID.flatMap { id in canvases.first { $0.centerID == id } }
-        var hostPoint: CGPoint?
-        if host != nil, let hostID, let window = windows[hostID] {
-            let loc = NSEvent.mouseLocation   // Cocoa global (y-up); the canvas fills the window
-            hostPoint = CGPoint(x: loc.x - window.frame.minX, y: loc.y - window.frame.minY)
+        let ctx = cursorContext()
+        let pressed = NSEvent.pressedMouseButtons != 0
+        let target: GhostTarget?
+        if pressed {
+            target = ghostPressTarget         // frozen for the drag (nil ⇒ no halo)
+        } else {
+            ghostPressTarget = nil            // belt: ups can be missed across spaces
+            if let host = ctx.host, let p = ctx.hostPoint { target = host.ghostTarget(at: p) }
+            else { target = nil }
         }
         for canvas in canvases {
-            canvas.updateMouseOverlays(cursor: cursor, hostID: hostID, host: host, hostPoint: hostPoint)
+            canvas.updateMouseOverlays(cursor: ctx.cursor, hostID: ctx.displayID,
+                                       host: ctx.host, hostPoint: ctx.hostPoint, target: target)
         }
     }
 
@@ -176,7 +218,25 @@ final class ArrangerWindows {
         canvases.forEach { $0.refresh() }
     }
 
+    /// Refresh the unified chrome metrics (see `ArrangerState`): the largest Dock and
+    /// menu-bar claims anywhere, and the smallest screen extents, so every canvas
+    /// places its chrome at identical, everywhere-in-bounds anchor offsets.
+    private func updateChromeMetrics() {
+        var dock: CGFloat = 0, menu: CGFloat = 0
+        var minW = CGFloat(100_000), minH = CGFloat(100_000)
+        for s in NSScreen.screens {
+            dock = max(dock, s.visibleFrame.minY - s.frame.minY)
+            menu = max(menu, s.frame.maxY - s.visibleFrame.maxY)
+            minW = min(minW, s.frame.width)
+            minH = min(minH, s.frame.height)
+        }
+        state.uniformDockInset = dock
+        state.uniformMenuBarInset = menu
+        state.minScreenExtent = CGSize(width: minW, height: minH)
+    }
+
     private func rebuild() {
+        updateChromeMetrics()
         let screens = screenMap()
         var live: Set<CGDirectDisplayID> = []
 

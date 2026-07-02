@@ -12,6 +12,17 @@ final class CountdownBanner: NSVisualEffectView {
     /// banner clears them all. `keep` = bless the new state; `!keep` = act right now.
     var onResolve: ((ArrangerState.CountdownKind, _ keep: Bool) -> Void)?
 
+    /// A row button's role, for the ghost's twin lookup (see `GhostTarget`).
+    enum Role { case keep, act }
+
+    /// The frame (in this banner's coords) of a live row's button, or nil when that
+    /// countdown isn't showing — the ghost's per-canvas twin rect source.
+    func buttonRect(kind: ArrangerState.CountdownKind, role: Role) -> CGRect? {
+        guard let row = rows[kind], !row.isHidden else { return nil }
+        let button = role == .keep ? row.keepButton : row.actButton
+        return convert(button.bounds, from: button)
+    }
+
     private var rows: [ArrangerState.CountdownKind: Row] = [:]
     private let stack = NSStackView()
 
@@ -76,29 +87,33 @@ final class CountdownBanner: NSVisualEffectView {
     /// One countdown's line: message · Keep (pink — she wants you to commit) · act-now.
     private final class Row: NSStackView {
         let label = NSTextField(labelWithString: "")
+        let keepButton: NSButton
+        let actButton: NSButton
         private let onKeep: () -> Void
         private let onAct: () -> Void
 
         init(keepTitle: String, actTitle: String,
              onKeep: @escaping () -> Void, onAct: @escaping () -> Void) {
             self.onKeep = onKeep; self.onAct = onAct
+            keepButton = NSButton(title: keepTitle, target: nil, action: nil)
+            actButton = NSButton(title: actTitle, target: nil, action: nil)
             super.init(frame: .zero)
             label.font = .systemFont(ofSize: 13, weight: .semibold)
             label.textColor = .labelColor
             label.lineBreakMode = .byTruncatingTail
 
-            let keep = NSButton(title: keepTitle, target: self, action: #selector(keepTapped))
-            keep.bezelStyle = .push
-            keep.controlSize = .regular
-            keep.bezelColor = NSColor.systemPink.withAlphaComponent(0.85)
-            let act = NSButton(title: actTitle, target: self, action: #selector(actTapped))
-            act.bezelStyle = .push
-            act.controlSize = .regular
+            keepButton.target = self; keepButton.action = #selector(keepTapped)
+            keepButton.bezelStyle = .push
+            keepButton.controlSize = .regular
+            keepButton.bezelColor = NSColor.systemPink.withAlphaComponent(0.85)
+            actButton.target = self; actButton.action = #selector(actTapped)
+            actButton.bezelStyle = .push
+            actButton.controlSize = .regular
 
             orientation = .horizontal
             alignment = .centerY
             spacing = 12
-            setViews([label, keep, act], in: .center)
+            setViews([label, keepButton, actButton], in: .center)
         }
         required init?(coder: NSCoder) { fatalError() }
 
@@ -126,7 +141,7 @@ extension Arranger {
     private func makeBanner() -> CountdownBanner {
         let b = CountdownBanner()
         b.onResolve = { [weak self] kind, keep in self?.state.resolveCountdown(kind, keep: keep) }
-        b.layer?.zPosition = 6   // above the schematic layers and the SolvePanel (3)
+        b.layer?.zPosition = 7   // above the schematic layers, mouse aids included
         b.translatesAutoresizingMaskIntoConstraints = false
         addSubview(b)
         b.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true

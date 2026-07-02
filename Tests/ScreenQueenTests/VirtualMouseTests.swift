@@ -57,6 +57,85 @@ final class VirtualMouseTests: XCTestCase {
                                              planeRect: plane))
     }
 
+    // MARK: - Presence (chrome real ↔ ghost crossfade)
+
+    func testPresenceEndpointsAndMonotonicity() {
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        // On the screen (any point inside): fully present.
+        XCTAssertEqual(VirtualMouse.presence(cursor: CGPoint(x: 5, y: 5), screenBounds: screen), 1)
+        XCTAssertEqual(VirtualMouse.presence(cursor: CGPoint(x: 1919, y: 1079), screenBounds: screen), 1)
+        // At/beyond the threshold: fully ghost.
+        let far = CGPoint(x: 1920 + VirtualMouse.presenceThreshold, y: 540)
+        XCTAssertEqual(VirtualMouse.presence(cursor: far, screenBounds: screen), 0)
+        // Approach is monotonic: closer ⇒ more present.
+        var last: CGFloat = -1
+        for d in stride(from: VirtualMouse.presenceThreshold, through: 0, by: -20) {
+            let p = VirtualMouse.presence(cursor: CGPoint(x: 1920 + d, y: 540), screenBounds: screen)
+            XCTAssertGreaterThanOrEqual(p, last)
+            last = p
+        }
+        XCTAssertEqual(last, 1)
+        // Degenerate screens contribute nothing.
+        XCTAssertEqual(VirtualMouse.presence(cursor: .zero, screenBounds: .zero), 0)
+    }
+
+    func testSmoothstepClampsAndEases() {
+        XCTAssertEqual(VirtualMouse.smoothstep(-1), 0)
+        XCTAssertEqual(VirtualMouse.smoothstep(0), 0)
+        XCTAssertEqual(VirtualMouse.smoothstep(0.5), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(VirtualMouse.smoothstep(1), 1)
+        XCTAssertEqual(VirtualMouse.smoothstep(2), 1)
+    }
+
+    // MARK: - Docking (fraction transfer onto the twin control)
+
+    func testDockedPointPreservesFraction() {
+        let host = CGRect(x: 100, y: 50, width: 200, height: 40)
+        let dest = CGRect(x: 400, y: 900, width: 200, height: 40)
+        // Corners and center transfer exactly.
+        XCTAssertEqual(VirtualMouse.dockedPoint(hostPoint: CGPoint(x: 100, y: 50), hostRect: host, destRect: dest),
+                       CGPoint(x: 400, y: 900))
+        XCTAssertEqual(VirtualMouse.dockedPoint(hostPoint: CGPoint(x: 200, y: 70), hostRect: host, destRect: dest),
+                       CGPoint(x: 500, y: 920))
+        // A quarter along the (identically sized) slider stays a quarter along.
+        let q = VirtualMouse.dockedPoint(hostPoint: CGPoint(x: 150, y: 60), hostRect: host, destRect: dest)
+        XCTAssertEqual(q.x, 450, accuracy: 1e-9)
+        // Degenerate host rect: fall to the destination's center, not a crash.
+        let deg = VirtualMouse.dockedPoint(hostPoint: .zero,
+                                           hostRect: CGRect(x: 0, y: 0, width: 0, height: 0),
+                                           destRect: dest)
+        XCTAssertEqual(deg, CGPoint(x: dest.midX, y: dest.midY))
+    }
+
+    // MARK: - Anchor-space translations (chrome zones across differing canvases)
+
+    func testAnchorMappedPointsAgreeWithAnchors() {
+        let host = CGSize(width: 2880, height: 1864)     // roomy Retina
+        let dest = CGSize(width: 1920, height: 1080)     // smaller external
+        // Bottom-center: distance from bottom and from centerline both survive.
+        let barPoint = CGPoint(x: 2880 / 2 + 130, y: 96)   // 130 right of center, 96 up
+        let mapped = VirtualMouse.bottomCenterMapped(barPoint, hostSize: host, destSize: dest)
+        XCTAssertEqual(mapped.x - dest.width / 2, 130, accuracy: 1e-9)
+        XCTAssertEqual(mapped.y, 96)
+        // Top-center: distance from the top survives.
+        let bannerPoint = CGPoint(x: 2880 / 2 - 40, y: 1864 - 30)
+        let m2 = VirtualMouse.topCenterMapped(bannerPoint, hostSize: host, destSize: dest)
+        XCTAssertEqual(m2.x - dest.width / 2, -40, accuracy: 1e-9)
+        XCTAssertEqual(dest.height - m2.y, 30, accuracy: 1e-9)
+        // Round-trip is exact.
+        let back = VirtualMouse.bottomCenterMapped(mapped, hostSize: dest, destSize: host)
+        XCTAssertEqual(back.x, barPoint.x, accuracy: 1e-9)
+        XCTAssertEqual(back.y, barPoint.y, accuracy: 1e-9)
+    }
+
+    // MARK: - Bar width cap (the never-out-of-bounds rule)
+
+    func testBarWidthCap() {
+        XCTAssertEqual(Arranger.barWidthCap(minScreenWidth: 1920), 1856)
+        XCTAssertEqual(Arranger.barWidthCap(minScreenWidth: 1080), 1016, "rotated 1080p never compresses the bar")
+        XCTAssertEqual(Arranger.barWidthCap(minScreenWidth: 300), 320, "floored below the brawl line")
+    }
+
     // MARK: - RevertPolicy (when the auto-revert countdown arms)
 
     func testCoversEveryDisplay() {

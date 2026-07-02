@@ -104,6 +104,23 @@ final class ArrangerState {
     /// Undo once the plane-edit stack is exhausted; set by the AppDelegate.
     var pendingRevert: (() -> Void)?
 
+    // MARK: - Chrome anchor space (unified across screens)
+
+    /// Chrome is laid out in a *shared anchor space* — the bar bottom-center, the
+    /// banner top-center, the solve panel bottom-left — with the SAME offsets on
+    /// every canvas, so "the cursor is on Done" is a positional fact that holds on
+    /// every screen (the ghost story rides on this). These are the unified metrics:
+    /// the largest Dock / menu-bar claim anywhere, and the smallest screen extents
+    /// (chrome placed within them is in-bounds everywhere, however extreme the
+    /// aspect ratios). Recomputed by ArrangerWindows on every rebuild.
+    var uniformDockInset: CGFloat = 0
+    var uniformMenuBarInset: CGFloat = 0
+    var minScreenExtent = CGSize(width: 100_000, height: 100_000)
+
+    /// The solve panel's shared origin (bottom-left anchor offset). Dragging the
+    /// panel on any canvas moves it on all of them — positional identity again.
+    var solvePanelOrigin = CGPoint(x: 12, y: 28)
+
     // MARK: - Countdowns (the top-of-screen banner)
 
     /// The two safety countdowns. `.revertModes`: a whole-cast resolution change might

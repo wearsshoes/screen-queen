@@ -41,8 +41,20 @@ final class Arranger: NSView {
     /// clear a bottom-edge alignment arrow, but no more — the Dock inset is added on top.
     let baseBottomMargin: CGFloat = 40
 
-    /// The button bar's bottom constraint, re-tuned in `layout()` to sit above the Dock.
+    /// The button bar's bottom constraint, re-tuned in `layout()` to sit above the Dock
+    /// (the *uniform* Dock inset — see `ArrangerState.uniformDockInset`).
     var buttonBarBottom: NSLayoutConstraint?
+
+    /// Width cap on the bar container: the narrowest screen minus margin, identical on
+    /// every canvas, so the bar compresses (slider first) rather than ever running out
+    /// of bounds on an extreme-portrait girl.
+    var barMaxWidth: NSLayoutConstraint?
+
+    /// The cap rule: narrowest screen minus breathing room, floored so pathological
+    /// screens degrade to a slightly-overflowing bar instead of a constraint brawl.
+    static func barWidthCap(minScreenWidth: CGFloat) -> CGFloat {
+        max(320, minScreenWidth - 64)
+    }
 
     /// The button bar's outermost container (glass group on macOS 26, the HUD box
     /// otherwise) — kept so the ghost cursor can map bar-relative positions across
@@ -53,6 +65,15 @@ final class Arranger: NSView {
     /// unused or when their feature flags are off).
     var planeMarkerLayer: PlaneMouseMarkerLayer?
     var ghostCursorLayer: GhostCursorLayer?
+    /// The halo over the twin of the control the cursor is on (VirtualMouse.swift).
+    var ghostHighlightLayer: GhostHighlightLayer?
+    /// Dashed "the cursor isn't here" outlines per chrome piece, driven by presence.
+    var ghostFrames: [ChromePiece: GhostFrameLayer] = [:]
+
+    /// The bar's controls by role, for the ghost's twin lookup (same six controls on
+    /// every canvas). On macOS 26 the circle capsules stand in for their buttons —
+    /// they're the visible click surface the halo should wrap.
+    var barCapsules: [BarControl: NSView] = [:]
 
     /// The top-of-screen countdown banner (auto-revert / feed guard) — built on demand
     /// and driven in Arranger+Banner.swift. nil until a countdown first appears.
@@ -97,12 +118,27 @@ final class Arranger: NSView {
     /// lifted above the sparkle emitters (zPosition 1) and the front seam glow (2), so the
     /// map never draws over its own readout. Draggable by its title bar; body click-through.
     private(set) lazy var solvePanel: SolvePanel = {
-        let p = SolvePanel(frame: NSRect(x: 12, y: 28, width: 240, height: 166))
+        let p = SolvePanel(frame: NSRect(origin: state.solvePanelOrigin,
+                                         size: NSSize(width: 240, height: 166)))
         p.wantsLayer = true
         p.layer?.zPosition = 3
+        // Drags update the shared origin so every canvas's panel moves together.
+        p.onMoved = { [weak self] origin in
+            guard let self else { return }
+            self.state.solvePanelOrigin = self.clampedPanelOrigin(origin, size: p.frame.size)
+            self.state.notify()
+        }
         addSubview(p)
         return p
     }()
+
+    /// Clamp a solve-panel origin so the shared position is fully on-screen on *every*
+    /// canvas — against the smallest screen extents, not this canvas's own bounds.
+    func clampedPanelOrigin(_ o: CGPoint, size: NSSize) -> CGPoint {
+        let maxX = max(0, min(bounds.width, state.minScreenExtent.width) - size.width)
+        let maxY = max(0, min(bounds.height, state.minScreenExtent.height) - size.height)
+        return CGPoint(x: min(max(0, o.x), maxX), y: min(max(0, o.y), maxY))
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -140,6 +176,24 @@ final class Arranger: NSView {
     var dragStartPhys: CGPoint = .zero    // dragged tile's physical origin at grab
     var dragTransform: Transform?         // frozen during a drag (stable cursor mapping)
     var dragMoved = false
+
+    /// This canvas's transform, frozen while a tile drag is live on ANY canvas
+    /// (`state.draggingDisplayID` broadcasts one) — so no screen's map recenters
+    /// mid-drag. The drag host froze its own in `dragTransform`; everyone else
+    /// holds their blocking too. Cleared on the first draw after the drag ends.
+    var sharedDragTransform: Transform?
+
+    /// The transform to render with — frozen for the duration of a tile drag
+    /// anywhere, live otherwise. All drawing and mouse-overlay placement should go
+    /// through this (not `transform(_:)` directly) so the map and its markers agree.
+    func drawTransform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
+        guard state.draggingDisplayID != nil else {
+            sharedDragTransform = nil
+            return transform(rects)
+        }
+        if sharedDragTransform == nil { sharedDragTransform = dragTransform ?? transform(rects) }
+        return sharedDragTransform
+    }
 
     // Dragging the main display's menu-bar strip to move main to another tile.
     var draggingMenuBar: CGPoint?         // current cursor point while dragging
@@ -204,7 +258,14 @@ final class Arranger: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     /// Called by the state after a mutation so this view repaints.
-    func refresh() { syncButtons(); syncBanner(); needsDisplay = true }
+    func refresh() {
+        syncButtons(); syncBanner()
+        // Keep every canvas's panel at the shared anchor origin (a drag on any
+        // canvas moved it for all of them).
+        let origin = clampedPanelOrigin(state.solvePanelOrigin, size: solvePanel.frame.size)
+        if solvePanel.frame.origin != origin { solvePanel.setFrameOrigin(origin) }
+        needsDisplay = true
+    }
 
     func pointSize(_ d: DisplaySnapshot) -> CGSize { state.pointSize(d) }
     func sizedDisplays() -> [DisplaySnapshot] { state.sizedDisplays() }

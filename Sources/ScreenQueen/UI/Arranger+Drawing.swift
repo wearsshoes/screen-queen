@@ -25,7 +25,7 @@ extension Arranger {
         bounds.fill()
 
         let rects = currentRects()
-        guard let t = dragTransform ?? transform(rects) else {
+        guard let t = drawTransform(rects) else {
             drawCenteredMessage(Copy.emptyState)
             return
         }

@@ -20,6 +20,12 @@ final class SolvePanel: NSView {
     private var content = Content()
     private let titleBarHeight: CGFloat = 16
 
+    /// Dragging reports the desired origin here instead of moving the panel itself —
+    /// the origin lives in shared state (`ArrangerState.solvePanelOrigin`) so the
+    /// panel sits at the same anchor offset on every canvas; the canvases reposition
+    /// (clamped everywhere-in-bounds) on the resulting notify.
+    var onMoved: ((CGPoint) -> Void)?
+
     func update(_ content: Content) {
         self.content = content
         isHidden = content.rects.count < 2   // nothing to say about a solo girl
@@ -50,10 +56,9 @@ final class SolvePanel: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let off = dragOffset, let sup = superview else { return }
         let p = sup.convert(event.locationInWindow, from: nil)
-        // Follow the cursor, clamped fully on-screen.
-        let x = min(max(0, p.x - off.x), sup.bounds.width - frame.width)
-        let y = min(max(0, p.y - off.y), sup.bounds.height - frame.height)
-        setFrameOrigin(CGPoint(x: x, y: y))
+        // Follow the cursor; the shared-state applier clamps (against the *smallest*
+        // screen, so the shared position is legal everywhere).
+        onMoved?(CGPoint(x: p.x - off.x, y: p.y - off.y))
     }
 
     override func mouseUp(with event: NSEvent) { dragOffset = nil }

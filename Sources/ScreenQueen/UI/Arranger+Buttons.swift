@@ -100,6 +100,11 @@ extension Arranger {
             var pieces: [NSView] = glassy
             pieces.insert(sliderPill, at: 3)   // feed, reset, undo, [slider], done
 
+            // The ghost's twin lookup: circle capsules for the buttons (the visible
+            // click surface), the bare controls for slider/scope (fraction matters).
+            barCapsules = [.feed: glassy[0], .reset: glassy[1], .undo: glassy[2],
+                           .done: glassy[3], .slider: resSlider, .scope: scopeButton]
+
             let stack = NSStackView(views: pieces)
             stack.orientation = .horizontal
             stack.spacing = 22
@@ -110,7 +115,11 @@ extension Arranger {
             group.contentView = stack
             container = group
         } else {
-            resSlider.widthAnchor.constraint(equalToConstant: 120).isActive = true
+            setSoftSliderWidth(preferred: 120)
+            // Pre-26 there are no glass capsules (and no scope toggle): the buttons
+            // themselves are the ghost's twin surfaces.
+            barCapsules = [.feed: feedButton, .reset: resetButton, .undo: undoButton,
+                           .done: doneButton, .slider: resSlider]
             let stack = NSStackView(views: [feedButton, resetButton, undoButton, resSlider, doneButton])
             stack.orientation = .horizontal
             stack.spacing = 12
@@ -137,6 +146,11 @@ extension Arranger {
         container.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
         buttonBarBottom = container.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -baseBottomMargin)
         buttonBarBottom?.isActive = true
+        // Cap the bar to the narrowest screen (constant set in layout()); the slider's
+        // soft width above is what gives, so the whole bar compresses identically on
+        // every canvas instead of overflowing an extreme-portrait screen.
+        barMaxWidth = container.widthAnchor.constraint(lessThanOrEqualToConstant: 100_000)
+        barMaxWidth?.isActive = true
         barContainer = container   // for the ghost cursor's bar-relative mapping
     }
 
@@ -151,7 +165,7 @@ extension Arranger {
         small.font = .systemFont(ofSize: 14); small.textColor = .labelColor
 
         resSlider.translatesAutoresizingMaskIntoConstraints = false
-        resSlider.widthAnchor.constraint(equalToConstant: 172).isActive = true
+        setSoftSliderWidth(preferred: 172)
 
         let row = NSStackView(views: [big, resSlider, small, scopeButton])
         row.orientation = .horizontal
@@ -178,19 +192,26 @@ extension Arranger {
     }
 
 
-    /// Keep the button bar above the Dock (which intrudes on visibleFrame, not the safe
-    /// area, for a full-screen borderless window) and clear of a bottom-edge alignment
-    /// arrow (which lives ~40–65px up from the screen bottom).
+    /// The slider is the bar's one compressible member: a soft preferred width the
+    /// `barMaxWidth` cap can squeeze, with a firm-but-breakable floor so it never
+    /// collapses to nothing before the cap gives up.
+    private func setSoftSliderWidth(preferred: CGFloat) {
+        let pref = resSlider.widthAnchor.constraint(equalToConstant: preferred)
+        pref.priority = .defaultLow
+        let floor = resSlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
+        floor.priority = NSLayoutConstraint.Priority(900)
+        NSLayoutConstraint.activate([pref, floor])
+    }
+
+    /// Place the bar and banner at the *uniform* anchor offsets (`ArrangerState`'s
+    /// unified metrics): the same bottom/top insets and width cap on every canvas, so
+    /// the chrome sits at identical anchor-space positions on every screen — never out
+    /// of bounds on any of them, however extreme the aspect ratios.
     override func layout() {
         super.layout()
-        if let screen = window?.screen {
-            // Height the Dock lifts the visible area off the screen's bottom edge.
-            let dockInset = max(0, screen.visibleFrame.minY - screen.frame.minY)
-            buttonBarBottom?.constant = -baseBottomMargin - dockInset
-            // And the menu bar's claim on the top edge, for the countdown banner.
-            let menuInset = max(0, screen.frame.maxY - screen.visibleFrame.maxY)
-            bannerTop?.constant = menuInset + 12
-        }
+        buttonBarBottom?.constant = -baseBottomMargin - state.uniformDockInset
+        bannerTop?.constant = state.uniformMenuBarInset + 12
+        barMaxWidth?.constant = Self.barWidthCap(minScreenWidth: state.minScreenExtent.width)
     }
 
     @objc private func resetTapped() { state.onReset?() }
