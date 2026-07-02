@@ -36,7 +36,7 @@ final class ArrangerState {
     var selectedID: CGDirectDisplayID?
 
     /// Live per-display screen-content capture (nil when unavailable / not started).
-    /// Tiles draw the latest frame for their display, excluding Silkscreen's own overlay.
+    /// Tiles draw the latest frame for their display, excluding Screen Queen's own overlay.
     var capture: ScreenCaptureManager?
 
     /// Whether the live video feed is currently on (drives the leftmost toggle button and
@@ -57,6 +57,18 @@ final class ArrangerState {
     /// The display whose tile is being dragged right now (shared across canvases so the
     /// dragged display's own screen can brighten its backdrop). nil when not dragging.
     var draggingDisplayID: CGDirectDisplayID?
+
+    /// Point origins captured at drag start, holding the *unmoved* displays fixed for the
+    /// drag's duration: only the dragged display is re-solved each frame (docked to whatever it
+    /// now abuts), so a seam between two displays that didn't move can't flicker as an artifact
+    /// of re-interpreting the whole plane. Cleared on drag end. See `lockedSolve`.
+    var lockedPointOrigins: [CGDirectDisplayID: CGPoint]?
+
+    /// Snapshot the current point solve as the drag lock (call on mouse-down, before moving).
+    func beginDragLock() {
+        lockedPointOrigins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
+    }
+    func endDragLock() { lockedPointOrigins = nil }
 
     /// Resolution preview (pending until ⌘ released). `pendingModes` holds the previewed
     /// CGDisplayMode per display — one entry in `.one` scope, many in `.all` scope.
@@ -175,7 +187,41 @@ final class ArrangerState {
         planeDisplays.map { $0.with(bounds: CGRect(origin: $0.bounds.origin, size: pointSize($0))) }
     }
 
-    func currentBars() -> [SeamBar] { SchematicLayout.seamBars(sizedDisplays(), rects: plane) }
+    /// The point-space origins for the current plane. During a drag we hold the unmoved
+    /// displays frozen (`lockedSolve`); otherwise a normal full solve.
+    func pointOrigins() -> [CGDirectDisplayID: CGPoint] {
+        let sized = sizedDisplays()
+        if let locked = lockedPointOrigins, let dragged = draggingDisplayID {
+            return SchematicLayout.lockedSolve(rects: plane, displays: sized, locked: locked, dragged: dragged)
+        }
+        return SchematicLayout.toPoints(rects: plane, displays: sized)
+    }
+
+    func currentBars() -> [SeamBar] {
+        let origins = pointOrigins()
+        let bars = SchematicLayout.seamBars(sizedDisplays(), rects: plane, origins: origins)
+        Self.debugLogLayout(plane: plane, points: origins, dragged: draggingDisplayID, bars: bars)   // DEBUG
+        return bars
+    }
+
+    // DEBUG (temporary): log plane (physical) + reconstructed point rects whenever the seam
+    // set changes, to see which display's reconstructed position flips. Remove once diagnosed.
+    nonisolated(unsafe) private static var lastLayoutSig = ""
+    private static func debugLogLayout(plane: [CGDirectDisplayID: CGRect], points: [CGDirectDisplayID: CGPoint],
+                                       dragged: CGDirectDisplayID?, bars: [SeamBar]) {
+        let seamSig = bars.map { "\($0.aID)-\($0.bID)\($0.isVertical ? "V" : "H")" }.sorted().joined(separator: ",")
+        guard seamSig != lastLayoutSig else { return }
+        lastLayoutSig = seamSig
+        var line = "── seams=[\(seamSig)] dragged=\(dragged.map(String.init) ?? "-")\n"
+        for id in plane.keys.sorted() {
+            let r = plane[id] ?? .zero, p = points[id] ?? .zero
+            line += String(format: "   %u phys=(%.1f,%.1f %.1fx%.1f) pt=(%.0f,%.0f)\n",
+                           id, r.minX, r.minY, r.width, r.height, p.x, p.y)
+        }
+        let path = "/tmp/screenqueen-layout.log"
+        if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close() }
+        else { try? line.write(toFile: path, atomically: true, encoding: .utf8) }
+    }
 
     /// The display macOS will put the Dock on for the arrangement currently on the plane
     /// (predicted from the reconstructed point layout, so it updates live while dragging).
@@ -214,7 +260,7 @@ final class ArrangerState {
     /// the actual colors are a presentation choice and live here.
     static let seamPalette: [NSColor] = [
         NSColor(srgbRed: 1.00, green: 0.41, blue: 0.71, alpha: 1),  // hot pink (the lead)
-        NSColor(srgbRed: 0.93, green: 0.23, blue: 0.85, alpha: 1),  // fuchsia
+        NSColor(srgbRed: 0.64, green: 0.24, blue: 0.95, alpha: 1),  // violet (was fuchsia — too close to the pink)
         NSColor(srgbRed: 1.00, green: 0.80, blue: 0.20, alpha: 1),  // gold
         NSColor(srgbRed: 0.25, green: 0.85, blue: 0.95, alpha: 1),  // electric cyan
         NSColor(srgbRed: 0.72, green: 0.45, blue: 1.00, alpha: 1),  // lavender
@@ -223,12 +269,41 @@ final class ArrangerState {
         NSColor(srgbRed: 0.95, green: 0.20, blue: 0.30, alpha: 1),  // classic red lip
     ]
 
+    /// The last seam→palette-index assignment, fed back into the next coloring so a surviving
+    /// seam keeps its color across tree rebuilds instead of churning when the index order
+    /// shifts. (Stale entries for vanished seams are harmless — they're just ignored.)
+    private var lastSeamIndices: [DisplayGraph.SeamKey: Int] = [:]
+
     /// Colors keyed by seam (unordered display pair), derived from the current bars so
     /// both bars of a seam — edge and mini-map — share one color, recomputed as the
-    /// layout changes during a drag.
+    /// layout changes during a drag. Seeded with the previous assignment so untouched seams
+    /// hold their color when the graph rebuilds.
     func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] {
-        DisplayGraph.seamColorIndices(bars.map { ($0.aID, $0.bID) })
-            .mapValues { Self.seamPalette[$0 % Self.seamPalette.count] }
+        let indices = DisplayGraph.seamColorIndices(bars.map { ($0.aID, $0.bID) },
+                                                    previous: lastSeamIndices)
+        Self.debugLogColors(previous: lastSeamIndices, indices: indices)   // DEBUG
+        lastSeamIndices = indices   // only surviving seams (the result drops vanished ones)
+        return indices.mapValues { Self.seamPalette[$0 % Self.seamPalette.count] }
+    }
+
+    // DEBUG (temporary): append to a file (flushed) whenever the seam set OR any seam's color
+    // index changes, so we can tell churn (set changed) from a preservation failure (same set,
+    // index moved). Remove once diagnosed.
+    nonisolated(unsafe) private static var lastColorSig = ""
+    private static func debugLogColors(previous: [DisplayGraph.SeamKey: Int],
+                                       indices: [DisplayGraph.SeamKey: Int]) {
+        func sig(_ m: [DisplayGraph.SeamKey: Int]) -> String {
+            m.map { "\($0.key.a)-\($0.key.b):\($0.value)" }.sorted().joined(separator: " ")
+        }
+        let now = sig(indices)
+        guard now != lastColorSig else { return }
+        let setChanged = Set(previous.keys) != Set(indices.keys)
+        let recolored = indices.filter { previous[$0.key] != nil && previous[$0.key] != $0.value }
+        let line = "seams=[\(now)] setChanged=\(setChanged) recolored=[\(sig(recolored))]\n"
+        lastColorSig = now
+        let path = "/tmp/screenqueen-seamcolor.log"
+        if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close() }
+        else { try? line.write(toFile: path, atomically: true, encoding: .utf8) }
     }
 
     func commit() {

@@ -64,9 +64,33 @@ final class Arranger: NSView {
         return SeamEmitters(host: host)
     }()
 
+    /// The front seam glow: a layer *above* the sparkle emitters (higher zPosition), so its
+    /// bright per-seam glow reads in front of the shimmer (the wide soft glow is drawn behind
+    /// them, in `draw(_:)`).
+    private(set) lazy var seamGlow: SeamGlow = {
+        wantsLayer = true
+        let host = CALayer()
+        host.frame = bounds
+        host.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        host.zPosition = 2               // front glow above the particles
+        layer?.addSublayer(host)
+        return SeamGlow(host: host)
+    }()
+
+    /// The floating "what she sees" panel (see SolvePanel): a subview on its own layer,
+    /// lifted above the sparkle emitters (zPosition 1) and the front seam glow (2), so the
+    /// map never draws over its own readout. Draggable by its title bar; body click-through.
+    private(set) lazy var solvePanel: SolvePanel = {
+        let p = SolvePanel(frame: NSRect(x: 12, y: 28, width: 240, height: 166))
+        p.wantsLayer = true
+        p.layer?.zPosition = 3
+        addSubview(p)
+        return p
+    }()
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { seamEmitters.clear() }
+        if window == nil { seamEmitters.clear(); seamGlow.clear() }
     }
 
     // Forwarding accessors so this view's methods read/write the shared state.
@@ -207,6 +231,14 @@ final class Arranger: NSView {
                     y: flipY(offset.y + (g.y - unionOrigin.y) * scale))
         }
     }
+
+    /// The y-flip gate for content drawn in *this screen's own point space* against the real
+    /// window `bounds` — the on-glass edge bars. macOS point space is y-down (top-left origin);
+    /// this view is y-up. This is the point-space counterpart of `Transform.flipY` (which gates
+    /// the physical *plane* → view): the same single-flip rule, applied to the one path that
+    /// doesn't ride the plane transform. Callers pass a top-origin point offset and get a y-up
+    /// view coordinate; no consumer flips y itself.
+    func pointYToView(_ y: CGFloat) -> CGFloat { bounds.height - y }
 
     func transform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
         let values = Array(rects.values)

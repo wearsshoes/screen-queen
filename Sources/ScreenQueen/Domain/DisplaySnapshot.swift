@@ -91,9 +91,13 @@ struct DisplaySnapshot: Identifiable, Equatable {
         return fingerprintSuffix.isEmpty ? base : "\(base)@\(fingerprintSuffix)"
     }
 
-    /// A stable, memorable nickname derived from the fingerprint (a temporary handle
-    /// until the user can assign custom names).
-    var nickname: String { Moniker.nickname(for: fingerprint) }
+    /// Her drag name: stable, deterministic from the fingerprint, forever the same monitor
+    /// forever the same girl. The suffix reacts to what she actually is.
+    var nickname: String {
+        let ppi = physicalSizeMM.width > 1 ? Double(pixelSize.width) / (Double(physicalSizeMM.width) / 25.4) : nil
+        let aspect = bounds.height > 0 ? Double(bounds.width / bounds.height) : nil
+        return Moniker.nickname(for: fingerprint, isBuiltin: isBuiltin, pixelsPerInch: ppi, aspectRatio: aspect)
+    }
 
     /// A copy with new `bounds` — for building a *prospective* layout (drag or
     /// resolution preview) without actually reconfiguring the displays.

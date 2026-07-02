@@ -1,4 +1,4 @@
-// Renders the Size Queen app icon master (1024×1024) to scripts/icon/AppIcon_master_1024.png.
+// Renders the Screen Queen app icon master (1024×1024) to scripts/icon/AppIcon_master_1024.png.
 // Run from the repo root:  swift scripts/icon/render-icon.swift
 // Then rebuild Resources/AppIcon.icns (sips + iconutil; see scripts/package.sh notes).
 //

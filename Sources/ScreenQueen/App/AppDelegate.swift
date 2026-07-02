@@ -35,6 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyMonitors: [Any] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Snappy tooltips (the buttons are icon-only; their tooltips carry the copy, so
+        // don't make anyone wait the system's ~1.5s for a punchline). App-scoped, in ms;
+        // `register` supplies a default without persisting anything. 666 on purpose.
+        UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 666])
+        DragFont.register()   // the marquee typeface — not doing this in San Francisco
         PrefsMigration.migrateIfNeeded()   // carry over profiles/calibration from the old bundle id
         requestAccessibilityIfNeeded()   // needed to see the global ⌘⌥F1 hotkey
         setupMenuBar()
@@ -204,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Open the Control Center **Screen Mirroring** menu — the honest "manage it" action
-    /// for a detected AirPlay session, since public API can't cancel one Silkscreen didn't
+    /// for a detected AirPlay session, since public API can't cancel one Screen Queen didn't
     /// start. It has to be the Screen Mirroring menu specifically: Display *Settings*
     /// doesn't know about AirPlay window/app sessions either. There's no public URL for
     /// the Control Center module, so we click its menu-bar item via System Events (needs

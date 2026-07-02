@@ -48,17 +48,21 @@ extension Arranger {
                 drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
             }
         }
-        // Seam particle emitters are repositioned each draw (they animate on the GPU
-        // between draws). Wrap the bar passes, which register the current edges.
+        // Seam particle emitters and the front-glow overlay are repositioned each draw
+        // (both live on layers that composite over this view's drawn content). Wrap the bar
+        // passes, which register the current edges for both.
         seamEmitters.begin()
+        seamGlow.begin()
         drawReferenceBars(bars, t: t, seamColor: seamColor)
         let markers = activeMarkers(rects)
         for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
         drawEdgeBars(bars, seamColor: seamColor)   // full-screen reference bars hugging this screen's real edges
         seamEmitters.commit()
+        seamGlow.commit()
         drawScreenMarkers(markers)                // alignment notches/arrows at this screen's real edges
         drawMirrorColumn()                        // mirrored displays live in the right column
         drawFooter(Copy.footer)
+        updateSolvePanel(seamColor: seamColor)    // the "what she sees" panel (floats above)
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
             if let over = display(at: p), !over.isMain, let r = rects[over.id] {
@@ -118,14 +122,70 @@ extension Arranger {
         }
     }
 
-    /// A D-shaped mini-map bar: rounded on the `inward` edge (facing its display's
-    /// center), flat against the seam. Colored circles drift off the inward edge toward
-    /// the display center and fade out.
+    /// This screen's density relative to the 109 pt/in panels the sparkle look was tuned on.
+    /// Sparkles are set in points, so multiplying their scale by this keeps the shimmer the
+    /// same *physical* size on every screen (denser panel → more points for the same inches).
+    private var screenDensityScale: CGFloat {
+        let ppi = displays.first { $0.id == centerID }?.pointsPerInch
+        return CGFloat(ppi ?? 109) / 109
+    }
+
+    /// A D-shaped mini-map bar rendered as *two* glows around the sparkles: a wide soft
+    /// glow behind them (painted here, under the emitter layer) that bleeds deep toward the
+    /// display center, and a tight bright glow in *front* of them (on an overlay layer above
+    /// the emitters). Sparkles drift off the inward edge toward the center and fade out.
     private func drawBar(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
-        color.setFill()
-        dPath(rect, roundedOn: inward).fill()
+        drawBehindGlow(rect, roundedOn: inward, color: color)
+        let eid = barID(rect, inward)
         seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: color,
-                         id: "mini-\(barID(rect, inward))", sizeScale: 1)
+                         id: "mini-\(eid)", sizeScale: screenDensityScale)
+        seamGlow.add(rect: rect, inward: overlayEdge(inward), color: color, id: "mini-\(eid)")
+    }
+
+    /// The wide, soft glow *behind* the sparkles: seam color opaque at the flat (outward)
+    /// edge, fading to transparent well past the inward edge (toward the display center) —
+    /// it reaches ~2× the bar depth into the tile so the color bleeds rather than sits as a
+    /// slab. Clipped to a D-shape extended to that reach so the bleed isn't capped at the
+    /// thin bar.
+    private func drawBehindGlow(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
+        let depth = (inward == .minX || inward == .maxX) ? rect.width : rect.height
+        let reach = depth * behindGlowReach          // how far past the inward edge the glow bleeds
+        // Grow the rect inward by (reach - depth) so its inward edge lands at the glow's end.
+        let ext: NSRect
+        switch inward {
+        case .minX: ext = NSRect(x: rect.maxX - reach, y: rect.minY, width: reach, height: rect.height)
+        case .maxX: ext = NSRect(x: rect.minX, y: rect.minY, width: reach, height: rect.height)
+        case .minY: ext = NSRect(x: rect.minX, y: rect.maxY - reach, width: rect.width, height: reach)
+        case .maxY: ext = NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: reach)
+        }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        dPath(ext, roundedOn: inward).addClip()
+        // Gradient from the seam (outward) edge → the extended inward edge: opaque → clear.
+        let (start, end): (CGPoint, CGPoint)
+        switch inward {
+        case .minX: start = CGPoint(x: ext.maxX, y: ext.midY); end = CGPoint(x: ext.minX, y: ext.midY)
+        case .maxX: start = CGPoint(x: ext.minX, y: ext.midY); end = CGPoint(x: ext.maxX, y: ext.midY)
+        case .minY: start = CGPoint(x: ext.midX, y: ext.maxY); end = CGPoint(x: ext.midX, y: ext.minY)
+        case .maxY: start = CGPoint(x: ext.midX, y: ext.minY); end = CGPoint(x: ext.midX, y: ext.maxY)
+        }
+        // Slightly softened at the seam so the front glow reads as the brighter core.
+        let gradient = NSGradient(colors: [color.withAlphaComponent(0.7), color.withAlphaComponent(0)],
+                                  atLocations: [0, 1], colorSpace: .sRGB)
+        gradient?.draw(from: start, to: end, options: [])
+    }
+
+    /// The behind glow reaches this multiple of the bar depth toward the display center.
+    private var behindGlowReach: CGFloat { 2 }
+
+    /// Map a drawing `RectEdge` to the overlay glow's inward direction.
+    private func overlayEdge(_ inward: RectEdge) -> SeamGlow.Edge {
+        switch inward {
+        case .minX: return .minX
+        case .maxX: return .maxX
+        case .minY: return .minY
+        case .maxY: return .maxY
+        }
     }
 
     /// The direction particles drift: toward the display center = the `inward` edge. View is
@@ -182,7 +242,11 @@ extension Arranger {
             let inward: RectEdge
             if bar.isVertical {
                 let x = weAreA ? bounds.width - thickness : 0    // a = left display
-                rect = NSRect(x: x, y: along - len / 2, width: thickness, height: len)
+                // `along` is a point offset down from the screen's *top* (macOS point space is
+                // y-down); the view is y-up. Pass it through the same single y-flip gate the
+                // mini-map uses so the bar lands at the real seam — no bespoke flip here.
+                let yCenter = pointYToView(along)
+                rect = NSRect(x: x, y: yCenter - len / 2, width: thickness, height: len)
                 inward = weAreA ? .minX : .maxX                  // a hugs the right edge → rounds left
             } else {
                 // `a` is above the seam, so the seam is at its bottom edge (y 0); "inward"
@@ -191,11 +255,14 @@ extension Arranger {
                 rect = NSRect(x: along - len / 2, y: y, width: len, height: thickness)
                 inward = weAreA ? .maxY : .minY
             }
-            facing.setFill()
-            dPath(rect, roundedOn: inward).fill()
-            // Edge bars are full-screen scale → larger particles than the mini-map bars.
+            drawBehindGlow(rect, roundedOn: inward, color: facing)
+            let eid = barID(rect, inward)
+            // Edge bars are full-screen scale → larger particles than the mini-map bars, with
+            // a deeper drift (travel only — size/spacing stay put). Scaled by the screen's
+            // density so the shimmer is the same physical size everywhere.
             seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: facing,
-                             id: "edge-\(barID(rect, inward))", sizeScale: 2.6)
+                             id: "edge-\(eid)", sizeScale: 2 * screenDensityScale, travelBoost: 3)
+            seamGlow.add(rect: rect, inward: overlayEdge(inward), color: facing, id: "edge-\(eid)")
         }
     }
 
@@ -330,7 +397,7 @@ extension Arranger {
     }
 
     /// Fill the tile with what's actually on that screen: a live capture frame (the real
-    /// desktop + windows, minus Silkscreen's own overlay) when available, else the static
+    /// desktop + windows, minus Screen Queen's own overlay) when available, else the static
     /// wallpaper. Clipped to the rounded tile and scaled to cover. A mirrored slave shows
     /// its master's content. Dimmed slightly so labels/bars stay legible on top.
     private func drawWallpaper(for display: DisplaySnapshot, in tile: NSRect, selected: Bool) {
@@ -476,23 +543,30 @@ extension Arranger {
             return italic ? NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask) : base
         }
 
-        // On the selected (accent-tinted) tile, text is a deep saturated accent so it
-        // stays legible against the blue-white and reads as "active" — not white-on-white.
+        // The label sits on a dark plate now (so the drag name's glow reads as a glow),
+        // so the rest of the text is light-on-dark; selected tiles lift it toward the
+        // accent instead of toward black.
         let accent = NSColor.systemPink
-        let primary = selected ? (accent.blended(withFraction: 0.72, of: .black) ?? accent) : .labelColor
-        let secondary = selected ? (accent.blended(withFraction: 0.55, of: .black) ?? accent) : .secondaryLabelColor
+        let primary = selected ? (accent.blended(withFraction: 0.3, of: .white) ?? accent) : .white
+        let secondary = selected ? (accent.blended(withFraction: 0.5, of: .white) ?? accent) : NSColor.white.withAlphaComponent(0.7)
+        let tertiary = secondary.withAlphaComponent(0.72)
 
-        // The text lines (name, resolution, diagonal·ppi). These *scale* with the tile
-        // to preview resolution, so they must not shove the slider around.
-        var lines: [(String, NSFont, NSColor)] = []
-        lines.append((display.name, f(16, bold: true), primary))
+        // The text lines (drag name, government name, resolution, diagonal·ppi). These
+        // *scale* with the tile to preview resolution, so they must not shove the slider
+        // around. She goes by her drag name; the EDID/System-name string is the fine
+        // print underneath — work names go in baby letters. The drag name carries a
+        // lighter-pink glow (hot pink fill); everything else is nil.
+        var lines: [(String, NSFont, NSColor, NSColor?)] = []
+        let nameGlow = NSColor.systemPink.blended(withFraction: 0.55, of: .white) ?? .white
+        lines.append((display.nickname, DragFont.script(size: 26 * fontScale), .systemPink, nameGlow))
+        lines.append((display.name, f(10), tertiary, nil))
         let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
-        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13), primary))
+        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13), primary, nil))
         let diag = display.diagonalInches > 0 ? String(format: "%.0f″ · ", display.diagonalInches) : ""
         if let effPPI {
-            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), secondary))
+            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), secondary, nil))
         } else {
-            lines.append((diag + Copy.calibratePrompt, f(13), secondary))
+            lines.append((diag + Copy.calibratePrompt, f(13), secondary, nil))
         }
 
         // Text is centered in the *whole* tile. The slider is pinned to a fixed spot near
@@ -513,22 +587,31 @@ extension Arranger {
             let boxW = min(widest + padX * 2, rect.width - 4)
             let box = NSRect(x: rect.midX - boxW / 2, y: bottom - padY,
                              width: boxW, height: total + padY * 2)
-            // A light plate under the (dark) label text so it reads over any wallpaper.
+            // A dark plate under the label so the pink glow actually reads as a glow
+            // (a light backdrop just makes it look like a soft blur) and the text pops
+            // off any wallpaper.
             let fill = selected
-                ? NSColor.white.withAlphaComponent(0.6)
-                : NSColor(white: 0.9, alpha: 0.44)
+                ? NSColor.black.withAlphaComponent(0.55)
+                : NSColor.black.withAlphaComponent(0.4)
             fill.setFill()
             NSBezierPath(roundedRect: box, xRadius: 11, yRadius: 11).fill()
         }
 
         // Stack lines top-down (y-up): start at the block's top and drop each line's height.
         var y = bottom + total
-        for (i, (text, font, color)) in lines.enumerated() {
+        for (i, (text, font, color, glow)) in lines.enumerated() {
             let s = sizes[i]
             y -= s.height
             if s.width <= rect.width - 8 {
-                (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: y),
-                                        withAttributes: [.font: font, .foregroundColor: color])
+                var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+                if let glow {
+                    let shadow = NSShadow()
+                    shadow.shadowColor = glow
+                    shadow.shadowBlurRadius = 6
+                    shadow.shadowOffset = .zero
+                    attrs[.shadow] = shadow
+                }
+                (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: y), withAttributes: attrs)
             }
             y -= gap
         }
@@ -733,6 +816,30 @@ extension Arranger {
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.tertiaryLabelColor]
         let size = (text as NSString).size(withAttributes: attrs)
         (text as NSString).draw(at: CGPoint(x: (bounds.width - size.width) / 2, y: 8), withAttributes: attrs)
+    }
+
+    /// Feed the "what she sees" panel the current point solve (rendering lives in
+    /// `SolvePanel`). Uses the *actual* origins the seam detection uses (the locked solve
+    /// during a drag), so the panel shows the truth; ambiguity flags come from the trace,
+    /// and each seam carries its own palette color so panel and schematic read as one.
+    private func updateSolvePanel(seamColor: [DisplayGraph.SeamKey: NSColor]) {
+        let origins = state.pointOrigins()
+        let trace = SchematicLayout.solveTrace(rects: state.plane, displays: state.sizedDisplays())
+        let ambiguousIDs = Set(trace.pointRects.filter(\.ambiguous).map(\.id))
+        var content = SolvePanel.Content()
+        for d in state.sizedDisplays() {
+            guard let o = origins[d.id] else { continue }
+            content.rects.append((d.id, CGRect(origin: o, size: d.bounds.size), ambiguousIDs.contains(d.id)))
+        }
+        for i in 0..<content.rects.count {
+            for j in (i + 1)..<content.rects.count {
+                guard let s = SchematicLayout.seam(content.rects[i].rect, content.rects[j].rect) else { continue }
+                let key = DisplayGraph.SeamKey(content.rects[i].id, content.rects[j].id)
+                content.seams.append((content.rects[i].id, content.rects[j].id, s.vertical,
+                                      seamColor[key] ?? .systemPink))
+            }
+        }
+        solvePanel.update(content)
     }
 
     private func drawCenteredMessage(_ message: String) {

@@ -9,7 +9,7 @@ extension Arranger {
         let p = convert(event.locationInWindow, from: nil)
         guard let d = display(at: p) else { return nil }
         let menu = NSMenu()
-        menu.addItem(withTitle: d.name, action: nil, keyEquivalent: "")
+        menu.addItem(withTitle: d.nickname, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(resolutionMenuItem(for: d))
         // The built-in display's EDID physical size is authoritative, so it's not

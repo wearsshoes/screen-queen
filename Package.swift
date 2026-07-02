@@ -2,17 +2,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "Silkscreen",
+    name: "ScreenQueen",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "Silkscreen",
-            path: "Sources/Silkscreen"
+            name: "ScreenQueen",
+            path: "Sources/ScreenQueen",
+            resources: [.copy("Fonts")]
         ),
         .testTarget(
-            name: "SilkscreenTests",
-            dependencies: ["Silkscreen"],
-            path: "Tests/SilkscreenTests"
+            name: "ScreenQueenTests",
+            dependencies: ["ScreenQueen"],
+            path: "Tests/ScreenQueenTests"
         )
     ],
     // Phase 1 uses language mode 5 to keep the AppKit/C-callback glue simple.

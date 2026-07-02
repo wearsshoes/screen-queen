@@ -47,6 +47,7 @@ extension Arranger {
         // Option-drag mirrors: dropping onto another tile mirrors this display onto it.
         optionMirrorDrag = event.modifierFlags.contains(.option) && planeDisplays.count > 1
         state.draggingDisplayID = d.id   // brighten the grabbed display's screen from click
+        state.beginDragLock()            // freeze unmoved displays' point positions for the drag
         dragStartMouse = p
         dragTransform = transform(plane)      // freeze so the cursor mapping is stable
         dragStartPhys = plane[d.id]?.origin ?? .zero
@@ -89,7 +90,7 @@ extension Arranger {
     override func mouseUp(with event: NSEvent) {
         defer { draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil
                 optionMirrorDrag = false; mirrorDragPoint = nil; state.pendingMainID = nil
-                state.draggingDisplayID = nil; state.notify() }
+                state.draggingDisplayID = nil; state.endDragLock(); state.notify() }
         // Dropped the menu-bar strip: whichever tile it's over becomes main.
         if let p = draggingMenuBar {
             needsDisplay = true

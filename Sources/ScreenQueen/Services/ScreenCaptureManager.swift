@@ -3,7 +3,7 @@ import Foundation
 import CoreImage
 
 /// Captures a live, low-frame-rate feed of each display's contents — *excluding
-/// Silkscreen's own arranger overlay* — so each tile can show what's really on that
+/// Screen Queen's own arranger overlay* — so each tile can show what's really on that
 /// screen. One `SCStream` per display; the latest frame is cached as a `CGImage`
 /// keyed by display id, and `onFrame` fires (on the main actor) when any updates so
 /// the canvas can repaint.
@@ -72,7 +72,7 @@ final class ScreenCaptureManager: NSObject {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(
             false, onScreenWindowsOnly: true) else { return }
 
-        // Exclude *this whole app* — every Silkscreen overlay on every screen — so the
+        // Exclude *this whole app* — every Screen Queen overlay on every screen — so the
         // tiles show the real desktop, not our own dim overlay captured recursively.
         // (Excluding individual windows is fragile: a backdrop/glass window mid-
         // registration slips through and each screen captures the others' overlays.)

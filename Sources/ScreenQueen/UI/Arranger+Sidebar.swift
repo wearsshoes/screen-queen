@@ -41,36 +41,47 @@ extension Arranger {
             let aspect = sz0.height > 0 ? sz0.width / sz0.height : 16.0 / 9
             let cardH = min(max(cardW / max(aspect, 0.1), 120), 260)
             let card = NSRect(x: colX + pad, y: y - cardH, width: cardW, height: cardH)
-            NSColor(white: 0.72, alpha: 0.85).setFill()
+            // Dark card so the drag name's glow reads as a glow, not a smudge.
+            NSColor(white: 0.12, alpha: 0.9).setFill()
             NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
 
             let inner = card.insetBy(dx: 18, dy: 16)
             // Lines stack top-down: start at the card's top and drop by each line's height.
             var ty = inner.maxY
-            func line(_ s: String, _ font: NSFont, _ color: NSColor) {
-                let a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            func line(_ s: String, _ font: NSFont, _ color: NSColor, glow: NSColor? = nil) {
+                var a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+                if let glow {
+                    let shadow = NSShadow()
+                    shadow.shadowColor = glow
+                    shadow.shadowBlurRadius = 6
+                    shadow.shadowOffset = .zero
+                    a[.shadow] = shadow
+                }
                 let h = (s as NSString).size(withAttributes: a).height
                 ty -= h
                 (s as NSString).draw(at: CGPoint(x: inner.minX, y: ty), withAttributes: a)
                 ty -= 5
             }
-            line(d.name, .boldSystemFont(ofSize: 20), .labelColor)
+            let nameGlow = NSColor.systemPink.blended(withFraction: 0.55, of: .white) ?? .white
+            line(d.nickname, DragFont.script(size: 30), .systemPink, glow: nameGlow)
+            line(d.name, .systemFont(ofSize: 10), NSColor.white.withAlphaComponent(0.5))
             // The mirrored display's own stats — resolution (HiDPI-tagged), diagonal, PPI —
             // like a plane tile, so the card isn't only "what it mirrors".
             let sz = pointSize(d)
             let pixelW = Int(d.pixelSize.width)
             let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
-            line("\(Int(sz.width))×\(Int(sz.height))\(hidpi)", .systemFont(ofSize: 15), .labelColor)
+            line("\(Int(sz.width))×\(Int(sz.height))\(hidpi)", .systemFont(ofSize: 15), .white)
             let effPPI = d.diagonalInches > 0 && sz.width > 0
                 ? Double(sz.width) / (Double(d.physicalSizeMM.width) / 25.4) : nil
             let diag = d.diagonalInches > 0 ? String(format: "%.0f″ · ", d.diagonalInches) : ""
+            let dim = NSColor.white.withAlphaComponent(0.7)
             if let effPPI {
-                line(diag + String(format: "%.0f ppi", effPPI), .systemFont(ofSize: 15), .secondaryLabelColor)
+                line(diag + String(format: "%.0f ppi", effPPI), .systemFont(ofSize: 15), dim)
             } else if !diag.isEmpty {
-                line(String(diag.dropLast(3)), .systemFont(ofSize: 15), .secondaryLabelColor)
+                line(String(diag.dropLast(3)), .systemFont(ofSize: 15), dim)
             }
             let masterName = displays.first { $0.id == d.mirrorMaster }?.name ?? Copy.unknownDisplayName
-            line(Copy.mirrorsLine(masterName), .systemFont(ofSize: 15), .secondaryLabelColor)
+            line(Copy.mirrorsLine(masterName), .systemFont(ofSize: 15), dim)
 
             // Un-mirror button (top-right ✕).
             let bx = NSRect(x: card.maxX - 34, y: card.maxY - 34, width: 24, height: 24)

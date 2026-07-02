@@ -4,21 +4,21 @@
             "type": "swift",
             "request": "launch",
             "args": [],
-            "cwd": "${workspaceFolder:silkscreen}",
-            "name": "Debug Silkscreen",
-            "target": "Silkscreen",
+            "cwd": "${workspaceFolder:screen-queen}",
+            "name": "Debug ScreenQueen",
+            "target": "ScreenQueen",
             "configuration": "debug",
-            "preLaunchTask": "swift: Build Debug Silkscreen"
+            "preLaunchTask": "swift: Build Debug ScreenQueen"
         },
         {
             "type": "swift",
             "request": "launch",
             "args": [],
-            "cwd": "${workspaceFolder:silkscreen}",
-            "name": "Release Silkscreen",
-            "target": "Silkscreen",
+            "cwd": "${workspaceFolder:screen-queen}",
+            "name": "Release ScreenQueen",
+            "target": "ScreenQueen",
             "configuration": "release",
-            "preLaunchTask": "swift: Build Release Silkscreen"
+            "preLaunchTask": "swift: Build Release ScreenQueen"
         }
     ]
 }

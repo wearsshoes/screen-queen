@@ -1,18 +1,17 @@
 #!/bin/bash
-# Build Size Queen as a release .app bundle and codesign it.
-# (The SPM product/module is still named Silkscreen — her government name.)
+# Build Screen Queen as a release .app bundle and codesign it.
 #
 #   scripts/package.sh                 # ad-hoc signed (local use)
 #   CODESIGN_IDENTITY="Developer ID Application: …" scripts/package.sh
 #
-# Output: build/SizeQueen.app
+# Output: build/ScreenQueen.app
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-PRODUCT_NAME="Silkscreen"   # SPM product (unchanged)
-APP_NAME="SizeQueen"        # the marquee
-BUNDLE_ID="com.moxsf.silkscreen"
+PRODUCT_NAME="ScreenQueen"   # SPM product
+APP_NAME="ScreenQueen"       # the marquee
+BUNDLE_ID="com.moxsf.screenqueen"
 SHORT_VERSION="${SHORT_VERSION:-1.0}"
 BUILD_VERSION="${BUILD_VERSION:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 # Resolve the codesigning identity:
@@ -101,7 +100,7 @@ fi
 
 # Notarize when asked (needs a real Developer ID signature above). Provide either a
 # stored credential profile or an Apple ID / team / app-specific-password triple:
-#   NOTARIZE=1 NOTARY_PROFILE="silkscreen"                       scripts/package.sh
+#   NOTARIZE=1 NOTARY_PROFILE="screenqueen"                      scripts/package.sh
 #   NOTARIZE=1 NOTARY_APPLE_ID=… NOTARY_TEAM_ID=… NOTARY_PASSWORD=…  scripts/package.sh
 if [[ "${NOTARIZE:-0}" == "1" ]]; then
 	ZIP="$BUILD_DIR/$APP_NAME.zip"

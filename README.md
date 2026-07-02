@@ -1,16 +1,16 @@
-# Size Queen for macOS — make your desktop *glitter* 👑
+# Screen Queen for macOS — make your desktop *glitter* 👑
 
 **A tiny macOS menu-bar app that arranges your displays by their true physical size. She cares about the inches. The *real* ones.**
 
 <!-- TODO: hero GIF of the queen strutting onto every screen and a display getting dragged, snatched, and put in her place. Drop it at docs/werk.gif and uncomment:
-![Size Queen serving realness](docs/werk.gif) -->
+![Screen Queen serving realness](docs/werk.gif) -->
 
 Plug a 27" 4K monitor next to a 15" laptop and macOS's **Displays** settings arranges them
 like a straight man packed your suitcase: the physically enormous screen shows up as a tiny
 little box, your cursor face-plants into the wrong seam, and windows leap across the gap like
 they've seen a bug. It's giving *disorganized*. It's giving *unread group chat*.
 
-Size Queen replaces that mess with an arranger that draws your monitors at their **real
+Screen Queen replaces that mess with an arranger that draws your monitors at their **real
 relative sizes**, aligns the seams where your cursor *actually* crosses, and predicts exactly
 where the Dock is going to sashay off to. She does not tuck. She does not compromise.
 
@@ -54,8 +54,8 @@ where the Dock is going to sashay off to. She does not tuck. She does not compro
 
 Requires **macOS 14 (Sonoma) or later** (Apple Silicon or Intel — she doesn't discriminate).
 
-1. Download `SizeQueen.dmg` from the [latest release](../../releases/latest).
-2. Open it and drag **Size Queen** to your Applications folder. (You *drag* her. It's the whole
+1. Download `ScreenQueen.dmg` from the [latest release](../../releases/latest).
+2. Open it and drag **Screen Queen** to your Applications folder. (You *drag* her. It's the whole
    bit. Stay with me.)
 3. Launch her. She lives in the menu bar (👑) — no Dock icon, no window, no clutter. A lady
    travels light.
@@ -63,7 +63,7 @@ Requires **macOS 14 (Sonoma) or later** (Apple Silicon or Intel — she doesn't 
    global <kbd>⌘⌥F1</kbd> hotkey while other apps have the spotlight. Grant it in
    **System Settings → Privacy & Security → Accessibility**. Consent is sexy.
 
-> Size Queen is notarized by Apple, so Gatekeeper lets her through without a scene.
+> Screen Queen is notarized by Apple, so Gatekeeper lets her through without a scene.
 
 ### Build from source
 
@@ -71,7 +71,7 @@ Requires **macOS 14 (Sonoma) or later** (Apple Silicon or Intel — she doesn't 
 swift build            # debug build (rehearsal)
 swift test             # run the layout tests (dress rehearsal)
 scripts/dev.sh         # build + launch (add --watch to rebuild on change)
-scripts/package.sh     # assemble build/SizeQueen.app (ad-hoc signed — full drag)
+scripts/package.sh     # assemble build/ScreenQueen.app (ad-hoc signed — full drag)
 ```
 
 ## Using her
@@ -96,12 +96,12 @@ Summon the arranger with <kbd>⌘⌥F1</kbd> or the menu-bar icon.
 
 macOS positions displays in a **point** coordinate space that ignores physical size entirely,
 so a dense 4K panel and a sparse 1080p panel of the same point-dimensions occupy identical
-boxes — despite being *wildly* different objects in real life. (Padding. It's padding.) Drag
+boxes — despite being *wildly* different objects in real life. (Padding. It's padding.) Size
 Queen reads each display's real size (from EDID, or your calibration), lays your arrangement out
 on a **physical plane**, and translates it back to the point origins macOS demands — so the seam
 where your cursor crosses lines up with the seam between the actual screens. The whole illusion
 is held together by math and audacity, and the round-trip is covered by the tests in
-[Tests/SilkscreenTests](Tests/SilkscreenTests). She rehearses.
+[Tests/ScreenQueenTests](Tests/ScreenQueenTests). She rehearses.
 
 ## License
 

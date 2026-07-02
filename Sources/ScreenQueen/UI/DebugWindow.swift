@@ -19,7 +19,7 @@ final class DebugWindow {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 460),
                          styleMask: [.titled, .closable, .resizable],
                          backing: .buffered, defer: false)
-        w.title = "Silkscreen — Debug"
+        w.title = "Screen Queen — Debug"
         w.isReleasedWhenClosed = false
         // The arranger sits at the shielding level; lift the debug window above it so it
         // isn't hidden behind the overlay.

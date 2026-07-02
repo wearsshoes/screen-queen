@@ -1,19 +1,20 @@
 import Foundation
 
-/// One-time migration of persisted settings from the app's previous incarnation
-/// (the "screenmonger" executable) into Silkscreen's domain. Renaming the app —
-/// and giving it a real bundle id — repoints `UserDefaults.standard` at a fresh
-/// domain, so without this the user's saved layout profiles and size calibrations
-/// would silently disappear.
+/// One-time migration of persisted settings from the app's previous incarnations
+/// into Screen Queen's domain. Each rename — from the "screenmonger" executable, and
+/// later from the `com.moxsf.silkscreen` bundle id — repoints `UserDefaults.standard`
+/// at a fresh domain, so without this the user's saved layout profiles and size
+/// calibrations would silently disappear.
 enum PrefsMigration {
 
-    /// The previous app's UserDefaults domain names, most-likely first. The old app
-    /// ran as a bare SwiftPM executable, so its `UserDefaults.standard` domain was the
-    /// *executable name* (`screenmonger`); we also try the intended bundle id in case a
-    /// later build wrote there.
-    private static let oldDomains = ["screenmonger", "com.moxsf.screenmonger"]
+    /// The previous app's UserDefaults domain names, most-likely first. Screen Queen
+    /// shipped earlier under the `com.moxsf.silkscreen` bundle id, and before that as a
+    /// bare SwiftPM executable whose `UserDefaults.standard` domain was the *executable
+    /// name* (`screenmonger`); we also try the old intended bundle id in case a later
+    /// build wrote there.
+    private static let oldDomains = ["com.moxsf.silkscreen", "screenmonger", "com.moxsf.screenmonger"]
     /// Guard so we only copy once (a later legitimate delete shouldn't be undone).
-    private static let doneKey = "migratedFromScreenmonger"
+    private static let doneKey = "migratedFromLegacyDomains"
     /// The keys the old app persisted (see `LayoutStore` / `CalibrationStore`).
     private static let keys = ["layoutProfiles", "physicalSizeOverridesMM"]
 

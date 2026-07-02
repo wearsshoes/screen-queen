@@ -34,6 +34,15 @@ enum Copy {
     /// (in place of the PPI readout). Invites the right-click calibration flow.
     static let calibratePrompt = "won't say her size"
 
+    // MARK: - "What she sees" panel (bottom-left of the arranger)
+
+    /// Panel title: the live reconstructed *point* arrangement — macOS's coordinate story,
+    /// as she reads it — with the seams she detects between the girls.
+    static let solvePanelTitle = "what she sees"
+    /// Appended to the title when any display's placement resolved through an ambiguous
+    /// (multi-preimage) seam inverse — she's reading tea leaves on that one.
+    static let solvePanelAmbiguous = " ⚠︎ ambiguous"
+
     // MARK: - Bottom button bar (tooltips; the buttons themselves are icon-only)
 
     /// Reset button (⌘⌫): restore the layout captured when the arranger opened.
