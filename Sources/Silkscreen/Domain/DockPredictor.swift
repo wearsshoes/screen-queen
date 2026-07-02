@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import CoreGraphics
 
 /// Predicts which display macOS will place the Dock on, for a given (possibly

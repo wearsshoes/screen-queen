@@ -1,15 +1,10 @@
-import AppKit
 import CoreGraphics
 
-/// Per-*seam* palette assignment. Color belongs to a seam (a shared edge between two
-/// displays), not to a monitor: both bars for a seam — the on-glass edge bars on each
-/// participating screen and the mini-map reference bars — render in the seam's color.
+/// Per-*seam* color assignment as a pure graph problem. Color belongs to a seam (a shared
+/// edge between two displays), not to a monitor: both bars for a seam render in the seam's
+/// color. This type only decides each seam's *palette index* (an edge-coloring); mapping an
+/// index to an actual color is a presentation concern, done in the UI.
 enum DisplayGraph {
-
-    static let palette: [NSColor] = [
-        .systemPink, .systemGreen, .systemBlue, .systemOrange,
-        .systemPurple, .systemTeal, .systemYellow, .systemRed
-    ]
 
     /// A seam's stable identity: the unordered pair of display ids it joins.
     struct SeamKey: Hashable {
@@ -17,10 +12,10 @@ enum DisplayGraph {
         init(_ x: CGDirectDisplayID, _ y: CGDirectDisplayID) { a = min(x, y); b = max(x, y) }
     }
 
-    /// Greedily edge-color the seams so two seams meeting at the same monitor never
-    /// share a color (a proper edge-coloring). Seams are processed in a stable order
-    /// (by their id pair) so colors don't churn while dragging.
-    static func seamColors(_ seams: [(CGDirectDisplayID, CGDirectDisplayID)]) -> [SeamKey: NSColor] {
+    /// Greedily edge-color the seams so two seams meeting at the same monitor never share a
+    /// palette index (a proper edge-coloring). Seams are processed in a stable order (by
+    /// their id pair) so indices don't churn while dragging.
+    static func seamColorIndices(_ seams: [(CGDirectDisplayID, CGDirectDisplayID)]) -> [SeamKey: Int] {
         let keys = Array(Set(seams.map { SeamKey($0.0, $0.1) })).sorted {
             $0.a != $1.a ? $0.a < $1.a : $0.b < $1.b
         }
@@ -35,6 +30,6 @@ enum DisplayGraph {
             usedAt[key.a, default: []].insert(idx)
             usedAt[key.b, default: []].insert(idx)
         }
-        return colorIndexOf.mapValues { palette[$0 % palette.count] }
+        return colorIndexOf
     }
 }

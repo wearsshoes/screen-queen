@@ -210,11 +210,19 @@ final class ArrangementState {
     /// prediction reflects the would-be main during the drag.
     var pendingMainID: CGDirectDisplayID?
 
+    /// The seam palette. `DisplayGraph` assigns each seam an index (pure edge-coloring);
+    /// the actual colors are a presentation choice and live here.
+    static let seamPalette: [NSColor] = [
+        .systemPink, .systemGreen, .systemBlue, .systemOrange,
+        .systemPurple, .systemTeal, .systemYellow, .systemRed,
+    ]
+
     /// Colors keyed by seam (unordered display pair), derived from the current bars so
     /// both bars of a seam — edge and mini-map — share one color, recomputed as the
     /// layout changes during a drag.
     func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] {
-        DisplayGraph.seamColors(bars.map { ($0.aID, $0.bID) })
+        DisplayGraph.seamColorIndices(bars.map { ($0.aID, $0.bID) })
+            .mapValues { Self.seamPalette[$0 % Self.seamPalette.count] }
     }
 
     func commit() {
