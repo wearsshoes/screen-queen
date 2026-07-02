@@ -21,6 +21,11 @@ aligns the seams where your cursor *actually* crosses, and predicts where the Do
 - **On-every-screen overlay.** Press <kbd>⌘⌥F1</kbd> (or click the 🖥 menu-bar item) and a
   translucent arranger appears on *all* displays at once — you're never trapped in an
   unusable layout.
+- **Live preview in each tile.** Every tile shows what's actually on that screen in real
+  time (its wallpaper when the feed is off), so you can tell your monitors apart at a glance.
+- **Resolution & proportional zoom.** Change any display's resolution from the tile slider
+  or <kbd>⌘</kbd> ±, or zoom *every* display together (<kbd>⌘⇧</kbd> ±) keeping them roughly
+  proportional in density — all as a live preview that commits as a single undo.
 - **Safe by default.** Resolution, main-display, and mirror changes each arm a countdown
   **revert**, so a bad mode can't strand you.
 - **Physical-size calibration.** Monitors lie about their size over EDID. Calibrate a
@@ -28,6 +33,8 @@ aligns the seams where your cursor *actually* crosses, and predicts where the Do
   reference display.
 - **Dock prediction.** Shows where the Dock will actually land across your arrangement.
 - **Mirroring.** Option-drag one display onto another to mirror it; un-mirror from the tile.
+- **AirPlay-aware.** Surfaces an active AirPlay receiver (even a "Window or App" session that
+  isn't a real display) as a card, so you always know every screen macOS is driving.
 - **Remembers your layouts.** Reconnect the same set of monitors and your arrangement
   restores automatically. Unplug one and the survivors stay put instead of collapsing.
   Plug in a new display and Silkscreen docks it to the nearest free edge and opens so you
@@ -63,7 +70,10 @@ Open the arranger with <kbd>⌘⌥F1</kbd> or the menu-bar icon.
 - **Arrow keys / WASD** nudge the selected display; <kbd>⌘⇧</kbd> + arrow aligns it to an
   edge anchor (hold <kbd>⌘⇧</kbd> to preview the destinations).
 - **<kbd>⌘</kbd> +** <kbd>=</kbd> / <kbd>-</kbd> / <kbd>0</kbd> steps the selected
-  display's resolution up / down / to default.
+  display's resolution up / down / to default; add <kbd>⇧</kbd> (<kbd>⌘⇧</kbd> ±/0) to zoom
+  every display together, proportionally. The bottom bar has the same as a slider.
+- **The bottom bar** also toggles the live screen feed and whether the slider affects one
+  display or all.
 - **Right-click** a display for resolution, main display, mirroring, and calibration.
 - **Drag the menu-bar strip** of a tile to make that display the main display.
 - **Option-drag** a display onto another to mirror it.
