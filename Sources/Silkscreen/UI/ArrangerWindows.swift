@@ -1,14 +1,14 @@
 import AppKit
 
 /// One full-screen borderless arranger window per display, all sharing a single
-/// `ArrangementState`. Each window's canvas centers on its own screen's tile; a
+/// `ArrangerState`. Each window's canvas centers on its own screen's tile; a
 /// mutation on any of them broadcasts through the state so all repaint.
 @MainActor
-final class ArrangementWindows {
+final class ArrangerWindows {
 
-    let state = ArrangementState()
+    let state = ArrangerState()
     private var windows: [CGDirectDisplayID: NSWindow] = [:]
-    private var canvases: [ArrangementCanvas] = []
+    private var canvases: [Arranger] = []
 
     var isVisible: Bool { !windows.isEmpty }
 
@@ -115,7 +115,7 @@ final class ArrangementWindows {
         // style); older systems fall back to a behind-window .hudWindow blur. The canvas
         // (with its own dim wash) sits on top.
         let fullFrame = CGRect(origin: .zero, size: frame.size)
-        let canvas = ArrangementCanvas(state: state, frame: fullFrame)
+        let canvas = Arranger(state: state, frame: fullFrame)
         canvas.centerID = centerID
         canvas.autoresizingMask = [.width, .height]
 

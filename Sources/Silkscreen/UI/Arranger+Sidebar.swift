@@ -4,7 +4,7 @@ import AppKit
 /// resolution / what they mirror, with an un-mirror button) and a macOS-managed
 /// AirPlay session. Screen-anchored UI drawn on top of the schematic, unrelated to
 /// the physical plane.
-extension ArrangementCanvas {
+extension Arranger {
 
     /// The right-hand mirror column: one compact card per mirrored display, showing its
     /// name, resolution, and which display it mirrors — no zoom slider — plus a small

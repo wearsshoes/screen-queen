@@ -24,7 +24,7 @@ private func displayReconfigCallback(
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
-    private let arranger = ArrangementWindows()
+    private let arranger = ArrangerWindows()
     private let calibrationController = CalibrationController()
 
     private var isLiveDragging = false

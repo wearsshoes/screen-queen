@@ -2,8 +2,8 @@ import AppKit
 
 /// Interaction: mouse dragging and keyboard nudge/align/selection. All mutate the shared
 /// `state` and broadcast a redraw. (Resolution/mode handling lives in
-/// ArrangementCanvas+Resolution; the context menu in ArrangementCanvas+Menu.)
-extension ArrangementCanvas {
+/// Arranger+Resolution; the context menu in Arranger+Menu.)
+extension Arranger {
 
     // MARK: - Mouse / dragging
 

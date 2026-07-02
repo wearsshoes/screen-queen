@@ -10,7 +10,7 @@ import CoreGraphics
 /// testable in isolation.
 enum SchematicSnapping {
 
-    /// The two active-anchor markers, matching `ArrangementState`'s storage shape so call
+    /// The two active-anchor markers, matching `ArrangerState`'s storage shape so call
     /// sites assign the result directly without conversion.
     typealias VMarker = (selfA: VAnchor, otherA: VAnchor, otherID: CGDirectDisplayID)
     typealias HMarker = (selfA: HAnchor, otherA: HAnchor, otherID: CGDirectDisplayID)

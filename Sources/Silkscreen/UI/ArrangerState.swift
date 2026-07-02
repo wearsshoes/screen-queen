@@ -1,11 +1,11 @@
 import AppKit
 
-/// The editing state shared by every per-screen `ArrangementCanvas`: one physical
+/// The editing state shared by every per-screen `Arranger`: one physical
 /// plane and the surrounding selection/preview state, plus the app callbacks. A
 /// mutation on any canvas writes here and calls `changed()` so all canvases redraw
 /// from the same source of truth.
 @MainActor
-final class ArrangementState {
+final class ArrangerState {
 
     // App callbacks (wired once by the AppDelegate).
     var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)?
@@ -42,7 +42,7 @@ final class ArrangementState {
     /// Whether the live video feed is currently on (drives the leftmost toggle button and
     /// whether tiles show live content vs. static wallpaper).
     var feedEnabled = false
-    /// Toggle the live feed on/off (wired by ArrangementWindows to start/stop capture).
+    /// Toggle the live feed on/off (wired by ArrangerWindows to start/stop capture).
     var onToggleFeed: ((Bool) -> Void)?
 
     /// A live macOS-managed AirPlay visual session (nil when none). Detected via a

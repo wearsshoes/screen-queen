@@ -2,7 +2,7 @@ import AppKit
 
 /// Rendering: draws the schematic (tiles, labels, reference/edge bars, alignment
 /// markers, boxing) from the shared `state` and the view transform.
-extension ArrangementCanvas {
+extension Arranger {
 
     // MARK: - Drawing
 

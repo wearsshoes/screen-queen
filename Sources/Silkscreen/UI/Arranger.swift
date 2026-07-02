@@ -13,12 +13,12 @@ import AppKit
 ///
 /// Keys (selected display): ⌘+arrows/WASD change selection; arrows/WASD nudge;
 /// ⌘⇧+arrows/WASD step alignment; ⌘ +/−/0 change resolution.
-final class ArrangementCanvas: NSView {
+final class Arranger: NSView {
 
     /// Shared editing state — one instance across every per-screen canvas.
-    let state: ArrangementState
+    let state: ArrangerState
     // The bottom button bar's views + state — constructed and driven in
-    // ArrangementCanvas+Buttons.
+    // Arranger+Buttons.
     let feedButton = NSButton(title: "", target: nil, action: nil)
     let resetButton = NSButton(title: "Reset", target: nil, action: nil)
     let undoButton = NSButton(title: "Undo", target: nil, action: nil)
@@ -44,7 +44,7 @@ final class ArrangementCanvas: NSView {
     /// The button bar's bottom constraint, re-tuned in `layout()` to sit above the Dock.
     var buttonBarBottom: NSLayoutConstraint?
 
-    init(state: ArrangementState, frame: NSRect) {
+    init(state: ArrangerState, frame: NSRect) {
         self.state = state
         super.init(frame: frame)
         setupButtonBar()

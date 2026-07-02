@@ -4,7 +4,7 @@ import AppKit
 /// proportional zoom, and previewing/committing pending modes. The pure ladder math (which
 /// modes to offer, ordering, default, PPI) lives in `ResolutionLadder`; the thin wrappers
 /// here supply the live system facts (catalog modes, notch, current mode, pending state).
-extension ArrangementCanvas {
+extension Arranger {
 
     /// Step the selected display's resolution: preview via `pendingSize` (physical
     /// size is unchanged, so the plane and alignment are untouched), apply the mode

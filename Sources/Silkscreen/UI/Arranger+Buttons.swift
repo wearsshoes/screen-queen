@@ -3,8 +3,8 @@ import AppKit
 /// The bottom button bar (feed · reset · undo · [resolution slider] · done) — its
 /// construction (real Liquid Glass capsules on macOS 26, HUD fallback below), Dock-
 /// aware placement, the tap/slider actions, and syncing to shared state. The bar's
-/// views and cursor-state live as stored properties on ArrangementCanvas.
-extension ArrangementCanvas {
+/// views and cursor-state live as stored properties on Arranger.
+extension Arranger {
 
     /// Idiomatic bottom button bar (Reset · Undo · Done) grouped in a rounded box,
     /// on every screen, sitting above the Dock.
