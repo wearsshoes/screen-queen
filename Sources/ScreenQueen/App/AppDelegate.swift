@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let arranger = ArrangerWindows()
     private let calibrationController = CalibrationController()
+    private let focusPolicy = FocusPolicy()
 
     private var isLiveDragging = false
     /// Snapshot captured when the arranger was opened, for "Reset".
@@ -172,6 +173,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let priorChanged = s.changed
         s.changed = { [weak self] in self?.isLiveDragging = true; priorChanged?() }
         calibrationController.onComplete = { [weak self] in self?.refreshAfterCalibration() }
+
+        // Focus follows the cursor across screens (calibration panels first, arranger
+        // canvases otherwise) — the policy owns all cursor-screen tracking.
+        focusPolicy.isCalibrationActive = { [weak self] in self?.calibrationController.isActive ?? false }
+        focusPolicy.focusCalibration = { [weak self] screen in self?.calibrationController.focusPanel(on: screen) }
+        focusPolicy.isArrangerVisible = { [weak self] in self?.arranger.isVisible ?? false }
+        focusPolicy.focusArranger = { [weak self] screen in self?.arranger.focusWindow(on: screen) }
     }
 
     /// Visual match-the-boxes calibration against a trusted reference display.
@@ -190,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // trusted and measured screens, and the seam glow below keeps showing the
         // user how to get their cursor from one to the other.
         calibrationController.begin(target: target, reference: reference)
+        focusPolicy.begin()   // arrow keys nudge the tape on whichever screen you mouse to
     }
 
     // MARK: - Calibration
@@ -657,6 +666,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CGDisplayCopyDisplayMode(d.id).map { (d.id, $0) }
         }, uniquingKeysWith: { a, _ in a })
         arranger.show(displays: displays)
+        focusPolicy.begin()
     }
 
     /// Restore positions, resolutions, and main to the baseline captured on open.

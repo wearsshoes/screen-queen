@@ -108,6 +108,16 @@ final class ArrangerWindows {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Key the canvas on `screen` (focus-follows-cursor, driven by `FocusPolicy`).
+    /// Mirrors calibration's don't-steal semantics: no-op when not visible or when
+    /// any of our windows on that screen is already key.
+    func focusWindow(on screen: NSScreen) {
+        guard isVisible else { return }
+        let window = windows.values.first { $0.screen?.frame == screen.frame }
+        guard let window, !window.isKeyWindow else { return }
+        window.makeKey()
+    }
+
     func hide() {
         capture.stop()
         cancelFeedWatchdog()
