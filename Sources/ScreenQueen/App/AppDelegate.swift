@@ -171,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // reconfig callback doesn't clobber the working plane.
         let priorChanged = s.changed
         s.changed = { [weak self] in self?.isLiveDragging = true; priorChanged?() }
-        calibrationController.onComplete = { [weak self] in self?.refresh() }
+        calibrationController.onComplete = { [weak self] in self?.refreshAfterCalibration() }
     }
 
     /// Visual match-the-boxes calibration against a trusted reference display.
@@ -186,8 +186,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             calibrate(id) // no trusted reference available — fall back to manual entry
             return
         }
-        // Dismiss the arranger overlay so it doesn't clutter the calibration windows.
-        dismissArranger()
+        // The arranger stays up underneath: the calibration is an overlay on the
+        // trusted and measured screens, and the seam glow below keeps showing the
+        // user how to get their cursor from one to the other.
         calibrationController.begin(target: target, reference: reference)
     }
 
@@ -200,7 +201,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let alert = NSAlert()
         alert.messageText = Copy.calibrateTitle(d.name)
-        alert.informativeText = Copy.calibrateBody(edidInches: String(format: "%.1f", d.diagonalInches))
+        // Quote what she *claims* over EDID (the body says "she claims", so it must
+        // be her story) — plus our own last measurement when one is on file.
+        alert.informativeText = Copy.calibrateBody(
+            edidInches: String(format: "%.1f", d.edidDiagonalInches),
+            priorInches: d.physicalSizeIsCalibrated ? String(format: "%.1f", d.diagonalInches) : nil)
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
         field.placeholderString = "e.g. 15.4"
         alert.accessoryView = field
@@ -223,13 +228,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                          pixelWidth: Int(d.pixelSize.width),
                                          pixelHeight: Int(d.pixelSize.height))
         CalibrationStore.setOverride(mm, for: d.fingerprint)
-        refresh()
+        refreshAfterCalibration()
     }
 
     private func resetCalibration(_ id: CGDirectDisplayID) {
         guard let d = DisplayManager.snapshot().first(where: { $0.id == id }) else { return }
         CalibrationStore.clearOverride(for: d.fingerprint)
-        refresh()
+        refreshAfterCalibration()
+    }
+
+    /// A calibration edit changes only *physical* size — the point layout is
+    /// untouched, so both `refresh()`'s live-drag gate and the arranger's own
+    /// no-change detection would swallow the re-render. Force it through.
+    private func refreshAfterCalibration() {
+        isLiveDragging = false
+        let displays = DisplayManager.snapshot()
+        handleProfiles(displays)
+        arranger.refresh(displays: displays, force: true)
     }
 
     /// Open the Control Center **Screen Mirroring** menu — the honest "manage it" action
@@ -495,6 +510,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let recognized = profile.map { Set($0.keys) } ?? []
         let unrecognized = displays.filter { newcomerIDs.contains($0.id) && !recognized.contains($0.fingerprint) }
         selectNewcomer(Set(unrecognized.map(\.id)), in: displays)
+
+        // A brand-new girl gets measured on arrival: if she's external, never
+        // calibrated, and this is a genuine hotplug (not launch populating the
+        // set), bring the tape out immediately, over the arranger.
+        if !lastDisplayIDs.isEmpty,
+           let newbie = unrecognized.first(where: { !$0.isBuiltin && !$0.physicalSizeIsCalibrated }) {
+            calibrateVisual(newbie.id)
+        }
     }
 
     /// Re-apply the survivors' prior origins so the remaining monitor(s) don't get

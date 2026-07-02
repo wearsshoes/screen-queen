@@ -153,10 +153,13 @@ enum Copy {
 
     /// Alert title. `name` is the display's name.
     static func calibrateTitle(_ name: String) -> String { "Measuring \(name)" }
-    /// Alert body. `edidInches` is what the monitor currently claims, e.g. "27.2".
-    static func calibrateBody(edidInches: String) -> String {
-        "What's her actual diagonal, in inches, corner to corner of the glass? "
-        + "She claims \(edidInches)\" over EDID. Monitors lie."
+    /// Alert body. `edidInches` is what the monitor claims over EDID, e.g. "27.2";
+    /// `priorInches` is a stored calibration's diagonal, when one exists.
+    static func calibrateBody(edidInches: String, priorInches: String?) -> String {
+        var body = "What's her actual diagonal, in inches, corner to corner of the glass? "
+            + "She claims \(edidInches)\" over EDID. Monitors lie."
+        if let priorInches { body += " Our receipts say \(priorInches)\"." }
+        return body
     }
     /// Confirm button (shared with the match-calibration panel).
     static let save = "Make It Canon"
@@ -175,6 +178,8 @@ enum Copy {
     static let matchReadoutPlaceholder = "—"
     /// Under the live readout: what the monitor itself claims, for contrast.
     static func matchClaimLine(_ edidInches: String) -> String { "her story: \(edidInches)″" }
+    /// Above the claim line, only when a prior calibration is on file.
+    static func matchPriorLine(_ inches: String) -> String { "our receipts say: \(inches)″" }
     /// Unit printed over the reference tape's blade — her real inches. This is the
     /// only label telling the two tapes apart.
     static let matchUnitReference = "inches"

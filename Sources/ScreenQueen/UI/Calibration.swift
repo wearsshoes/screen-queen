@@ -6,14 +6,26 @@ import AppKit
 /// (spanning the full edge — the seam picks the edge but doesn't cap the tape),
 /// and one along a perpendicular edge — the bottom, except a built-in laptop
 /// panel uses its top, since the laptop sits on the desk with its screen below
-/// the monitor's. The two pairs are matched independently, one per axis: the
-/// primary pair sizes one dimension, the perpendicular pair the other — she
-/// doesn't assume square pixels, she checks. (Rotated screens would swap her
-/// axes, but the user should know better than to flip their screen.) The
-/// reference display is trusted (its EDID PPI), so each of its tapes' physical
-/// length (points ÷ refPPI) is known; at a match, per axis:
+/// the monitor's.
 ///
-///   pointsPerInch_target = targetTapePoints / (refTapePoints / refPPI)
+/// A screen's two tapes are linked — and both screens link at the SUSPECT's
+/// claimed aspect ratio, so the physical ratio between a pair's two tapes is
+/// identical on both sides. That's what makes the pairs interchangeable:
+/// matching the perpendicular tapes implies exactly the same scale as matching
+/// the primary ones, no measurement error from mixing. Each tape is ruled at
+/// its own axis's pitch — the trusted screen's true points-per-inch, the
+/// target's EDID-claimed pitch. A linked resize never clamps the partner: if
+/// it would run off its screen, it goes translucent instead — visibly invalid
+/// for measuring. Each tape also echoes its partner's length as dashed lines
+/// in the partner's chalk color, centered on the tape's own middle — so a
+/// physically rotated screen still shows a matching-colored pair to sight
+/// against.
+///
+/// The seam-facing (primary) pair is the measurement of record (the perp pair
+/// implies the same scale by construction). Her EDID shape is trusted; her
+/// scale is corrected:
+///
+///   trueSize = claimedSize × (refInches / herInches)
 ///
 /// ⏎ saves and ⎋ cancels from anywhere — the panel or either tape.
 @MainActor
@@ -21,21 +33,20 @@ final class CalibrationController {
 
     private var refWindow: NSWindow?
     private var targetWindow: NSWindow?
-    private var panel: CalibrationPanel?
+    private var panels: [(screen: NSScreen, panel: CalibrationPanel)] = []   // one per screen, same controls
     private var target: DisplaySnapshot?
     private weak var targetBar: BarView?   // for arrow-key nudges routed via the panel
     private var keyObservers: [NSObjectProtocol] = []   // panel key-status → tape glow
 
-    private var refPPT: Double = 0             // trusted reference PPI (source of truth)
-    // Live tape lengths, one per axis per screen: the primary pair (seam-facing
-    // edges) measures one axis, the perpendicular pair the other.
-    private var refPrimaryLen: CGFloat = 0
-    private var refPerpLen: CGFloat = 0
-    private var targetPrimaryLen: CGFloat = 0
-    private var targetPerpLen: CGFloat = 0
-    /// Whether the primary pair runs vertically (side-by-side displays) — it then
-    /// measures the y axis and the perpendicular pair the x axis; else swapped.
-    private var primaryIsVertical = true
+    private var refPPT: Double = 0             // trusted reference PPI (fallback pitch)
+    // One implicit physical measurement per screen — every tape on a screen shows
+    // this same length in its own axis's pitch, so there is never a question of
+    // which tape the user meant to commit.
+    private var refMeasure: Double = 0         // trusted screen, true inches
+    private var targetMeasure: Double = 0      // target screen, her claimed inches
+    private var refPitch: (x: Double, y: Double) = (0, 0)
+    private var targetPitch: (x: Double, y: Double) = (0, 0)
+    private var targetClaimedSize: CGSize = .zero   // her EDID story, in inches
 
     /// Called after a save or cancel so the owner can refresh.
     var onComplete: (() -> Void)?
@@ -69,46 +80,99 @@ final class CalibrationController {
         let (refPerpPlace, refPerpFull) = fullEdgePlacement(perpendicularEdge(to: refEdge, for: reference), on: refScreen)
         let (targetPlace, targetFull) = fullEdgePlacement(targetEdge, on: targetScreen)
         let (targetPerpPlace, targetPerpFull) = fullEdgePlacement(perpendicularEdge(to: targetEdge, for: target), on: targetScreen)
-        refPrimaryLen = refFull
-        refPerpLen = refPerpFull
-        targetPrimaryLen = targetFull
-        targetPerpLen = targetPerpFull
-        primaryIsVertical = targetPlace.lengthIsVertical
+        // Per-axis pitches: the trusted screen's true points-per-inch, and the
+        // pitch the target *claims* over EDID — shape trusted, scale on trial.
+        // When she won't even claim a size, assume the trusted pitch.
+        refPitch = axisPitches(bounds: reference.bounds, sizeMM: reference.physicalSizeMM)
+            ?? (x: refPPT, y: refPPT)
+        if let claimed = axisPitches(bounds: target.bounds, sizeMM: target.edidSizeMM) {
+            targetPitch = claimed
+            targetClaimedSize = CGSize(width: Double(target.edidSizeMM.width) / 25.4,
+                                       height: Double(target.edidSizeMM.height) / 25.4)
+        } else {
+            targetPitch = (x: refPPT, y: refPPT)
+            targetClaimedSize = CGSize(width: Double(target.bounds.width) / refPPT,
+                                       height: Double(target.bounds.height) / refPPT)
+        }
+        let primaryVertical = targetPlace.lengthIsVertical
+        func pitch(_ p: (x: Double, y: Double), vertical: Bool) -> Double { vertical ? p.y : p.x }
+        let refPrimaryPitch = pitch(refPitch, vertical: primaryVertical)
+        let refPerpPitch = pitch(refPitch, vertical: !primaryVertical)
+        let targetPrimaryPitch = pitch(targetPitch, vertical: primaryVertical)
+        let targetPerpPitch = pitch(targetPitch, vertical: !primaryVertical)
+
+        // Both screens link their pair at the SUSPECT's claimed aspect: the ratio
+        // between perpendicular and primary physical lengths is `k` on both
+        // sides, so matching either same-axis pair implies the same scale.
+        let k = primaryVertical
+            ? Double(targetClaimedSize.width) / Double(targetClaimedSize.height)
+            : Double(targetClaimedSize.height) / Double(targetClaimedSize.width)
+
+        // The suspect's tapes start at 90% of her own edges (her claimed aspect,
+        // out of her corners). The trusted pair starts at 90% too, shrunk if the
+        // k-linked perpendicular tape wouldn't fit its own edge.
+        let f0 = 0.9
+        targetMeasure = f0 * Double(targetFull) / targetPrimaryPitch
+        refMeasure = min(f0 * Double(refFull) / refPrimaryPitch,
+                         f0 * Double(refPerpFull) / refPerpPitch / k)
 
         // Both tapes wear the same look; the unit printed on the blade — "inches"
         // vs her "inches" — is what tells them apart. Reference tapes (trusted
         // screen): pure measuring affordances, no controls.
-        let refView = BarView(length: refFull, anchor: refPlace,
-                              pointsPerInch: refPPT, unitLabel: Copy.matchUnitReference,
+        let refView = BarView(length: CGFloat(refMeasure * refPrimaryPitch), anchor: refPlace,
+                              pointsPerInch: CGFloat(refPrimaryPitch), unitLabel: Copy.matchUnitReference,
                               brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
                               palette: .honest)
-        let refPerpView = BarView(length: refPerpFull, anchor: refPerpPlace,
-                                  pointsPerInch: refPPT, unitLabel: Copy.matchUnitReference,
+        let refPerpView = BarView(length: CGFloat(refMeasure * k * refPerpPitch), anchor: refPerpPlace,
+                                  pointsPerInch: CGFloat(refPerpPitch), unitLabel: Copy.matchUnitReference,
                                   brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
                                   palette: .honest)
-        refView.onResize = { [weak self] len in self?.refPrimaryLen = len; self?.updateReadout() }
-        refPerpView.onResize = { [weak self] len in self?.refPerpLen = len; self?.updateReadout() }
+        refView.onResize = { [weak self, weak refPerpView] len in
+            guard let self else { return }
+            self.refMeasure = Double(len) / refPrimaryPitch
+            refPerpView?.setLength(CGFloat(self.refMeasure * k * refPerpPitch))
+            self.updateReadout()
+        }
+        refPerpView.onResize = { [weak self, weak refView] len in
+            guard let self else { return }
+            self.refMeasure = Double(len) / refPerpPitch / k
+            refView?.setLength(CGFloat(self.refMeasure * refPrimaryPitch))
+            self.updateReadout()
+        }
         refWindow = makeWindow(screen: refScreen, views: [refView, refPerpView], interactive: true)
 
         // Target tapes (target screen). Their ribbons are ruled at the pitch the
         // display *claims* over EDID — even when a previous calibration knows
         // better — so when the two sides physically match, hers reads a different
-        // number than the honest one. The lie, printed on the tape. (The ruling is
-        // purely cosmetic; the actual inference below uses point lengths against
-        // the reference's trusted PPI.)
-        let targetPPI = target.edidPointsPerInch ?? refPPT
-        let calView = BarView(length: targetFull, anchor: targetPlace,
-                              pointsPerInch: targetPPI, unitLabel: Copy.matchUnitTarget,
+        // number than the honest one. The lie, printed on the tape.
+        let calView = BarView(length: CGFloat(f0) * targetFull, anchor: targetPlace,
+                              pointsPerInch: CGFloat(targetPrimaryPitch), unitLabel: Copy.matchUnitTarget,
                               brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
                               palette: .vanity)
-        let calPerpView = BarView(length: targetPerpFull, anchor: targetPerpPlace,
-                                  pointsPerInch: targetPPI, unitLabel: Copy.matchUnitTarget,
+        let calPerpView = BarView(length: CGFloat(f0) * targetPerpFull, anchor: targetPerpPlace,
+                                  pointsPerInch: CGFloat(targetPerpPitch), unitLabel: Copy.matchUnitTarget,
                                   brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
                                   palette: .vanity)
-        calView.onResize = { [weak self] len in self?.targetPrimaryLen = len; self?.updateReadout() }
-        calPerpView.onResize = { [weak self] len in self?.targetPerpLen = len; self?.updateReadout() }
+        calView.onResize = { [weak self, weak calPerpView] len in
+            guard let self else { return }
+            self.targetMeasure = Double(len) / targetPrimaryPitch
+            calPerpView?.setLength(len * targetPerpFull / targetFull)
+            self.updateReadout()
+        }
+        calPerpView.onResize = { [weak self, weak calView] len in
+            guard let self else { return }
+            let primaryLen = len * targetFull / targetPerpFull
+            self.targetMeasure = Double(primaryLen) / targetPrimaryPitch
+            calView?.setLength(primaryLen)
+            self.updateReadout()
+        }
         targetWindow = makeWindow(screen: targetScreen, views: [calView, calPerpView], interactive: true)
         targetBar = calView
+
+        // Each tape echoes its partner's length in the partner's chalk color —
+        // the flip-your-screen affordance (see BarView.drawChalk).
+        refView.partner = refPerpView; refPerpView.partner = refView
+        calView.partner = calPerpView; calPerpView.partner = calView
 
         // ⏎ / ⎋ work from any tape, not just while the panel is key.
         for tape in [refView, refPerpView, calView, calPerpView] {
@@ -116,30 +180,52 @@ final class CalibrationController {
             tape.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
         }
 
-        // A native floating panel on the target screen holds the instruction, the live
-        // inferred-size readout, and Save/Cancel — instead of controls floating on the dim.
-        let panel = CalibrationPanel(displayName: target.name, claimedInches: target.edidDiagonalInches)
-        panel.onSave = { [weak self] in self?.save() }
-        panel.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
-        panel.onNudge = { [weak self] delta in self?.targetBar?.nudge(delta) }
-        panel.present(on: targetScreen, near: targetPlace)
-        self.panel = panel
+        // A native floating panel on EACH screen holds the instruction, the live
+        // inferred-size readout, and Save/Cancel — wherever the user is looking,
+        // Make It Canon is one glance away. The target's panel presents last, so
+        // it opens key (its arrows route to the liar's tape).
+        panels = [(refScreen, refPlace), (targetScreen, targetPlace)].map { screen, place in
+            let panel = CalibrationPanel(displayName: target.name, claimedInches: target.edidDiagonalInches,
+                                         lastMeasuredInches: target.physicalSizeIsCalibrated ? target.diagonalInches : 0)
+            panel.onSave = { [weak self] in self?.save() }
+            panel.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
+            panel.onNudge = { [weak self] delta in self?.targetBar?.nudge(delta) }
+            panel.present(on: screen, near: place)
+            return (screen, panel)
+        }
 
-        // The panel opens key with its arrows routed to the liar's tape; keep her
-        // active-tip glow in sync as key focus moves between panel and tapes.
+        // A panel being key routes its arrows to the liar's tape; keep her
+        // active-tip glow in sync as key focus moves among panels and tapes.
         calView.externallyActive = true
         let nc = NotificationCenter.default
-        keyObservers.append(nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: panel,
-                                           queue: .main) { [weak calView] _ in
-            MainActor.assumeIsolated { calView?.externallyActive = true }
-        })
-        keyObservers.append(nc.addObserver(forName: NSWindow.didResignKeyNotification, object: panel,
-                                           queue: .main) { [weak calView] _ in
-            MainActor.assumeIsolated { calView?.externallyActive = false }
-        })
+        for (_, panel) in panels {
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+                keyObservers.append(nc.addObserver(forName: name, object: panel, queue: .main) { [weak self, weak calView] _ in
+                    MainActor.assumeIsolated {
+                        calView?.externallyActive = self?.panels.contains { $0.panel.isKeyWindow } ?? false
+                    }
+                })
+            }
+        }
 
         NSApp.activate(ignoringOtherApps: true)
         updateReadout()
+    }
+
+    /// Whether a calibration session is on stage (windows up).
+    var isActive: Bool { !panels.isEmpty }
+
+    /// Hand key focus to this screen's calibration panel, if there is one — the
+    /// hook for an app-level focus-follows-cursor policy (owned outside this
+    /// controller). Deliberately won't steal focus when a window on the same
+    /// screen is already key — e.g. a tape the user just grabbed, whose arrow
+    /// keys they're using.
+    func focusPanel(on screen: NSScreen) {
+        guard isActive,
+              let panel = panels.first(where: { $0.screen.frame == screen.frame })?.panel,
+              !panel.isKeyWindow else { return }
+        if let key = NSApp.keyWindow, key.screen?.frame == screen.frame { return }
+        panel.makeKeyAndOrderFront(nil)
     }
 
     func cancel() {
@@ -147,29 +233,33 @@ final class CalibrationController {
         keyObservers.removeAll()
         refWindow?.orderOut(nil); refWindow = nil
         targetWindow?.orderOut(nil); targetWindow = nil
-        panel?.orderOut(nil); panel = nil
+        panels.forEach { $0.panel.orderOut(nil) }; panels = []
         target = nil
     }
 
-    /// The target's physical size in inches, one axis per tape pair: the primary
-    /// pair sizes the axis it runs along, the perpendicular pair the other. `nil`
-    /// until both axes are determined.
+    /// Per-axis points-per-inch for a screen, or nil when the physical size is
+    /// missing or implausible.
+    private func axisPitches(bounds: CGRect, sizeMM: CGSize) -> (x: Double, y: Double)? {
+        let w = Double(sizeMM.width) / 25.4, h = Double(sizeMM.height) / 25.4
+        guard w > 0.5, h > 0.5 else { return nil }
+        return (x: Double(bounds.width) / w, y: Double(bounds.height) / h)
+    }
+
+    /// The target's physical size in inches: her claimed (EDID) shape scaled by
+    /// the one number the match determines — how many true inches her "inch"
+    /// actually is. Every matched pairing of tapes yields this same factor,
+    /// which is the point: one measurement per screen, nothing to disagree.
     private func inferredSizeInches() -> CGSize? {
-        guard let target else { return nil }
-        let ppiPrimary = CalibrationMath.inferredTargetPPI(refLengthPoints: refPrimaryLen, refPPI: refPPT,
-                                                           targetLengthPoints: targetPrimaryLen)
-        let ppiPerp = CalibrationMath.inferredTargetPPI(refLengthPoints: refPerpLen, refPPI: refPPT,
-                                                        targetLengthPoints: targetPerpLen)
-        guard ppiPrimary > 0, ppiPerp > 0 else { return nil }
-        let ppiX = primaryIsVertical ? ppiPerp : ppiPrimary
-        let ppiY = primaryIsVertical ? ppiPrimary : ppiPerp
-        return CGSize(width: Double(target.bounds.width) / ppiX,
-                      height: Double(target.bounds.height) / ppiY)
+        guard refMeasure > 0, targetMeasure > 0,
+              targetClaimedSize.width > 0, targetClaimedSize.height > 0 else { return nil }
+        let scale = refMeasure / targetMeasure
+        return CGSize(width: targetClaimedSize.width * scale,
+                      height: targetClaimedSize.height * scale)
     }
 
     private func updateReadout() {
         let diag = inferredSizeInches().map { hypot(Double($0.width), Double($0.height)) } ?? 0
-        panel?.setInferredDiagonal(diag)
+        panels.forEach { $0.panel.setInferredDiagonal(diag) }
     }
 
     private func save() {
@@ -266,10 +356,13 @@ final class CalibrationPanel: NSPanel {
     private let valueLabel = NSTextField(labelWithString: Copy.matchReadoutPlaceholder)
     private let displayName: String
     private let claimedInches: Double
+    /// A previous calibration's diagonal, when one is stored (0 = never measured).
+    private let lastMeasuredInches: Double
 
-    init(displayName: String, claimedInches: Double) {
+    init(displayName: String, claimedInches: Double, lastMeasuredInches: Double) {
         self.displayName = displayName
         self.claimedInches = claimedInches
+        self.lastMeasuredInches = lastMeasuredInches
         super.init(contentRect: NSRect(x: 0, y: 0, width: 320, height: 214),
                    styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: false)
@@ -321,7 +414,8 @@ final class CalibrationPanel: NSPanel {
         valueLabel.textColor = .labelColor
         valueLabel.alignment = .center
 
-        // What the monitor itself claims, for contrast with the live measurement.
+        // What the monitor itself claims, for contrast with the live measurement —
+        // and what we measured last time, when there's a prior calibration on file.
         let claim = NSTextField(labelWithString:
             claimedInches > 0 ? Copy.matchClaimLine(String(format: "%.1f", claimedInches)) : "")
         claim.font = .systemFont(ofSize: 11)
@@ -329,11 +423,20 @@ final class CalibrationPanel: NSPanel {
         claim.alignment = .center
         claim.isHidden = claimedInches <= 0
 
+        let receipts = NSTextField(labelWithString:
+            lastMeasuredInches > 0 ? Copy.matchPriorLine(String(format: "%.1f", lastMeasuredInches)) : "")
+        receipts.font = .systemFont(ofSize: 11)
+        receipts.textColor = .tertiaryLabelColor
+        receipts.alignment = .center
+        receipts.isHidden = lastMeasuredInches <= 0
+
         let cancel = NSButton(title: Copy.cancel, target: self, action: #selector(cancelTapped))
         cancel.controlSize = .large; cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         let save = NSButton(title: Copy.save, target: self, action: #selector(saveTapped))
         save.controlSize = .large; save.bezelStyle = .rounded; save.keyEquivalent = "\r"
-        // The modern prominent (accent-filled) default button.
+        // The modern prominent (accent-filled) default button. Focus follows the
+        // cursor between screens, so the panel under the user's hand is always
+        // the key one — its Make It Canon wears the accent when it matters.
         save.bezelColor = .controlAccentColor
 
         let buttons = NSStackView(views: [cancel, save])
@@ -341,13 +444,14 @@ final class CalibrationPanel: NSPanel {
         buttons.spacing = 10
         buttons.distribution = .fillEqually
 
-        let stack = NSStackView(views: [title, instruction, caption, valueLabel, claim, buttons])
+        let stack = NSStackView(views: [title, instruction, caption, valueLabel, receipts, claim, buttons])
         stack.orientation = .vertical
         stack.spacing = 10
         stack.alignment = .centerX
         stack.setCustomSpacing(16, after: instruction)
         stack.setCustomSpacing(2, after: caption)
         stack.setCustomSpacing(2, after: valueLabel)
+        stack.setCustomSpacing(2, after: receipts)
         stack.setCustomSpacing(18, after: claim)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -438,6 +542,16 @@ private final class BarView: NSView {
     var onCommit: (() -> Void)?
     /// ⎋ pressed while this tape has keys: cancel out.
     var onCancel: (() -> Void)?
+    /// The perpendicular tape sharing this screen: its length is echoed onto this
+    /// tape in its chalk color (see `drawChalk`), and linked resizes arrive from
+    /// it via the controller.
+    weak var partner: BarView?
+
+    /// A linked resize pushed this tape past its screen edge — it can't be
+    /// trusted for measuring until the pair shrinks back. Shown, but faded.
+    private(set) var isInvalid = false {
+        didSet { if isInvalid != oldValue { alphaValue = isInvalid ? 0.3 : 1 } }
+    }
 
     private var length: CGFloat
     private var offset: CGFloat = 0        // slide of the bar's center along the seam
@@ -605,6 +719,20 @@ private final class BarView: NSView {
     }
     override func mouseUp(with event: NSEvent) { grab = .none; needsDisplay = true }
 
+    /// Adopt the length a linked resize implies (the partner was dragged; the
+    /// pair keeps the screen's aspect ratio). Never clamps and keeps the center
+    /// put — a length that no longer fits the screen instead marks the tape
+    /// invalid, faded until the pair shrinks back. Does NOT fire `onResize`, so
+    /// the sync can't ping-pong.
+    func setLength(_ newLength: CGFloat) {
+        guard abs(newLength - length) > 0.01 else { return }
+        length = newLength
+        let start = anchorAlong() + offset - length / 2
+        isInvalid = start < -0.5 || start + length > maxAlong + 0.5
+        window?.invalidateCursorRects(for: self)
+        needsDisplay = true
+    }
+
     /// Two tapes share each screen as full-frame siblings; only claim clicks that
     /// actually land on this tape's grab regions so the rest fall through to the
     /// other tape.
@@ -636,9 +764,11 @@ private final class BarView: NSView {
     private func commit(start: CGFloat, end: CGFloat) {
         length = end - start
         offset = (start + end) / 2 - anchorAlong()
+        isInvalid = start < -0.5 || end > maxAlong + 0.5   // direct drags re-legitimize
         onResize?(length)
         window?.invalidateCursorRects(for: self)
         needsDisplay = true
+        partner?.needsDisplay = true   // its echo of this length just moved
     }
 
     // MARK: Keyboard — dragging is coarse exactly at the scale that matters
@@ -716,13 +846,12 @@ private final class BarView: NSView {
         }
     }
 
-    /// This tape's chalk: yellow for the y-measuring (vertical) tapes, hot pink
-    /// for x — two axes, two sticks of tailor's chalk, no cross-axis confusion.
-    private var chalkColor: NSColor {
-        lengthIsVertical
-            ? NSColor(calibratedRed: 1.0, green: 0.86, blue: 0.25, alpha: 1)
-            : NSColor(calibratedRed: 1.0, green: 0.35, blue: 0.66, alpha: 1)
-    }
+    /// Two axes, two sticks of tailor's chalk: yellow for x, pink for y.
+    private static let xChalk = NSColor(calibratedRed: 1.0, green: 0.86, blue: 0.25, alpha: 1)
+    private static let yChalk = NSColor(calibratedRed: 1.0, green: 0.35, blue: 0.66, alpha: 1)
+
+    /// This tape's own chalk: yellow when it measures x, pink when it measures y.
+    private var chalkColor: NSColor { lengthIsVertical ? Self.yChalk : Self.xChalk }
 
     /// Tailor's chalk lines struck perpendicular from both ends of the ribbon,
     /// all the way across the screen — she marks before she cuts. Does what the
@@ -747,6 +876,23 @@ private final class BarView: NSView {
                 chalk.withAlphaComponent(pass.alpha).setStroke()
                 line.stroke()
             }
+        }
+
+        // The partner's length echoed onto this tape: a dashed pair in the
+        // *partner's* chalk color, centered on this tape's middle — outside the
+        // ends on the shorter tape, inside them on the longer (the linked pair
+        // keeps the screen's aspect ratio, so the offset IS that ratio). Turn a
+        // screen sideways and there's still a matching-colored line to sight
+        // against the other display's solid chalk.
+        if let partner {
+            let ghost = NSBezierPath()
+            for x in [length / 2 - partner.length / 2, length / 2 + partner.length / 2] {
+                ghost.move(to: CGPoint(x: x, y: -reach)); ghost.line(to: CGPoint(x: x, y: reach))
+            }
+            ghost.lineWidth = 1.1
+            ghost.setLineDash([7, 9], count: 2, phase: 0)
+            partner.chalkColor.withAlphaComponent(0.6).setStroke()
+            ghost.stroke()
         }
     }
 
