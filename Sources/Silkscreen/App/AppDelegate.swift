@@ -97,10 +97,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private lazy var statusMenu: NSMenu = {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Show Arrangement  (⌘⌥F1)", action: #selector(showWindow), keyEquivalent: "")
-        menu.addItem(withTitle: "Debug…", action: #selector(showDebug), keyEquivalent: "")
+        menu.addItem(withTitle: Copy.menuShowArranger, action: #selector(showWindow), keyEquivalent: "")
+        menu.addItem(withTitle: Copy.menuDebug, action: #selector(showDebug), keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit Silkscreen", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: Copy.menuQuit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu
     }()
 
@@ -170,13 +170,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let d = DisplayManager.snapshot().first(where: { $0.id == id }), !d.isBuiltin else { return }
 
         let alert = NSAlert()
-        alert.messageText = "Calibrate \(d.name)"
-        alert.informativeText = "Enter the screen's diagonal size in inches (corner to corner of the visible area). EDID currently reports \(String(format: "%.1f", d.diagonalInches))\"."
+        alert.messageText = Copy.calibrateTitle(d.name)
+        alert.informativeText = Copy.calibrateBody(edidInches: String(format: "%.1f", d.diagonalInches))
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
         field.placeholderString = "e.g. 15.4"
         alert.accessoryView = field
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: Copy.save)
+        alert.addButton(withTitle: Copy.cancel)
         alert.window.initialFirstResponder = field
 
         NSApp.activate(ignoringOtherApps: true)

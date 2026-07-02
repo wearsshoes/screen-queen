@@ -30,7 +30,7 @@ extension Arranger {
 
         if !mirrored.isEmpty {
             y -= 18   // header text height
-            ("Mirrored" as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
+            (Copy.mirroredHeader as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
             y -= 8
         }
 
@@ -69,8 +69,8 @@ extension Arranger {
             } else if !diag.isEmpty {
                 line(String(diag.dropLast(3)), .systemFont(ofSize: 15), .secondaryLabelColor)
             }
-            let masterName = displays.first { $0.id == d.mirrorMaster }?.name ?? "another display"
-            line("⤷ mirrors \(masterName)", .systemFont(ofSize: 15), .secondaryLabelColor)
+            let masterName = displays.first { $0.id == d.mirrorMaster }?.name ?? Copy.unknownDisplayName
+            line(Copy.mirrorsLine(masterName), .systemFont(ofSize: 15), .secondaryLabelColor)
 
             // Un-mirror button (top-right ✕).
             let bx = NSRect(x: card.maxX - 34, y: card.maxY - 34, width: 24, height: 24)
@@ -100,7 +100,7 @@ extension Arranger {
         y: inout CGFloat, hAttrs: [NSAttributedString.Key: Any]
     ) {
         y -= 18   // header text height
-        ("AirPlay" as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
+        (Copy.airplayHeader as NSString).draw(at: CGPoint(x: colX + pad, y: y), withAttributes: hAttrs)
         y -= 8
 
         let cardH: CGFloat = 140
@@ -125,7 +125,7 @@ extension Arranger {
         // Device name, with the AirPlay glyph inline before it (sized to the 20pt title
         // and drawn as a template so it takes the label color).
         let nameFont = NSFont.boldSystemFont(ofSize: 20)
-        let name = (session.receiverName ?? "AirPlay receiver") as NSString
+        let name = (session.receiverName ?? Copy.unknownAirPlayReceiver) as NSString
         let nameAttrs: [NSAttributedString.Key: Any] = [.font: nameFont, .foregroundColor: NSColor.labelColor]
         ty -= name.size(withAttributes: nameAttrs).height   // drop to this line's baseline (y-up)
         var nameX = inner.minX
@@ -143,8 +143,8 @@ extension Arranger {
         }
         name.draw(at: CGPoint(x: nameX, y: ty), withAttributes: nameAttrs)
         ty -= 5
-        line("Mirroring a window or app", .systemFont(ofSize: 15), .labelColor)
-        line("Managed by macOS.",
+        line(Copy.airplayBody, .systemFont(ofSize: 15), .labelColor)
+        line(Copy.airplayFinePrint,
              .systemFont(ofSize: 13), .secondaryLabelColor)
 
         // Hands off to the Control Center **Screen Mirroring** menu — the live control
@@ -156,7 +156,7 @@ extension Arranger {
         let ba: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.white,
         ]
-        let label = "Open Screen Mirroring" as NSString
+        let label = Copy.airplayOpenSettings as NSString
         let ls = label.size(withAttributes: ba)
         label.draw(at: CGPoint(x: btn.midX - ls.width / 2, y: btn.midY - ls.height / 2), withAttributes: ba)
         airplaySettingsButtonRect = btn

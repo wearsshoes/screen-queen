@@ -26,7 +26,7 @@ extension Arranger {
 
         let rects = currentRects()
         guard let t = dragTransform ?? transform(rects) else {
-            drawCenteredMessage("No displays detected")
+            drawCenteredMessage(Copy.emptyState)
             return
         }
         let bars = currentBars()
@@ -58,7 +58,7 @@ extension Arranger {
         seamEmitters.commit()
         drawScreenMarkers(markers)                // alignment notches/arrows at this screen's real edges
         drawMirrorColumn()                        // mirrored displays live in the right column
-        drawFooter("Drag to rearrange · ⌘/arrows select · arrows nudge · ⌘⇧ align · ⌘ ± 0 resolution")
+        drawFooter(Copy.footer)
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
             if let over = display(at: p), !over.isMain, let r = rects[over.id] {
@@ -75,7 +75,7 @@ extension Arranger {
             let path = NSBezierPath(roundedRect: vr, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
             path.fill()
             NSColor.controlAccentColor.setStroke(); path.lineWidth = 2; path.stroke()
-            let hint = "Mirror here"
+            let hint = Copy.mirrorDropHint
             let a: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.white]
             let hs = (hint as NSString).size(withAttributes: a)
             (hint as NSString).draw(at: CGPoint(x: vr.midX - hs.width / 2, y: vr.midY - hs.height / 2), withAttributes: a)
@@ -492,7 +492,7 @@ extension Arranger {
         if let effPPI {
             lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), secondary))
         } else {
-            lines.append((diag + "calibrate?", f(13), secondary))
+            lines.append((diag + Copy.calibratePrompt, f(13), secondary))
         }
 
         // Text is centered in the *whole* tile. The slider is pinned to a fixed spot near

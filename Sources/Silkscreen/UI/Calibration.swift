@@ -55,13 +55,13 @@ final class CalibrationController {
 
         // Both bars wear the same QuickTime-trimmer look; a small label tells them
         // apart. Reference bar (trusted screen): a pure resize affordance, no controls.
-        let refView = BarView(length: overlapPoints, anchor: refAnchor, role: "Reference")
+        let refView = BarView(length: overlapPoints, anchor: refAnchor, role: Copy.matchRoleReference)
         refView.onResize = { [weak self] len in self?.refLengthPoints = len; self?.updateReadout() }
         refWindow = makeWindow(screen: refScreen, view: refView, interactive: true)
 
         // Target bar (target screen): also a pure resize affordance. The controls now
         // live in a floating panel, keeping the overlay clean.
-        let calView = BarView(length: overlapPoints, anchor: targetAnchor, role: "This display")
+        let calView = BarView(length: overlapPoints, anchor: targetAnchor, role: Copy.matchRoleTarget)
         calView.onResize = { [weak self] len in self?.targetLengthPoints = len; self?.updateReadout() }
         targetWindow = makeWindow(screen: targetScreen, view: calView, interactive: true)
 
@@ -153,7 +153,7 @@ final class CalibrationPanel: NSPanel {
     var onSave: (() -> Void)?
     var onCancel: (() -> Void)?
 
-    private let valueLabel = NSTextField(labelWithString: "—")
+    private let valueLabel = NSTextField(labelWithString: Copy.matchReadoutPlaceholder)
     private let displayName: String
 
     init(displayName: String) {
@@ -184,13 +184,13 @@ final class CalibrationPanel: NSPanel {
         title.alignment = .center
 
         let instruction = NSTextField(wrappingLabelWithString:
-            "Drag the bars until they look the same real size.")
+            Copy.matchInstruction)
         instruction.font = .systemFont(ofSize: 12)
         instruction.textColor = .secondaryLabelColor
         instruction.alignment = .center
         instruction.preferredMaxLayoutWidth = 260
 
-        let caption = NSTextField(labelWithString: "INFERRED DIAGONAL")
+        let caption = NSTextField(labelWithString: Copy.matchReadoutCaption)
         caption.font = .systemFont(ofSize: 10, weight: .semibold)
         caption.textColor = .tertiaryLabelColor
         caption.alignment = .center
@@ -199,9 +199,9 @@ final class CalibrationPanel: NSPanel {
         valueLabel.textColor = .labelColor
         valueLabel.alignment = .center
 
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
+        let cancel = NSButton(title: Copy.cancel, target: self, action: #selector(cancelTapped))
         cancel.controlSize = .large; cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
-        let save = NSButton(title: "Save", target: self, action: #selector(saveTapped))
+        let save = NSButton(title: Copy.save, target: self, action: #selector(saveTapped))
         save.controlSize = .large; save.bezelStyle = .rounded; save.keyEquivalent = "\r"
         // The modern prominent (accent-filled) default button.
         save.bezelColor = .controlAccentColor
@@ -280,7 +280,7 @@ final class CalibrationPanel: NSPanel {
 
     /// Update the prominent readout with the currently inferred diagonal in inches.
     func setInferredDiagonal(_ inches: Double) {
-        valueLabel.stringValue = inches > 0 ? String(format: "%.1f″", inches) : "—"
+        valueLabel.stringValue = inches > 0 ? String(format: "%.1f″", inches) : Copy.matchReadoutPlaceholder
     }
 
     @objc private func saveTapped() { onSave?() }

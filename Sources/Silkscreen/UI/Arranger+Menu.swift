@@ -16,16 +16,16 @@ extension Arranger {
         // calibratable — offer no size overrides for it.
         if !d.isBuiltin {
             menu.addItem(.separator())
-            let calItem = NSMenuItem(title: "Input Size…", action: #selector(calibrateFromMenu(_:)), keyEquivalent: "")
+            let calItem = NSMenuItem(title: Copy.menuInputSize, action: #selector(calibrateFromMenu(_:)), keyEquivalent: "")
             calItem.target = self; calItem.representedObject = NSNumber(value: d.id)
             menu.addItem(calItem)
             if displays.count > 1 {
-                let matchItem = NSMenuItem(title: "Manual Calibration…", action: #selector(calibrateVisualFromMenu(_:)), keyEquivalent: "")
+                let matchItem = NSMenuItem(title: Copy.menuManualCalibration, action: #selector(calibrateVisualFromMenu(_:)), keyEquivalent: "")
                 matchItem.target = self; matchItem.representedObject = NSNumber(value: d.id)
                 menu.addItem(matchItem)
             }
             if d.physicalSizeIsCalibrated {
-                let resetItem = NSMenuItem(title: "Reset Size to EDID", action: #selector(resetCalibrationFromMenu(_:)), keyEquivalent: "")
+                let resetItem = NSMenuItem(title: Copy.menuResetSizeToEDID, action: #selector(resetCalibrationFromMenu(_:)), keyEquivalent: "")
                 resetItem.target = self; resetItem.representedObject = NSNumber(value: d.id)
                 menu.addItem(resetItem)
             }
@@ -34,7 +34,7 @@ extension Arranger {
     }
 
     private func resolutionMenuItem(for d: DisplaySnapshot) -> NSMenuItem {
-        let item = NSMenuItem(title: "Resolution", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: Copy.menuResolution, action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         let current = CGDisplayCopyDisplayMode(d.id)
         for mode in modesList(for: d) {
@@ -47,7 +47,7 @@ extension Arranger {
         // into the full extended set here, on its own tile.
         if d.isBuiltin {
             submenu.addItem(.separator())
-            let ext = NSMenuItem(title: "Show Extended Resolutions", action: #selector(toggleExtendedBuiltin(_:)), keyEquivalent: "")
+            let ext = NSMenuItem(title: Copy.menuShowExtendedResolutions, action: #selector(toggleExtendedBuiltin(_:)), keyEquivalent: "")
             ext.target = self; ext.state = extendedBuiltinModes ? .on : .off
             submenu.addItem(ext)
         }

@@ -28,7 +28,7 @@ extension Arranger {
         resetButton.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Reset")
         undoButton.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: "Undo")
         doneButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Done")
-        resetButton.toolTip = "Reset"; undoButton.toolTip = "Undo"; doneButton.toolTip = "Done"
+        resetButton.toolTip = Copy.resetTooltip; undoButton.toolTip = Copy.undoTooltip; doneButton.toolTip = Copy.doneTooltip
         for b in allButtons {
             b.image = b.image?.withSymbolConfiguration(iconConfig)
             b.imagePosition = .imageOnly
@@ -44,7 +44,7 @@ extension Arranger {
         resSlider.controlSize = .large
         resSlider.target = self
         resSlider.action = #selector(resSliderChanged)
-        resSlider.toolTip = "Resolution"
+        resSlider.toolTip = Copy.sliderTooltip
 
         // One/All scope toggle (icon set in syncButtons to reflect the current scope).
         scopeButton.isBordered = false
@@ -251,7 +251,7 @@ extension Arranger {
         feedButton.image = NSImage(systemSymbolName: feedSymbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(feedCfg)
         feedButton.contentTintColor = .labelColor
-        feedButton.toolTip = state.feedEnabled ? "Stop live preview" : "Show live preview"
+        feedButton.toolTip = state.feedEnabled ? Copy.feedOnTooltip : Copy.feedOffTooltip
 
         // One/All scope toggle: single rectangle = one display, overlapping = all.
         let scopeCfg = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
@@ -260,7 +260,7 @@ extension Arranger {
             .withSymbolConfiguration(scopeCfg)
         scopeButton.contentTintColor = state.sliderScope == .all ? .controlAccentColor : .secondaryLabelColor
         scopeButton.toolTip = state.sliderScope == .all
-            ? "Zoom all displays proportionally" : "Zoom the selected display only"
+            ? Copy.scopeAllTooltip : Copy.scopeOneTooltip
 
         let selected = selectedID.flatMap { id in displays.first(where: { $0.id == id }) }
         sliderModes = selected.map { sortedModes(for: $0) } ?? []
