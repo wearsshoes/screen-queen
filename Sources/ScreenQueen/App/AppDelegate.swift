@@ -53,6 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showWindow()
     }
 
+    // TODO: a first-run *setup screen* that walks through every permission in one sitting —
+    // Accessibility (the global hotkey) and Screen Recording (the live tile feed) — with a
+    // line each on why she's asking and a live granted/denied readout, instead of macOS
+    // ambushing the user with system prompts one at a time as features are first touched.
+    // Consent is sexy; surprise dialogs are not.
     /// Prompt for Accessibility permission (once), which macOS requires for the global
     /// key monitor to observe the hotkey while other apps are focused.
     private func requestAccessibilityIfNeeded() {
