@@ -57,7 +57,6 @@ final class ArrangementCanvas: NSView {
     private(set) lazy var seamEmitters: SeamEmitters = {
         wantsLayer = true
         let host = CALayer()
-        // View is now a standard y-up NSView, matching CALayer's y-up geometry — no flip.
         host.frame = bounds
         host.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         host.zPosition = 1               // particles above the schematic fill

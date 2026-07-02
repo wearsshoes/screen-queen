@@ -109,9 +109,9 @@ extension ArrangementCanvas {
             } else {
                 let cA = t.viewPoint(CGPoint(x: bar.physAlongA, y: bar.physLine))
                 let cB = t.viewPoint(CGPoint(x: bar.physAlongB, y: bar.physLine))
-                // a = top display (center above the seam). View is y-up, so "above" is larger
-                // y: a's bar sits above the seam line and rounds on its top edge (.maxY, facing
-                // a's center); b (below) sits under the seam and rounds .minY.
+                // a = top display (center above the seam, i.e. larger y): its bar sits above
+                // the seam line and rounds on its top edge (.maxY, facing a's center); b
+                // (below) sits under the seam and rounds .minY.
                 drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y + gap, width: lenA, height: thickness), roundedOn: .maxY, color: color)
                 drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y - gap - thickness, width: lenB, height: thickness), roundedOn: .minY, color: color)
             }
@@ -185,8 +185,8 @@ extension ArrangementCanvas {
                 rect = NSRect(x: x, y: along - len / 2, width: thickness, height: len)
                 inward = weAreA ? .minX : .maxX                  // a hugs the right edge → rounds left
             } else {
-                // `a` is the display above the seam, so the seam is at its *bottom* edge.
-                // y-up: screen bottom = y 0, and "inward" (toward center) rounds upward = .maxY.
+                // `a` is above the seam, so the seam is at its bottom edge (y 0); "inward"
+                // (toward center) rounds upward = .maxY.
                 let y = weAreA ? 0 : bounds.height - thickness
                 rect = NSRect(x: along - len / 2, y: y, width: len, height: thickness)
                 inward = weAreA ? .maxY : .minY
@@ -231,7 +231,7 @@ extension ArrangementCanvas {
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.45)
         shadow.shadowBlurRadius = 8
-        shadow.shadowOffset = NSSize(width: 0, height: -3)   // y-up view: -y casts the shadow downward
+        shadow.shadowOffset = NSSize(width: 0, height: -3)   // -y casts the shadow downward
         shadow.set()
         let path = NSBezierPath(roundedRect: tileRect.insetBy(dx: 1.5, dy: 1.5),
                                 xRadius: tileCornerRadius, yRadius: tileCornerRadius)
@@ -273,7 +273,7 @@ extension ArrangementCanvas {
         // Depth band (perpendicular to the Dock axis) shared by icons + tray.
         let depthLo: CGFloat   // near edge in view coords
         switch edge {
-        case .bottom: depthLo = inset.minY + margin          // y-up: minY is the screen bottom
+        case .bottom: depthLo = inset.minY + margin          // minY is the screen bottom
         case .left:   depthLo = inset.minX + margin
         case .right:  depthLo = inset.maxX - margin - icon
         }
@@ -353,8 +353,7 @@ extension ArrangementCanvas {
         tile.fill()
     }
 
-    /// Draw `image` aspect-filled (cover, center-crop) into `rect`. The view is a standard
-    /// y-up NSView matching CGImage's native orientation, so no flip is needed here.
+    /// Draw `image` aspect-filled (cover, center-crop) into `rect`.
     func drawImageAspectFill(_ image: CGImage, in rect: NSRect, alpha: CGFloat = 1) {
         guard let ctx = NSGraphicsContext.current?.cgContext, image.width > 0, image.height > 0 else { return }
         let iw = CGFloat(image.width), ih = CGFloat(image.height)
@@ -365,8 +364,6 @@ extension ArrangementCanvas {
         ctx.saveGState()
         defer { ctx.restoreGState() }
         ctx.setAlpha(alpha)
-        // The view is now a standard y-up NSView, matching CGImage's native y-up geometry —
-        // no per-image flip needed (that was the old `isFlipped` workaround).
         ctx.draw(image, in: dst)
     }
 
@@ -442,7 +439,7 @@ extension ArrangementCanvas {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    /// The menu-bar strip across the top of a tile (y-up view: max-y is the top).
+    /// The menu-bar strip across the top of a tile.
     func menuBarRect(inTile tile: NSRect) -> NSRect {
         let h = min(18, tile.height * 0.2)
         return NSRect(x: tile.minX, y: tile.maxY - h, width: tile.width, height: h)
@@ -505,7 +502,7 @@ extension ArrangementCanvas {
         let gap: CGFloat = 3
         let sizes = lines.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]) }
         let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(lines.count - 1)
-        // The block is vertically centered; `bottom` is its lower edge (y-up).
+        // The block is vertically centered; `bottom` is its lower edge.
         let bottom = rect.midY - total / 2
 
         // A rounded translucent plate behind the info block so it reads against the
@@ -542,7 +539,6 @@ extension ArrangementCanvas {
     /// The eight perimeter anchor positions (corners + edge midpoints).
     private enum AnchorPos: CaseIterable {
         case topLeft, topMid, topRight, leftMid, rightMid, bottomLeft, bottomMid, bottomRight
-        // View is y-up: screen-top = maxY, screen-bottom = minY.
         func point(in r: NSRect) -> CGPoint {
             switch self {
             case .topLeft: return CGPoint(x: r.minX, y: r.maxY)
@@ -555,7 +551,7 @@ extension ArrangementCanvas {
             case .bottomRight: return CGPoint(x: r.maxX, y: r.minY)
             }
         }
-        // Unit vector from the anchor toward the tile center (y-up: top anchors point down).
+        // Unit vector from the anchor toward the tile center.
         var inward: CGVector {
             switch self {
             case .topLeft: return CGVector(dx: 1, dy: -1)
@@ -590,8 +586,7 @@ extension ArrangementCanvas {
     private func drawScreenMarkers(_ markers: [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)]) {
         guard let me = centerID, let active = markers[me] else { return }
         let notch = window?.screen?.safeAreaInsets.top ?? 0   // keep clear of the notch on top
-        // y-up: the notch is at the top (high y), so reserve its clearance off the top of
-        // the area (shrink the height; the origin stays at the bottom).
+        // The notch is at the top, so reserve its clearance by shrinking the height.
         let area = NSRect(x: bounds.minX + 40, y: bounds.minY + 40,
                           width: bounds.width - 80, height: bounds.height - 80 - notch)
         drawArrow(at: active.pos.point(in: area), dir: active.dir, scale: 3)
@@ -632,7 +627,7 @@ extension ArrangementCanvas {
                     at = CGPoint(x: g.midX, y: exposedY)
                 }
             }
-            let travel: CGVector   // y-up view: up = +y
+            let travel: CGVector
             switch dir {
             case .left:  travel = CGVector(dx: -1, dy: 0)
             case .right: travel = CGVector(dx: 1, dy: 0)
@@ -702,7 +697,6 @@ extension ArrangementCanvas {
     private func dirV(_ pos: AnchorPos, corner: Bool, partner: VAnchor) -> CGVector {
         if corner { return pos.inward }
         guard partner != .center else { return pos.inward }
-        // y-up: partner on top (high y) means the arrow points up (+y).
         return CGVector(dx: pos.inward.dx, dy: partner == .top ? 1 : -1)
     }
     private func dirH(_ pos: AnchorPos, corner: Bool, partner: HAnchor) -> CGVector {

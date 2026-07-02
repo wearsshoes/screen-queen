@@ -71,8 +71,8 @@ extension ArrangementCanvas {
         if optionMirrorDrag { mirrorDragPoint = p; dragMoved = true; needsDisplay = true; return }
         guard let id = draggedID, let dragged = displays.first(where: { $0.id == id }),
               let t = dragTransform ?? transform(plane) else { return }
-        // The tile tracks the cursor 1:1: view delta ÷ scale = physical delta. The view is
-        // y-up but the physical plane is y-down (`CGDisplayBounds`), so the y delta inverts.
+        // The tile tracks the cursor 1:1: view delta ÷ scale = physical delta. The plane is
+        // y-down (the view y-up), so the y delta is negated.
         let free = CGPoint(x: dragStartPhys.x + (p.x - dragStartMouse.x) / t.scale,
                            y: dragStartPhys.y - (p.y - dragStartMouse.y) / t.scale)
         let snap = SchematicSnapping.dockAndSnap(dragged: SchematicLayout.physSize(dragged), id: id,

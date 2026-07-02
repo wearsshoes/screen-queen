@@ -161,11 +161,9 @@ enum SchematicSnapping {
         return nil
     }
 
-    /// The single source of truth for "where can this tile go": every ⌘⇧-arrow direction
-    /// that would actually move the tile, mapped to the plane origin it would land on
-    /// (no-op directions omitted). Both the ghost preview and the apply step read from
-    /// this, so what's previewed is exactly what applies — the invariant to lean on when
-    /// chasing multi-monitor edge cases.
+    /// Every ⌘⇧-arrow direction that would move the tile, mapped to the plane origin it
+    /// would land on (no-op directions omitted). The ghost preview and the apply step both
+    /// read this, so what's previewed is what applies.
     static func plannedMoves(_ id: CGDirectDisplayID,
                              plane: [CGDirectDisplayID: CGRect],
                              activeV: VMarker?, activeH: HMarker?) -> [MoveDirection: CGPoint] {
