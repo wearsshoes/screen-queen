@@ -90,16 +90,23 @@ enum SchematicLayout {
     /// axis so the junction's *point* coordinate maps, at the display's own uniform scale,
     /// onto the neighbors' shared *physical* edge — its two seams then meet exactly where the
     /// pair meet. (A rigid single-scale tile can't also stay flush to one dock parent when
-    /// densities differ; per design we privilege the junction.) The start display anchors the
-    /// frame and is never moved. One pass: junction partners are assumed not to be straddlers
-    /// themselves (chained straddles are out of scope).
+    /// densities differ; per design we privilege the junction.)
+    ///
+    /// When the straddler is the *start* display — it anchors the frame and never moves — the
+    /// same constraint is satisfied in reverse: the junction *pair* slides (each partner set
+    /// flush to the pinned junction, which also closes any placement drift between them) so
+    /// their shared edge lands where the start's own map puts the point-junction. One pass:
+    /// junction partners are assumed not to be straddlers themselves (chained straddles are
+    /// out of scope).
     private static func pinStraddlersOnPlane(_ eff: [DisplaySnapshot], startID: CGDirectDisplayID,
                                              out: inout [CGDirectDisplayID: CGRect], tol: CGFloat) {
-        for child in eff where child.id != startID {
+        typealias Pin = (dist: CGFloat, jPoint: CGFloat, jPhys: CGFloat,
+                         a: CGDirectDisplayID, b: CGDirectDisplayID)
+        for child in eff {
             guard let cr = out[child.id] else { continue }
             let c = child.bounds
-            var pinX: (dist: CGFloat, value: CGFloat)?
-            var pinY: (dist: CGFloat, value: CGFloat)?
+            var pinX: Pin?
+            var pinY: Pin?
             // Horizontal-seam straddle (junction along x): same-side pair below/above (y-down).
             for pairBelow in [true, false] {
                 let side = eff.filter { n in
@@ -115,9 +122,8 @@ enum SchematicLayout {
                     let jPoint = (a.bounds.maxX + b.bounds.minX) / 2
                     guard jPoint > c.minX, jPoint < c.maxX else { continue }  // junction inside the child
                     let jPhys = (ar.maxX + br.minX) / 2
-                    let k = cr.width / max(c.width, 0.01)
                     let dist = abs(jPoint - c.midX)
-                    if pinX == nil || dist < pinX!.dist { pinX = (dist, jPhys - k * (jPoint - c.minX)) }
+                    if pinX == nil || dist < pinX!.dist { pinX = (dist, jPoint, jPhys, a.id, b.id) }
                 } }
             }
             // Vertical-seam straddle (junction along y): same-side pair right/left of the child.
@@ -135,13 +141,33 @@ enum SchematicLayout {
                     let jPoint = (a.bounds.maxY + b.bounds.minY) / 2
                     guard jPoint > c.minY, jPoint < c.maxY else { continue }
                     let jPhys = (ar.maxY + br.minY) / 2
-                    let k = cr.height / max(c.height, 0.01)
                     let dist = abs(jPoint - c.midY)
-                    if pinY == nil || dist < pinY!.dist { pinY = (dist, jPhys - k * (jPoint - c.minY)) }
+                    if pinY == nil || dist < pinY!.dist { pinY = (dist, jPoint, jPhys, a.id, b.id) }
                 } }
             }
-            if let v = pinX?.value { out[child.id]!.origin.x = v }
-            if let v = pinY?.value { out[child.id]!.origin.y = v }
+            let isStart = child.id == startID
+            if let p = pinX {
+                let k = cr.width / max(c.width, 0.01)
+                if isStart {
+                    // Reverse: slide the pair so their shared edge sits where the start's own
+                    // map puts the point-junction (a flush to its left, b flush to its right).
+                    let desired = cr.minX + k * (p.jPoint - c.minX)
+                    if let aw = out[p.a]?.width { out[p.a]!.origin.x = desired - aw }
+                    out[p.b]?.origin.x = desired
+                } else {
+                    out[child.id]!.origin.x = p.jPhys - k * (p.jPoint - c.minX)
+                }
+            }
+            if let p = pinY {
+                let k = cr.height / max(c.height, 0.01)
+                if isStart {
+                    let desired = cr.minY + k * (p.jPoint - c.minY)
+                    if let ah = out[p.a]?.height { out[p.a]!.origin.y = desired - ah }
+                    out[p.b]?.origin.y = desired
+                } else {
+                    out[child.id]!.origin.y = p.jPhys - k * (p.jPoint - c.minY)
+                }
+            }
         }
     }
 
@@ -174,9 +200,9 @@ enum SchematicLayout {
                 // a seam between two displays that didn't move (e.g. two top monitors) intact
                 // when a third (the main, below) slides underneath — the third's ambiguous
                 // placement no longer leaks into where the untouched pair lands.
-                guard let origin = dockOrigin(child: child, preferredParentID: parentID,
-                                              origins: origins, rects: rects, byID: byID, tol: tol) else { continue }
-                origins[child.id] = origin
+                guard let dock = dockOrigin(child: child, preferredParentID: parentID,
+                                            origins: origins, rects: rects, byID: byID, tol: tol) else { continue }
+                origins[child.id] = dock.origin
                 queue.append(child.id)
             }
         }
@@ -191,12 +217,30 @@ enum SchematicLayout {
         }
         // Straddle pins need *both* junction partners placed, which the BFS can't guarantee at
         // dock time (order depends on the display list); re-apply now that everyone is placed.
-        // Idempotent when the dock already pinned. The start display anchors the frame.
-        for d in displays where d.id != start.id {
+        // Idempotent when the dock already pinned. When the *start* display is the straddler
+        // it anchors the frame and never moves — satisfy its pin in reverse by sliding the
+        // junction pair so their shared edge's point coordinate is where the start's own map
+        // puts the physical junction (mirrors `pinStraddlersOnPlane`).
+        for d in displays {
             guard origins[d.id] != nil, let cr = rects[d.id] else { continue }
             let pins = straddlePointPins(child: d, cr: cr, origins: origins, rects: rects, byID: byID, tol: tol)
-            if let x = pins.x { origins[d.id]!.x = x }
-            if let y = pins.y { origins[d.id]!.y = y }
+            if d.id == start.id {
+                if let p = pins.x {
+                    let k = cr.width / max(d.bounds.width, 0.01)
+                    let desired = d.bounds.minX + (p.jPhys - cr.minX) / k
+                    if let aw = byID[p.a]?.bounds.width { origins[p.a]?.x = desired - aw }
+                    origins[p.b]?.x = desired
+                }
+                if let p = pins.y {
+                    let k = cr.height / max(d.bounds.height, 0.01)
+                    let desired = d.bounds.minY + (p.jPhys - cr.minY) / k
+                    if let ah = byID[p.a]?.bounds.height { origins[p.a]?.y = desired - ah }
+                    origins[p.b]?.y = desired
+                }
+            } else {
+                if let x = pins.x?.value { origins[d.id]!.x = x }
+                if let y = pins.y?.value { origins[d.id]!.y = y }
+            }
         }
         return origins
     }
@@ -232,9 +276,9 @@ enum SchematicLayout {
         // Place the dragged display against the frozen neighbors. `preferredParentID` is any
         // placed neighbor; `dockOrigin` picks the best exact-edge one on its own.
         let anyPlaced = origins.keys.first ?? dragged
-        if let o = dockOrigin(child: byID[dragged]!, preferredParentID: anyPlaced,
-                              origins: origins, rects: rects, byID: byID, tol: tol) {
-            origins[dragged] = o
+        if let dock = dockOrigin(child: byID[dragged]!, preferredParentID: anyPlaced,
+                                 origins: origins, rects: rects, byID: byID, tol: tol) {
+            origins[dragged] = dock.origin
         } else if let mainID = displays.first(where: { $0.isMain })?.id,
                   let mr = rects[mainID], let mo = origins[mainID] ?? (mainID == dragged ? .zero : nil) {
             // Disconnected: place relative to the main at the main's density.
@@ -263,11 +307,17 @@ enum SchematicLayout {
     /// mover's own (possibly ambiguous, position-dependent) seam map. Among exact-edge
     /// neighbors we take the lowest id, so the choice is stable frame to frame. When no neighbor
     /// abuts exactly, fall back to the queue parent (then any bordering neighbor).
+    ///
+    /// Also reports `ambiguous`: whether the resolved position actually *relied* on a folded
+    /// (>1-preimage) inverse. A seam pins its perpendicular axis hard and only *resolves* the
+    /// along axis through the inverse map, so only that axis can be ambiguous — and an
+    /// L-junction's perpendicular flush or a straddle pin settles it. Genuinely ambiguous means
+    /// "she had to guess," not "some neighboring map has a fold somewhere."
     private static func dockOrigin(child: DisplaySnapshot, preferredParentID: CGDirectDisplayID,
                                    origins: [CGDirectDisplayID: CGPoint],
                                    rects: [CGDirectDisplayID: CGRect],
                                    byID: [CGDirectDisplayID: DisplaySnapshot],
-                                   tol: CGFloat) -> CGPoint? {
+                                   tol: CGFloat) -> (origin: CGPoint, ambiguous: Bool)? {
         let cr = rects[child.id]!, cs = child.bounds.size, cPhys = physSize(child)
 
         // A candidate docking against placed neighbor `n`: the child's origin, the physical
@@ -318,31 +368,38 @@ enum SchematicLayout {
             return a.id < b.id
         }
         var resolved: CGPoint?
+        // The axis whose value came from a folded (>1-preimage) inverse; cleared when a
+        // harder constraint (L-junction flush, straddle pin) settles that axis.
+        enum Axis { case x, y }
+        var foldAxis: Axis?
+        func markFold(_ c: Cand) { if c.preimages > 1 { foldAxis = c.vertical ? .y : .x } }
         if let best = exact.first {
             // L-junction: if another exact neighbor sits on the *perpendicular* axis, it pins
             // the coordinate `best` only resolved (didn't constrain). Take that pinned axis from
             // the best perpendicular neighbor so the child settles into the corner against both.
             var origin = best.c.origin
+            markFold(best.c)
             if let perp = exact.first(where: { $0.c.vertical != best.c.vertical }) {
-                if best.c.vertical { origin.y = perp.c.origin.y }   // best pinned x; take y from the horizontal-seam neighbor
-                else               { origin.x = perp.c.origin.x }   // best pinned y; take x from the vertical-seam neighbor
+                if best.c.vertical { origin.y = perp.c.origin.y; if foldAxis == .y { foldAxis = nil } }
+                else               { origin.x = perp.c.origin.x; if foldAxis == .x { foldAxis = nil } }
             }
             resolved = origin
         } else if let base = candidate(preferredParentID) {
             // No exact-edge neighbor: dock to the queue parent, else any bordering neighbor.
             resolved = base.origin
+            markFold(base)
         } else {
             for nid in origins.keys.sorted() where nid != preferredParentID {
-                if let c = candidate(nid) { resolved = c.origin; break }
+                if let c = candidate(nid) { resolved = c.origin; markFold(c); break }
             }
         }
         guard var origin = resolved else { return nil }
         // Straddle pin: a junction the child spans overrides the along-axis, so the child's
         // two seams meet exactly where the pair below/beside it meet (see straddlePointPins).
         let pins = straddlePointPins(child: child, cr: cr, origins: origins, rects: rects, byID: byID, tol: tol)
-        if let x = pins.x { origin.x = x }
-        if let y = pins.y { origin.y = y }
-        return origin
+        if let x = pins.x?.value { origin.x = x; if foldAxis == .x { foldAxis = nil } }
+        if let y = pins.y?.value { origin.y = y; if foldAxis == .y { foldAxis = nil } }
+        return (origin, foldAxis != nil)
     }
 
     /// Phys→point straddle pins for `child` (physical rect `cr`): when the child spans a
@@ -351,19 +408,29 @@ enum SchematicLayout {
     /// uniform scale, back to the junction's *point* coordinate. That anchors the child's
     /// along-axis so its two seams meet exactly where the pair meet (the rendered junction
     /// line), rather than inheriting one parent's far-edge anchor. Returns the pinned
-    /// point-origin coordinate per axis (nil = no straddle on that axis). Exactly mirrors
-    /// `pinStraddlersOnPlane` (the point→phys direction), so commit and interpret stay
+    /// point-origin coordinate per axis (nil = no straddle on that axis), along with the
+    /// junction it was pinned to (`jPoint`/`jPhys` and the pair `a`|`b`) so a caller pinning
+    /// the *start* display can satisfy the constraint in reverse by moving the pair. Exactly
+    /// mirrors `pinStraddlersOnPlane` (the point→phys direction), so commit and interpret stay
     /// faithful inverses; at the moment a junction crosses the child's edge the pin agrees
     /// with the single-parent anchor map (the shared edges-aligned anchor), so drag handoffs
     /// are continuous.
+    // TODO: expose the fold/straddle resolution as direct manipulation in the arranger — a
+    // draggable bar along the seam with a perpendicular *pin handle* (à la image-editing
+    // guides) that lets the user say which subsection of a neighbor an edge actually maps to.
+    // Genuinely folded cases (equal physical size, unequal densities, exactly parallel) have
+    // no single right answer; today a junction/L-flush picks one, but the handle would make
+    // the choice visible and adjustable, and double as a snap target. Not an immediate feature.
+    typealias StraddlePin = (value: CGFloat, jPoint: CGFloat, jPhys: CGFloat,
+                             a: CGDirectDisplayID, b: CGDirectDisplayID)
     private static func straddlePointPins(child: DisplaySnapshot, cr: CGRect,
                                           origins: [CGDirectDisplayID: CGPoint],
                                           rects: [CGDirectDisplayID: CGRect],
                                           byID: [CGDirectDisplayID: DisplaySnapshot],
-                                          tol: CGFloat) -> (x: CGFloat?, y: CGFloat?) {
+                                          tol: CGFloat) -> (x: StraddlePin?, y: StraddlePin?) {
         let c = child.bounds
-        var pinX: (dist: CGFloat, value: CGFloat)?
-        var pinY: (dist: CGFloat, value: CGFloat)?
+        var pinX: (dist: CGFloat, pin: StraddlePin)?
+        var pinY: (dist: CGFloat, pin: StraddlePin)?
         let placed = origins.keys.filter { $0 != child.id }
         // Horizontal-seam straddle (junction along x): a same-side pair — both below or both
         // above the child (y-down) — abutting left|right inside the child's span pins its x.
@@ -384,7 +451,9 @@ enum SchematicLayout {
                 guard abs(bo.x - jPoint) <= tol else { continue }         // and abut in point space
                 let k = cr.width / max(c.width, 0.01)                     // child inches per point
                 let dist = abs(jPhys - cr.midX)                           // several junctions → nearest to center
-                if pinX == nil || dist < pinX!.dist { pinX = (dist, jPoint - (jPhys - cr.minX) / k) }
+                if pinX == nil || dist < pinX!.dist {
+                    pinX = (dist, (jPoint - (jPhys - cr.minX) / k, jPoint, jPhys, a, b))
+                }
             } }
         }
         // Vertical-seam straddle (junction along y): a same-side pair — both right or both
@@ -406,10 +475,12 @@ enum SchematicLayout {
                 guard abs(bo.y - jPoint) <= tol else { continue }
                 let k = cr.height / max(c.height, 0.01)
                 let dist = abs(jPhys - cr.midY)
-                if pinY == nil || dist < pinY!.dist { pinY = (dist, jPoint - (jPhys - cr.minY) / k) }
+                if pinY == nil || dist < pinY!.dist {
+                    pinY = (dist, (jPoint - (jPhys - cr.minY) / k, jPoint, jPhys, a, b))
+                }
             } }
         }
-        return (pinX?.value, pinY?.value)
+        return (pinX?.pin, pinY?.pin)
     }
 
     // MARK: - Solve trace (powers the arranger's "what she sees" panel)
@@ -437,31 +508,14 @@ enum SchematicLayout {
             let parentID = queue.removeFirst()
             for child in displays where origins[child.id] == nil {
                 guard rects[child.id] != nil else { continue }
-                guard let origin = dockOrigin(child: child, preferredParentID: parentID,
-                                              origins: origins, rects: rects, byID: byID, tol: tol) else { continue }
-                origins[child.id] = origin
+                guard let dock = dockOrigin(child: child, preferredParentID: parentID,
+                                            origins: origins, rects: rects, byID: byID, tol: tol) else { continue }
+                origins[child.id] = dock.origin
                 queue.append(child.id)
-                // Diagnostics: which neighbor did we land flush against, and was that inverse
-                // ambiguous? Find the placed neighbor whose edge the child's origin abuts.
-                let cr = rects[child.id]!
-                let dock = origins.keys.first { nid in
-                    guard nid != child.id, let nr = rects[nid], let no = origins[nid] else { return false }
-                    let np = CGRect(origin: no, size: byID[nid]!.bounds.size)
-                    let cp = CGRect(origin: origin, size: child.bounds.size)
-                    let touchX = abs(cp.minX - np.maxX) < 1 || abs(cp.maxX - np.minX) < 1
-                    let touchY = abs(cp.minY - np.maxY) < 1 || abs(cp.maxY - np.minY) < 1
-                    return (touchX || touchY) && min(nr.maxX, cr.maxX) - max(nr.minX, cr.minX) > -tol
-                        && min(nr.maxY, cr.maxY) - max(nr.minY, cr.minY) > -tol
-                }
-                var ambiguous = false
-                if let dock, let nr = rects[dock] {
-                    let vertical = abs(cr.minX - nr.maxX) <= tol || abs(cr.maxX - nr.minX) <= tol
-                    let np = CGRect(origin: origins[dock]!, size: byID[dock]!.bounds.size)
-                    let a = seamPointResolved(vertical ? cr.minY : cr.minX,
-                                              seamAnchors(child: child, physSize(child), parentPoint: np, parentPhys: nr, vertical: vertical))
-                    ambiguous = a.preimages > 1
-                }
-                meta[child.id] = (ambiguous, dock)
+                // The dock itself reports whether the *chosen* resolution relied on a folded
+                // inverse — a fold on some unused neighboring seam (e.g. two same-size panels'
+                // mutual map, when both are actually pinned by a third display) doesn't count.
+                meta[child.id] = (dock.ambiguous, nil)
             }
         }
         for d in displays {

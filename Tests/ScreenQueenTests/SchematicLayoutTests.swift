@@ -194,6 +194,42 @@ final class SchematicLayoutTests: XCTestCase {
         XCTAssertEqual(withScarlet.lo, junctionPhysX, accuracy: 0.5, "top↔Scarlet region should physically start at the junction (drag)")
     }
 
+    /// A ⊥: two physically-identical panels at *different point densities* sit side by side
+    /// on top of the main, which spans their junction from below. Their mutual seam map is
+    /// genuinely folded — equal physical size + unequal point heights means "exactly parallel"
+    /// has many point preimages (you can align tops OR bottoms in point space, never both) —
+    /// but the T-junction settles everything: both sit flush on the main, and the pair's
+    /// shared edge must land where the *main's* own map puts the point-junction (the reverse
+    /// straddle pin: the main anchors the frame, so the pair slides instead). And since the
+    /// chosen resolution never relies on the folded seam, nothing should read as ambiguous.
+    func testTJunctionPinsPairOverMainAndResolvesAmbiguity() {
+        let mm27 = CGSize(width: 596.7, height: 335.6)   // both panels physically identical
+        let main = snap(1, CGRect(x: 0, y: 0, width: 1710, height: 1107),
+                        mm: CGSize(width: 326.5714, height: 211.412), main: true)
+        let left = snap(2, CGRect(x: 855 - 2560, y: -1440, width: 2560, height: 1440), mm: mm27)
+        let right = snap(3, CGRect(x: 855, y: -900, width: 1600, height: 900), mm: mm27)   // coarser
+        let displays = [main, left, right]
+        let plane = SchematicLayout.toPlane(displays)
+
+        // The pair's shared physical edge sits exactly where the main's own uniform map puts
+        // the point-junction (x = 855) — locked to the T, not drifting off one panel's anchor.
+        let kMain = plane[1]!.width / 1710
+        let jPhys = plane[1]!.minX + 855 * kMain
+        XCTAssertEqual(plane[2]!.maxX, jPhys, accuracy: 0.1, "left panel's edge should sit at the junction")
+        XCTAssertEqual(plane[3]!.minX, jPhys, accuracy: 0.1, "right panel's edge should sit at the junction")
+
+        // The round-trip must reproduce the point arrangement (the reverse pin inverts exactly).
+        let origins = SchematicLayout.toPoints(rects: plane, displays: displays)
+        XCTAssertEqual(origins[2]!.x, 855 - 2560, accuracy: 1.5, "left panel's point x should round-trip")
+        XCTAssertEqual(origins[3]!.x, 855, accuracy: 1.5, "right panel's point x should round-trip")
+
+        // And the trace reports no ambiguity: the fold on the pair's mutual seam never enters
+        // the chosen resolution (both dock unambiguously to the main; the junction pins x).
+        let trace = SchematicLayout.solveTrace(rects: plane, displays: displays)
+        XCTAssertFalse(trace.pointRects.contains { $0.ambiguous },
+                       "the T-junction fully determines the layout — nothing should read ambiguous")
+    }
+
     /// Even in the *fold* region — where the right Sceptre's dock-seam to the built-in
     /// has multiple point preimages — the round-trip is unique, because the seam it
     /// also shares with the top Sceptre inverts unambiguously and pins the answer.
