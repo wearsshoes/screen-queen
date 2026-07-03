@@ -1,10 +1,26 @@
 import CoreGraphics
 import Foundation
 
+/// A mode's value identity: the five facts that make two catalog entries "the same
+/// mode". CGDisplayMode instances aren't stable across fetches, so identity lives
+/// here — comparisons are `key == key`, never object identity.
+struct ModeKey: Hashable {
+    let pixelWidth: Int, pixelHeight: Int
+    let pointWidth: Int, pointHeight: Int
+    let refresh: Double
+
+    init(_ mode: CGDisplayMode) {
+        pixelWidth = mode.pixelWidth; pixelHeight = mode.pixelHeight
+        pointWidth = mode.width; pointHeight = mode.height
+        refresh = mode.refreshRate
+    }
+}
+
 /// A selectable display mode, with both native pixel and "Looks like" point
 /// dimensions so the UI can label scaled (HiDPI) modes the way users expect.
-struct DisplayMode: Identifiable {
-    let id = UUID()
+struct DisplayMode: Identifiable, Equatable {
+    var id: ModeKey { key }
+    let key: ModeKey
     let cgMode: CGDisplayMode
 
     let pixelWidth: Int
@@ -25,12 +41,15 @@ struct DisplayMode: Identifiable {
 
     init(_ mode: CGDisplayMode) {
         cgMode = mode
+        key = ModeKey(mode)
         pixelWidth = mode.pixelWidth
         pixelHeight = mode.pixelHeight
         pointWidth = mode.width
         pointHeight = mode.height
         refresh = mode.refreshRate
     }
+
+    static func == (a: DisplayMode, b: DisplayMode) -> Bool { a.key == b.key }
 }
 
 /// Discovers the display modes available for a display.
@@ -86,10 +105,4 @@ enum ModeCatalog {
         }
     }
 
-    /// Whether two modes are equivalent for the purpose of marking "current".
-    static func sameMode(_ a: CGDisplayMode, _ b: CGDisplayMode) -> Bool {
-        a.pixelWidth == b.pixelWidth && a.pixelHeight == b.pixelHeight &&
-        a.width == b.width && a.height == b.height &&
-        a.refreshRate == b.refreshRate
-    }
 }

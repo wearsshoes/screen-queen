@@ -79,8 +79,7 @@ extension Stage {
             guard modes.count > 1 else { continue }
             let mode = targetMode(for: d, modes: modes)
             // Did this display actually change from its current/previewed mode?
-            if let curIdx = currentModeIndex(for: d, in: modes),
-               !ModeCatalog.sameMode(modes[curIdx].cgMode, mode.cgMode) {
+            if let curIdx = currentModeIndex(for: d, in: modes), modes[curIdx] != mode {
                 anyMoved = true
             }
             targets.append((d.id, mode))

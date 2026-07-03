@@ -32,8 +32,8 @@ enum ResolutionLadder {
                 return abs(Double(m.pixelWidth) / Double(m.pixelHeight) - nativeAspect) / nativeAspect <= 0.02
             }
             var kept = all.filter(onAspect)
-            if let cur = current, !kept.contains(where: { ModeCatalog.sameMode(cur, $0.cgMode) }),
-               let curMode = all.first(where: { ModeCatalog.sameMode(cur, $0.cgMode) }) {
+            if let cur = current.map(ModeKey.init), !kept.contains(where: { $0.key == cur }),
+               let curMode = all.first(where: { $0.key == cur }) {
                 kept.append(curMode)
             }
             return kept.isEmpty ? all : kept
@@ -61,7 +61,7 @@ enum ResolutionLadder {
         let sorted = byArea(filtered)
         var lo = max(0, sorted.count - 5)   // macOS surfaces ~5 crisp "looks like" sizes
         // Always include the current mode, even if set below the crisp band.
-        if let cur = current, let curIdx = sorted.firstIndex(where: { ModeCatalog.sameMode(cur, $0.cgMode) }) {
+        if let cur = current.map(ModeKey.init), let curIdx = sorted.firstIndex(where: { $0.key == cur }) {
             lo = min(lo, curIdx)
         }
         return Array(sorted[lo...])
@@ -76,8 +76,8 @@ enum ResolutionLadder {
 
     /// Index of `current` within `modes`, if present.
     static func currentIndex(in modes: [DisplayMode], matching current: CGDisplayMode?) -> Int? {
-        guard let current else { return nil }
-        return modes.firstIndex { ModeCatalog.sameMode(current, $0.cgMode) }
+        guard let key = current.map(ModeKey.init) else { return nil }
+        return modes.firstIndex { $0.key == key }
     }
 
     /// The default mode: the largest clean 2× Retina mode (falling back to the largest of

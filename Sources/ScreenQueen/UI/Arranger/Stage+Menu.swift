@@ -37,11 +37,11 @@ extension Stage {
     private func resolutionMenuItem(for d: DisplaySnapshot) -> NSMenuItem {
         let item = NSMenuItem(title: Copy.menuResolution, action: nil, keyEquivalent: "")
         let submenu = NSMenu()
-        let current = CGDisplayCopyDisplayMode(d.id)
+        let current = CGDisplayCopyDisplayMode(d.id).map(ModeKey.init)
         for mode in modesList(for: d) {
             let mi = NSMenuItem(title: mode.label, action: #selector(setModeFromMenu(_:)), keyEquivalent: "")
             mi.target = self; mi.representedObject = ModeChoice(id: d.id, mode: mode.cgMode)
-            if let current, ModeCatalog.sameMode(current, mode.cgMode) { mi.state = .on }
+            if mode.key == current { mi.state = .on }
             submenu.addItem(mi)
         }
         item.submenu = submenu
