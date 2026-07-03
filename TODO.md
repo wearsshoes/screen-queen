@@ -29,6 +29,16 @@
   campaign: grab-region hit tests, cursor rects, first-responder tip glow,
   two overlapping tapes per window. CalibrationController keeps the window
   shells either way.
+* AppKit-import census (July 2026, after the framework diet): 16 files, all
+  load-bearing — shells (main, AppDelegate ×2, ArrangerWindows,
+  KeyableBorderlessWindow, CalibrationController, SeamLights' strip windows),
+  events (EventPlumbing; +Input now speaks decoded KeyInput/ModifierKeys),
+  bridges (DisplayManager, NSScreen+DisplayID, DragFont, SeamPalette — the
+  one NSColor home; Chime covers beeps via AudioToolbox), the Arranger NSView
+  + its NSMenu, VirtualMouse (only for the footer NSTextField — would clear
+  if the footer ever joins the bar's SwiftUI view), and the tape frontier.
+  Layer files are QuartzCore-only (CGColor at the updateSeamEffects boundary);
+  ArrangerState / +Resolution / +Input / +Hotplug are framework-free.
 * Conventions the port established:
   - Geometry computes **y-up** (the `Transform`/hit-test space shared with the
     AppKit layer worlds) and flips at each draw subject's boundary
