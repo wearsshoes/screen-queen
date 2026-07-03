@@ -77,7 +77,7 @@ extension Arranger {
     private func makeBanner() -> NSHostingView<CountdownBannerView> {
         let b = NSHostingView(rootView: bannerView())
         b.wantsLayer = true
-        b.layer?.zPosition = 7   // above the schematic layers, mouse aids included
+        b.layer?.zPosition = 5   // above the schematic layers, below the ghost mouse (z6)
         b.translatesAutoresizingMaskIntoConstraints = false
         addSubview(b)
         b.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
