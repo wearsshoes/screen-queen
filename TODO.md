@@ -27,12 +27,18 @@
   HoverGlassView / GhostGlassPill / ArrangerSliderCell dissolved — ghost tint and
   scale are model inputs now), ✅ tooltip bubble (click-through TooltipHost),
   ✅ solve panel (SolvePanelView — first SwiftUI Canvas/GraphicsContext piece,
-  the dry run for the big one; y-down point space meant the old flip vanished).
-  Remaining: Canvas (the big one), menu-bar item → MenuBarExtra (needs the
-  SwiftUI App lifecycle — its own slice), input last. LabelCard stays AppKit
-  *deliberately*: its text supersamples at 2× backing scale because the script
-  hairlines go mushy at 1× on non-Retina panels, and SwiftUI text can't express
-  that — revisit only with a non-Retina monitor to check against.
+  the dry run for the big one; y-down point space meant the old flip vanished),
+  ✅ the schematic itself (SchematicCanvas: draw(_:) → drawSchematic() inside
+  Canvas/withCGContext with one y-flip at the seam; needsDisplay funnels through
+  repaintSchematic(); subjects can go native GraphicsContext incrementally).
+  Remaining: input last. Two pieces stay AppKit *deliberately*:
+  - LabelCard: its text supersamples at 2× backing scale because the script
+    hairlines go mushy at 1× on non-Retina panels, and SwiftUI text can't
+    express that — revisit only with a non-Retina monitor to check against.
+  - Menu-bar item: stays NSStatusItem, NOT MenuBarExtra — corrected verdict.
+    Left-click toggles the arranger and right-click pops the menu; MenuBarExtra
+    has no left/right split (the earlier "fine for this menu" caveat missed
+    that the *click behavior* is the blocker, not the menu content).
 * Portable to SwiftUI (was AppKit by choice, not necessity):
   - Menu-bar 👑 item + menu → `MenuBarExtra` (first-class now; supports `.window` style for
     rich content). Replaces `NSStatusItem`. Caveat: no programmatic open/close and less
