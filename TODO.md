@@ -31,7 +31,15 @@
   ✅ the schematic itself (SchematicCanvas: draw(_:) → drawSchematic() inside
   Canvas/withCGContext with one y-flip at the seam; needsDisplay funnels through
   repaintSchematic(); subjects can go native GraphicsContext incrementally).
-  Remaining: input last. Two pieces stay AppKit *deliberately*:
+  ✅ PORT COMPLETE — the input layer is the final deliberate keeper (verdict
+  below), so nothing portable remains.
+  - Input stays AppKit: the commit semantics live in flagsChanged (⌘⇧-release
+    commits alignment, ⌘-release commits resolution) and SwiftUI's
+    onModifierKeysChanged is macOS 15+ against our 14 floor; mouseDown does
+    window-keying across the per-screen borderless windows (NSWindow-shell
+    territory); the held-key 60fps nudge machine and resignFirstResponder
+    commit-on-blur have no clean SwiftUI counterpart.
+  Other pieces that stay AppKit *deliberately*:
   - LabelCard: its text supersamples at 2× backing scale because the script
     hairlines go mushy at 1× on non-Retina panels, and SwiftUI text can't
     express that — revisit only with a non-Retina monitor to check against.
@@ -73,8 +81,9 @@
      wallpaper/aspect memoization — both benign, revisit only if the Canvas port trips.)
   3. ✅ DONE — `DisplayCommanding`: one `state.commander` reference replaces the twelve
      `onFoo` closures; executor lives in AppDelegate+Commands.swift.
-     Still open from this item: route remaining direct `state.plane`-poking through named
-     ArrangerState methods so `changed()`/`notify()` can become `@Observable`.
+     Sub-task ✅ DONE too: `plane` is private(set), mutations go through
+     `setPlaneRect(_:for:)` — @Observable adoption is unblocked whenever a
+     SwiftUI island wants to observe state directly.
   4. ✅ DONE (data-flow half) — seam emitters/glow are fed from the refresh path via pure
      edge sets. NOT boxed into one EffectsOverlayView, deliberately: the solve panel sits
      *between* the effect layers (glow below, beacon/arrow above), so a single sibling
