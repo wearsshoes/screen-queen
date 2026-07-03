@@ -11,12 +11,11 @@ extension Arranger {
         addSubview(host)
         barHost = host
 
-        // The instruction line under the bar — a sibling view, positioned + font-sized
+        // The instruction line under the bar — a sibling island, positioned + scaled
         // in `layoutFooter`.
-        footerLabel.stringValue = Copy.footer
-        footerLabel.textColor = .tertiaryLabelColor
-        footerLabel.alignment = .center
-        addSubview(footerLabel)
+        let footer = FooterHost(rootView: FooterView(scale: 1))
+        addSubview(footer)
+        footerHost = footer
     }
 
     /// Rebuild the bar from current state. `scale` sticks when given (renderChrome

@@ -273,6 +273,22 @@ private struct BarSlider: View {
     }
 }
 
+/// The instruction line under the bar (see `Copy.footer`), font-scaled with it.
+struct FooterView: View {
+    var scale: CGFloat
+    var body: some View {
+        Text(Copy.footer)
+            .font(.system(size: (11 * scale).rounded()))   // whole-point hints crispest
+            .foregroundStyle(.tertiary)
+            .fixedSize()
+    }
+}
+
+/// Decoration only — clicks fall through to the canvas.
+final class FooterHost: NSHostingView<FooterView> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// `.keyboardShortcut` can't take an optional; this applies one when present.
 private struct OptionalShortcut: ViewModifier {
     let shortcut: KeyboardShortcut?

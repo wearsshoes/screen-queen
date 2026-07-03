@@ -133,17 +133,15 @@ extension Arranger {
         ArrangerGeometry.pixelSnap(v, backingScale: window?.backingScaleFactor ?? 2)
     }
 
-    /// Position the footer under this canvas's own bar, font scaled with it (native text
-    /// at the target point size — crisp, not a layer-scaled bitmap).
+    /// Position the footer under this canvas's own bar, font scaled with it (text laid
+    /// out at the target point size — crisp, not a layer-scaled bitmap).
     private func layoutFooter(scale s: CGFloat) {
-        guard let bar = barHost else { return }
-        footerLabel.font = .systemFont(ofSize: (11 * s).rounded())   // whole-point hints crispest
-        footerLabel.sizeToFit()
-        footerLabel.wantsLayer = true
-        footerLabel.layer?.contentsScale = window?.backingScaleFactor ?? 2
-        let size = footerLabel.frame.size
-        footerLabel.setFrameOrigin(CGPoint(x: pixelSnap(bar.frame.midX - size.width / 2),
-                                           y: pixelSnap(bar.frame.minY - 8 * s - size.height)))
+        guard let bar = barHost, let footer = footerHost else { return }
+        if footer.rootView.scale != s { footer.rootView = FooterView(scale: s) }
+        let size = footer.fittingSize
+        footer.frame = CGRect(x: pixelSnap(bar.frame.midX - size.width / 2),
+                              y: pixelSnap(bar.frame.minY - 8 * s - size.height),
+                              width: size.width, height: size.height)
     }
 
     /// Move the ghost mouse — position only, the per-event path. Its *size* is applied

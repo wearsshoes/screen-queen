@@ -40,8 +40,8 @@ final class Arranger: NSView {
         max(320, minScreenWidth - 64)
     }
 
-    /// The instruction line under the bar (see `Copy.footer`), scaled/positioned with it.
-    let footerLabel = NSTextField(labelWithString: "")
+    /// The instruction line under the bar (see `FooterView`), scaled/positioned with it.
+    var footerHost: FooterHost?
 
     /// Ghost-mapping state for `ghostPoint` (the ghost mouse + tooltip): this canvas's
     /// minimap scale ÷ the active canvas's, and the active canvas's centre. Recomputed
