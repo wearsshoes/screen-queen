@@ -48,7 +48,7 @@ struct ArrangerBarView: View {
     var onControlFrame: (BarControl, CGRect) -> Void = { _, _ in }
 
     private var k: CGFloat { model.scale }
-    private var pink: Color { VirtualMouse.pink }
+    private var pink: Color { ChromeMetrics.ghostPink }
 
     var body: some View {
         // No width cap here: `layoutBar` clamps the hosting frame to `barWidthCap`,

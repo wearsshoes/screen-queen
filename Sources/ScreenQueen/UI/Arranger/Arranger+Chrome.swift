@@ -1,11 +1,15 @@
 import SwiftUI
 
-/// Chrome sizing constants.
+/// Chrome sizing constants and shared tints.
 enum ChromeMetrics {
     /// The minimap scale (view px per plane inch) at which chrome renders at natural
-    /// size. Bar, ghost mouse, and granny viewer all scale by `transform.scale / this`
+    /// size. Bar and granny viewer scale by `transform.scale / this`
     /// (`chromeTileScale`) — the one knob for their absolute size.
     static let referenceMinimapScale: CGFloat = 40
+
+    /// The one ghost tint — hot pink from the seam palette, as the SwiftUI currency
+    /// (the layer world takes its CGColor from `SeamPalette.colors[0]` directly).
+    static var ghostPink: Color { Color(nsColor: SeamPalette.colors[0]) }
 }
 
 /// The per-canvas chrome pass: render the bar/footer/ghost-arrow sizing at this

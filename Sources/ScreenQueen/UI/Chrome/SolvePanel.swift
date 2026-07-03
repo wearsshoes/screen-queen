@@ -22,7 +22,7 @@ struct SolvePanelView: View {
     var body: some View {
         Canvas { ctx, size in
             let bounds = CGRect(origin: .zero, size: size)
-            let ink: Color = content.ghost ? VirtualMouse.pink : .white
+            let ink: Color = content.ghost ? ChromeMetrics.ghostPink : .white
             let plateColor: Color = content.ghost
                 ? Color(nsColor: (SeamPalette.colors[0].blended(withFraction: 0.55, of: .black) ?? .black))
                 : .black

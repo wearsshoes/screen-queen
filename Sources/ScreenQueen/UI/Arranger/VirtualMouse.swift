@@ -1,21 +1,18 @@
 import QuartzCore
-import SwiftUI
 
 /// The ghost of the *active* screen (the one under the cursor), shown on every other
 /// screen. There is only ONE set of chrome per canvas — no parallel ghost structure.
 /// Active: normal place, normal look. Inactive: the same controls in the same
 /// map-relative place, each restyled pink *in its own look* (`GhostTintable`) — no flat
 /// overlay. Plus a ghost mouse (`GhostCursorLayer`) mirrored onto this canvas via
-/// `ghostPoint`, moved on every mouse event.
+/// `ghostPoint`, moved on every mouse event. (The tint's SwiftUI currency is
+/// `ChromeMetrics.ghostPink`; the tooltip that trails the ghost lives with its bubble
+/// in TooltipBubble.swift — this file is QuartzCore-only.)
 enum VirtualMouse {
     /// Feature flag: the ghost mouse.
     static let ghostMouseEnabled = true
     /// Feature flag: pink chrome on inactive displays.
     static let ghostChromeEnabled = true
-
-    /// The one ghost tint — hot pink from the seam palette, as the SwiftUI currency
-    /// (the layer world takes its CGColor from `SeamPalette.colors[0]` directly).
-    static var pink: Color { Color(nsColor: SeamPalette.colors[0]) }
 }
 
 /// A chrome element that wears the ghost tint *in its own look* (pink glass, pink
@@ -93,44 +90,6 @@ extension Arranger {
         layer?.addSublayer(a)
         ghostArrow = a
         return a
-    }
-
-    /// The tooltip text for the bar control at `activePoint` (active canvas's coords),
-    /// or nil. Called on the active canvas to decide what every canvas shows. Hit rects
-    /// come from the SwiftUI side (`barControlFrames`, bar-local top-left space).
-    func hoveredTooltip(at activePoint: CGPoint) -> String? {
-        guard let host = barHost else { return nil }
-        var p = host.convert(activePoint, from: self)
-        if !host.isFlipped { p.y = host.bounds.height - p.y }
-        for (control, frame) in barControlFrames where frame.contains(p) {
-            if barControlEnabled(control) { return tooltipText(for: control) }
-        }
-        return nil
-    }
-
-    /// Show/hide this canvas's tooltip bubble at the ghost-mapped cursor (below-and-right,
-    /// clamped on-canvas). Both nil ⇒ hide. The rootView is only swapped on a text change;
-    /// the per-event work is a frame move.
-    func updateTooltip(text: String?, cursorActivePoint: CGPoint?) {
-        guard let text, let p = cursorActivePoint else { tooltipBubble?.isHidden = true; return }
-        let host = ensureTooltipBubble()
-        if host.rootView.text != text { host.rootView = TooltipBubbleView(text: text) }
-        let size = host.fittingSize
-        let cursor = ghostPoint(p)
-        let gap: CGFloat = 14
-        var origin = CGPoint(x: cursor.x + gap, y: cursor.y + gap)
-        origin.x = min(max(origin.x, 4), bounds.width - size.width - 4)
-        origin.y = min(max(origin.y, 4), bounds.height - size.height - 4)
-        host.frame = CGRect(origin: origin, size: size)
-        host.isHidden = false
-    }
-
-    private func ensureTooltipBubble() -> TooltipHost {
-        if let b = tooltipBubble { return b }
-        let b = TooltipHost(rootView: TooltipBubbleView(text: ""))
-        addSubview(b)
-        tooltipBubble = b
-        return b
     }
 
 }
