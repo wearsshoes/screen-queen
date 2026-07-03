@@ -70,9 +70,7 @@ extension Arranger {
             for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(e) }
         }
         drawScreenMarkers(ctx, markers)           // alignment notches/arrows at this screen's real edges
-        legacyDraw(ctx) {
-            drawMirrorColumn()                    // mirrored displays live in the right column
-        }
+        drawMirrorColumn(ctx)                     // mirrored displays live in the right column
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
             if let over = display(at: p), !over.isMain, let r = rects[over.id] {

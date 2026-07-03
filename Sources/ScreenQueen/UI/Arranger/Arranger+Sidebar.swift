@@ -1,4 +1,4 @@
-import AppKit
+import SwiftUI
 
 /// The right-hand column overlay: read-only cards for mirrored displays (name /
 /// resolution / what they mirror, with an un-mirror button) and a macOS-managed
@@ -81,44 +81,41 @@ extension Arranger {
         return nil
     }
 
-    /// One compact card per mirrored display, plus the AirPlay card.
-    func drawMirrorColumn() {
+    /// One compact card per mirrored display, plus the AirPlay card. Native
+    /// GraphicsContext drawing; measurement stays NSString (pure math) so the top-down
+    /// stacking matches the AppKit-era layout exactly.
+    func drawMirrorColumn(_ ctx: GraphicsContext) {
         guard let layout = mirrorColumnLayout() else { return }
-        let hAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-            .foregroundColor: NSColor.secondaryLabelColor,
-        ]
-        if let o = layout.mirroredHeaderOrigin {
-            (Copy.mirroredHeader as NSString).draw(at: o, withAttributes: hAttrs)
+        func header(_ s: String, at oUp: CGPoint) {
+            let h = (s as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]).height
+            ctx.draw(Text(s).font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor)),
+                     at: CGPoint(x: oUp.x, y: bounds.height - oUp.y - h), anchor: .topLeading)
         }
-        for (d, card) in layout.cards { drawMirrorCard(d, in: card) }
+        if let o = layout.mirroredHeaderOrigin { header(Copy.mirroredHeader, at: o) }
+        for (d, card) in layout.cards { drawMirrorCard(ctx, d, in: card) }
         if let session = airplaySession, let card = layout.airplayCard {
-            if let o = layout.airplayHeaderOrigin {
-                (Copy.airplayHeader as NSString).draw(at: o, withAttributes: hAttrs)
-            }
-            drawAirPlayCard(session, in: card)
+            if let o = layout.airplayHeaderOrigin { header(Copy.airplayHeader, at: o) }
+            drawAirPlayCard(ctx, session, in: card)
         }
     }
 
-    private func drawMirrorCard(_ d: DisplaySnapshot, in card: NSRect) {
+    private func drawMirrorCard(_ ctx: GraphicsContext, _ d: DisplaySnapshot, in card: NSRect) {
         // Dark card so the drag name's glow reads as a glow, not a smudge.
-        NSColor(white: 0.12, alpha: 0.9).setFill()
-        NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
+        ctx.fill(Path(roundedRect: yDown(card), cornerRadius: 12),
+                 with: .color(Color(white: 0.12).opacity(0.9)))
 
         let inner = card.insetBy(dx: 18, dy: 16)
         var ty = inner.maxY
         func line(_ s: String, _ font: NSFont, _ color: NSColor, glow: NSColor? = nil) {
-            var a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-            if let glow {
-                let shadow = NSShadow()
-                shadow.shadowColor = glow
-                shadow.shadowBlurRadius = 6
-                shadow.shadowOffset = .zero
-                a[.shadow] = shadow
-            }
-            let h = (s as NSString).size(withAttributes: a).height
+            let h = (s as NSString).size(withAttributes: [.font: font]).height
             ty -= h
-            (s as NSString).draw(at: CGPoint(x: inner.minX, y: ty), withAttributes: a)
+            var c = ctx
+            if let glow {
+                c.addFilter(.shadow(color: Color(nsColor: glow), radius: 6, x: 0, y: 0))
+            }
+            c.draw(Text(s).font(Font(font)).foregroundStyle(Color(nsColor: color)),
+                   at: CGPoint(x: inner.minX, y: bounds.height - ty - h), anchor: .topLeading)
             ty -= 5
         }
         let nameGlow = NSColor.systemPink.blended(withFraction: 0.55, of: .white) ?? .white
@@ -141,55 +138,42 @@ extension Arranger {
         line(Copy.mirrorsLine(masterName), .systemFont(ofSize: 15), dim)
 
         // Un-mirror button (top-right ✕), at the same rect the hit test answers for.
-        let bx = Self.unmirrorButtonRect(inCard: card)
-        NSColor(white: 0.4, alpha: 0.9).setFill()
-        NSBezierPath(ovalIn: bx).fill()
-        let x: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: NSColor.white,
-        ]
-        let xs = ("✕" as NSString).size(withAttributes: x)
-        ("✕" as NSString).draw(at: CGPoint(x: bx.midX - xs.width / 2, y: bx.midY - xs.height / 2), withAttributes: x)
+        let bx = yDown(Self.unmirrorButtonRect(inCard: card))
+        ctx.fill(Path(ellipseIn: bx), with: .color(Color(white: 0.4).opacity(0.9)))
+        ctx.draw(Text("✕").font(.system(size: 15, weight: .bold)).foregroundStyle(.white),
+                 at: CGPoint(x: bx.midX, y: bx.midY))
     }
 
     /// A read-only card for a macOS-managed AirPlay *visual* session — it can have no
     /// `CGDirectDisplay` ("Window or App" mode), hence a card and not a plane tile. We
     /// can detect it but not cancel it, so the action hands off to system settings.
-    private func drawAirPlayCard(_ session: AirPlaySession, in card: NSRect) {
-        NSColor(white: 0.72, alpha: 0.85).setFill()
-        NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
+    private func drawAirPlayCard(_ ctx: GraphicsContext, _ session: AirPlaySession, in card: NSRect) {
+        ctx.fill(Path(roundedRect: yDown(card), cornerRadius: 12),
+                 with: .color(Color(white: 0.72).opacity(0.85)))
 
         let inner = card.insetBy(dx: 18, dy: 16)
         var ty = inner.maxY
         func line(_ s: String, _ font: NSFont, _ color: NSColor) {
-            let a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             let bounding = (s as NSString).boundingRect(
                 with: CGSize(width: inner.width, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: a)
+                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font])
             ty -= bounding.height
-            (s as NSString).draw(with: CGRect(x: inner.minX, y: ty, width: inner.width, height: bounding.height),
-                                 options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: a)
+            ctx.draw(Text(s).font(Font(font)).foregroundStyle(Color(nsColor: color)),
+                     in: CGRect(x: inner.minX, y: bounds.height - ty - bounding.height,
+                                width: inner.width, height: bounding.height + 2))
             ty -= 5
         }
 
-        // Device name, with the AirPlay glyph inline before it.
+        // Device name, with the AirPlay glyph inline before it — Text concatenation
+        // baseline-aligns the symbol against the name for free.
         let nameFont = NSFont.boldSystemFont(ofSize: 20)
-        let name = (session.receiverName ?? Copy.unknownAirPlayReceiver) as NSString
-        let nameAttrs: [NSAttributedString.Key: Any] = [.font: nameFont, .foregroundColor: NSColor.labelColor]
-        ty -= name.size(withAttributes: nameAttrs).height   // drop to this line's baseline (y-up)
-        var nameX = inner.minX
-        if let icon = NSImage(systemSymbolName: "airplayvideo", accessibilityDescription: "AirPlay") {
-            let cfg = NSImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
-            let glyph = (icon.withSymbolConfiguration(cfg) ?? icon)
-            glyph.isTemplate = true
-            let gh = glyph.size.height, gw = glyph.size.width
-            // Vertically center the glyph on the name's cap height.
-            let iconRect = NSRect(x: nameX, y: ty + (nameFont.ascender - gh) / 2 + 2, width: gw, height: gh)
-            NSColor.labelColor.set()
-            glyph.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1,
-                       respectFlipped: true, hints: nil)
-            nameX = iconRect.maxX + 8
-        }
-        name.draw(at: CGPoint(x: nameX, y: ty), withAttributes: nameAttrs)
+        let name = session.receiverName ?? Copy.unknownAirPlayReceiver
+        let h = (name as NSString).size(withAttributes: [.font: nameFont]).height
+        ty -= h
+        let nameText = Text("\(Image(systemName: "airplayvideo")) ").font(.system(size: 18, weight: .semibold))
+            + Text(name).font(Font(nameFont))
+        ctx.draw(nameText.foregroundStyle(Color(nsColor: .labelColor)),
+                 at: CGPoint(x: inner.minX, y: bounds.height - ty - h), anchor: .topLeading)
         ty -= 5
         line(Copy.airplayBody, .systemFont(ofSize: 15), .labelColor)
         line(Copy.airplayFinePrint,
@@ -198,14 +182,10 @@ extension Arranger {
         // Hands off to Control Center's Screen Mirroring menu (Display Settings doesn't
         // know about AirPlay sessions). Pinned to the card's bottom-left — the same rect
         // the hit test answers for.
-        let btn = Self.airplayButtonRect(inCard: card)
-        NSColor(white: 0.4, alpha: 0.9).setFill()
-        NSBezierPath(roundedRect: btn, xRadius: 6, yRadius: 6).fill()
-        let ba: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.white,
-        ]
-        let label = Copy.airplayOpenSettings as NSString
-        let ls = label.size(withAttributes: ba)
-        label.draw(at: CGPoint(x: btn.midX - ls.width / 2, y: btn.midY - ls.height / 2), withAttributes: ba)
+        let btn = yDown(Self.airplayButtonRect(inCard: card))
+        ctx.fill(Path(roundedRect: btn, cornerRadius: 6), with: .color(Color(white: 0.4).opacity(0.9)))
+        ctx.draw(Text(Copy.airplayOpenSettings).font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white),
+                 at: CGPoint(x: btn.midX, y: btn.midY))
     }
 }
