@@ -42,10 +42,25 @@ per store — formats changed freely pre-release, and **PrefsMigration deleted**
 them), **#11** became `Prefs` (UserDefaults-backed, default on — future Settings
 pane), and **#1 Phase 4 landed in its first slice**: `@Observable ArrangerState`;
 the solve panel and countdown banner observe state directly (their rootView-rebuild
-plumbing deleted); ten Stage forwarding accessors retired. Still on the Phase 4
-runway: the button bar (needs `sliderModes`/scale absorbed into observable state),
-the mirror column (frame follows fittingSize synchronously today), the label cards,
-and the schematic Canvas (blocked on Stage's own drag state not being observable).
+plumbing deleted); ten Stage forwarding accessors retired.
+
+**Sixth wave (July 2026) — the modern-macOS naming pass + Phase 4 finished.**
+`ArrangerState` → **`ArrangerModel`** (type, file, and every `state` property/label —
+the post-Observation "MV" convention); resolution interaction moved off Stage into
+**`ArrangerModel+Resolution`** with its run state (`zoomPending`, `globalZoomLevel`/
+`StartPPI`, `sliderModes`, `sliderDragStartIndex`) now shared — a ⌘⇧ zoom or slider
+run survives focus-follows-cursor switching the key stage mid-run (the old latent
+bug); `SchematicCanvas.swift` merged into `Stage.swift` as `StageCanvasView`/`Host`
+with `repaintCanvas()`/`render(in:size:)`. Phase 4 closed out: the **button bar**
+observes the model (BarModel dissolved; rootView rebuilt only for tile scale/ghost/
+seam-lights), the **mirror column** observes the model and self-sizes via Auto Layout
+(MirrorColumnContent dissolved), and the **canvas** touches its model reads in body
+(stage-local drag state still rides `generation`). The **label cards** are the one
+deliberate holdout: their content and placement are coupled through `fittingSize`
+(height gates visibility, frame centers on the measured size, fonts ride the view
+transform), so the refresh-path rebuild is the correct mechanism, not a gap.
+`changed()` fan-out survives for AppKit-side work (frames, layers) by design.
+
 **#16** remains the one deliberately open design decision (the two chrome scaling
 regimes).
 
@@ -55,12 +70,13 @@ regimes).
 
 Ordered roughly by payoff-per-risk. ⚙️ = mechanical once decided; 🎨 = a real design call.
 
-### 1. 🎨 Phase 4: `@Observable ArrangerState` (the parked big one)
-The single largest simplifier on the board, already scoped in docs/UI.md and parked
-"after Show HN". Would delete: Stage's ~20 forwarding accessors, the `refresh()` /
-`renderChrome()` fan-out choreography, `updateBar`'s rootView rebuilds, and the
-generation counters (`schematicGeneration`, `TapeHost.generation`) — SwiftUI observes
-instead of being told. Everything below shrinks less than this one thing.
+### 1. 🎨 Phase 4: `@Observable ArrangerState` — ✅ DONE (sixth wave)
+Landed across waves five and six: the model is `@Observable ArrangerModel`; the solve
+panel, banner, bar, mirror column, and canvas observe it directly; the forwarding
+accessors and rootView-rebuild plumbing are mostly gone. What deliberately remains:
+the `changed()` fan-out (AppKit frames/layers can't observe), the label cards
+(content/placement coupled through `fittingSize` — refresh-path is correct), and
+`TapeHost.generation` (calibration's separate input world).
 
 ### 2. ⚙️ The axis-duplication family in the layout math
 `SchematicLayout` + `SchematicSnapping` + `Stage+TileMarkers` maintain an H copy and a

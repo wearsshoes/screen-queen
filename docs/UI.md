@@ -29,12 +29,11 @@ most of the weird wiring below.
 
 | File | What it is |
 |---|---|
-| `Stage.swift` | The per-screen flipped NSView. All stored chrome properties, the three re-place entry points (`layout()`, `refresh()`, `renderChrome`), the plane↔view transform plumbing, drag-freeze logic, `ChromeMetrics`. **The god object** — every chrome file extends it; it also forwards ~12 accessors to `ArrangerState` purely so extensions read naturally. |
+| `Stage.swift` | The per-screen flipped NSView: stored chrome properties, the three re-place entry points (`layout()`, `refresh()`, `renderChrome`), the plane↔view transform plumbing, drag-freeze logic, `ChromeMetrics` — plus the merged canvas: `StageCanvasView`/`StageCanvasHost` (DragGesture + right-click forwarding) and the render-pass orchestrator `render(in:size:)` (paint order for everything below). A few forwarding accessors to the model remain so extensions read naturally. |
 | `Arranger.swift` | The coordinator: one window per display (fleet build/teardown/reconfig), key routing to the key window's stage, the cursor feed (CGEvent sample → ghost/beacon/tooltip fan-out), feed guard + watchdog, chrome-metrics computation, focus-follows-cursor hook. |
-| `ArrangerState.swift` | Shared editing state: the physical plane (source of truth mid-manipulation), selection, previews, drag locks, undo, countdowns, unified chrome metrics, the commit boundary (`SchematicLayout.toPoints`). Framework-free. |
-| `SchematicCanvas.swift` | The schematic's SwiftUI `Canvas` host + DragGesture + right-click forwarding, and the render-pass orchestrator `drawSchematic(in:size:)` (paint order for everything below). |
+| `ArrangerModel.swift` | The `@Observable` shared model: the physical plane (source of truth mid-manipulation), selection, previews, drag locks, undo, countdowns, unified chrome metrics, the commit boundary (`SchematicLayout.toPoints`). Framework-free. |
+| `ArrangerModel+Resolution.swift` | ⌘± single-display steps, ⌘⇧± global proportional zoom, the bar slider's detents, preview/commit of pending modes. Model logic with shared run state — a run survives focus-follows-cursor. Thin live-system wrapper over `ResolutionLadder`. |
 | `Stage+Input.swift` | Mouse drag / menu-bar-strip drag / option-mirror drag; keyboard nudge, alignment, selection. Framework-free — events arrive pre-decoded (`KeyInput`/`ModifierKeys`). |
-| `Stage+Resolution.swift` | ⌘± single-display steps, ⌘⇧± global proportional zoom, preview/commit of pending modes. Thin live-system wrapper over `ResolutionLadder`. |
 | `Stage+Menu.swift` | The per-tile right-click NSMenu (resolution submenu, calibration entries) + its `@objc` actions. |
 
 ## Minimap — its own type (`UI/Arranger/Minimap/`)
@@ -56,7 +55,7 @@ stays the input owner and its render pass sets paint order.
 from the scene (size is `chromeTileScale`, position is plane-inches from screen
 centre) without being *of* the minimap:
 
-- `ButtonBar.swift` + footer — sized by `chromeTileScale`, placed via `chromeViewRect`.
+- `ButtonBar.swift` + footer — sized by `chromeTileScale`, placed via `chromeViewRect`; observes the model directly (rootView rebuilt only for per-stage scale/ghost/seam-lights).
 - `SolvePanel.swift` — natural size × tile scale; its centre is a plane-inch offset in shared state.
 
 ## Global map — the real desk
@@ -73,8 +72,8 @@ refactor, Phase 1). The calibration edge/placement math lives in
 |---|---|
 | `Chrome/Glass/EdgeSeams.swift` | Full-screen bars hugging this screen's real edges; constant *physical* thickness (inches × PPI); rescales during a zoom preview (`axisReal / axisPreview`). |
 | `Chrome/Glass/EdgeMarkers.swift` | The active alignment arrow drawn large at this screen's real edges. |
-| `Chrome/Glass/CountdownBanner.swift` | Top-of-screen countdown rows on every screen (uniform menu-bar inset). The only chrome placed with Auto Layout constraints — everyone else uses manual frames. |
-| `Chrome/Glass/MirrorColumn.swift` | Right-edge column: mirrored-display cards + AirPlay card. Islanded; buttons swallow their own clicks. |
+| `Chrome/Glass/CountdownBanner.swift` | Top-of-screen countdown rows on every screen (uniform menu-bar inset). Auto Layout-placed. |
+| `Chrome/Glass/MirrorColumn.swift` | Right-edge column: mirrored-display cards + AirPlay card. Observes the model, self-sizes via Auto Layout; buttons swallow their own clicks. |
 | `Chrome/Glass/TooltipBubble.swift` | The Comic Sans bubble trailing the (ghost) cursor on every stage. Fixed size. |
 | `Chrome/Glass/VirtualMouse.swift` | `GhostCursorLayer` (never scales — cursors don't zoom; `Prefs` gates the act). QuartzCore-only. |
 | `Calibration/CalibrationTape.swift` | A ruler whose graduations *are* the pitch — the purest glass element in the app (its own windows, same regime). |
@@ -83,7 +82,7 @@ refactor, Phase 1). The calibration edge/placement math lives in
 ## Inputs
 
 - `App/EventPlumbing.swift` — all NSEvent monitors + the slider-drag timer + focus polling. The one NSEvent decode boundary for the arranger (Arranger converts to `KeyInput`/`ModifierKeys`).
-- `SchematicCanvas` — DragGesture (mouse), `menu(for:)` forwarding, window keying on mouseDown.
+- `StageCanvasHost` (Stage.swift) — DragGesture (mouse), `menu(for:)` forwarding, window keying on mouseDown.
 - `Stage+Input` — the framework-free handlers.
 - `SolvePanelHost` — its own mouseDown/dragged/up (drag-the-panel), rerouted through state.
 - `ButtonBar`'s `.onHover` → `hoveredBarControl` — SwiftUI owns bar hit-testing.
@@ -108,7 +107,7 @@ refactor, Phase 1). The calibration edge/placement math lives in
 | `Seams/SeamEmitters.swift` | CAEmitterLayer sparkles, cell-keyed so moving bars leave wakes. GPU, no frame loop. |
 | `Seams/SeamGlow.swift` | The tight front glow, one gradient layer per edge, begin/add/commit lifecycle. |
 | `UI/SeamPalette.swift` | The house palette (colors only — the lead pink dresses ghost chrome, cursor aids, beacon, tape chalk). |
-| `Seams/SeamEngine.swift` | The seam machinery: `SeamColorBook` (the one seam→color assignment) + `ArrangerState.seamColors` + `SeamEngine.committedSeams` (stage-free detection over the real desk) + the Stage-side glow/emitter registration. |
+| `Seams/SeamEngine.swift` | The seam machinery: `SeamColorBook` (the one seam→color assignment) + `ArrangerModel.seamColors` + `SeamEngine.committedSeams` (stage-free detection over the real desk) + the Stage-side glow/emitter registration. |
 | `GhostCursorLayer`, `PlaneMouseMarkerLayer` | Layer critters in their feature files (VirtualMouse, Beacon). |
 
 ## Copy
@@ -170,11 +169,10 @@ structure debt.
    `mouseDidMove` seeds it; the ordering dependency is invisible at the call
    sites.
 
-7. **`Stage` forwards a dozen accessors to state** (`displays`, `selectedID`,
-   `pendingSize`…) so extensions read naturally. It blurs ownership — half the
-   "Stage" API is actually ArrangerState. With `@Observable` unblocked
-   (plane is already `private(set)` + `setPlaneRect`), islands could read
-   state directly and the forwarding layer could shrink.
+7. **`Stage` forwards a few accessors to the model** (`displays`, `selectedID`,
+   `plane`, `activeV/H`) so extensions read naturally. Mostly resolved: the
+   islands observe `ArrangerModel` directly now; the survivors are vocabulary
+   sugar for the input/render extensions.
 
 8. **The banner is the one Auto Layout resident.** Constraints + a re-tuned
    `bannerTop` constant in `layout()`, while every sibling is a manual
@@ -243,11 +241,11 @@ taxonomy for its own sake).
   (`isMovableByWindowBackground`); the island is fixed at its placement.
   Re-add island dragging if it's missed.
 
-### Phase 4 — optional long game (flag it, don't start it)
-`@Observable ArrangerState`: islands observe state directly, Stage's
-forwarding accessors and the `refresh()` fan-out shrink file by file. Biggest
-structural win per line deleted, but it changes update *timing* everywhere —
-do it after Show HN, not before.
+### Phase 4 — ✅ done (July 2026)
+`@Observable ArrangerModel`: the solve panel, banner, bar, mirror column, and
+canvas observe the model directly. The `changed()` fan-out survives for the
+AppKit-side work (frames, layers, seam effects); the label cards stay on the
+refresh path deliberately (content/placement coupled through `fittingSize`).
 
 ---
 
