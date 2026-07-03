@@ -1,4 +1,5 @@
-import AppKit
+import QuartzCore
+import SwiftUI
 
 /// The per-canvas chrome pass: render the bar/footer/ghost-arrow sizing at this
 /// canvas's own tile scale, in normal or ghost dress. Born inside the ghost feature
