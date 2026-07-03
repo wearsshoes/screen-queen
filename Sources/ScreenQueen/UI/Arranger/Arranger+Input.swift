@@ -43,14 +43,8 @@ extension Arranger {
     /// host's mouseDown, before the gesture fires.
     func mouseBegan(at p: CGPoint, option: Bool) {
         mouseGestureActive = true
-        // Mirror-column buttons, hit-tested against the same pure layout the draw uses.
-        if let hit = mirrorColumnHit(at: p) {
-            switch hit {
-            case .unmirror(let id): commander?.unmirror(id)
-            case .airplaySettings: commander?.openAirPlaySettings()
-            }
-            return
-        }
+        // (Mirror-column clicks never reach here — the column is a SwiftUI island
+        // subview above the schematic host, so its buttons swallow their own events.)
         // Grabbing the main tile's menu-bar strip starts a "move main" drag.
         if mainMenuBarViewRect()?.contains(p) == true {
             draggingMenuBar = p

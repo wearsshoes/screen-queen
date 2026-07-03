@@ -63,6 +63,9 @@ final class Arranger: NSView {
     /// repositioned to the tile each frame; created on demand, hidden when untouched.
     var labelCards: [CGDirectDisplayID: LabelCardHost] = [:]
 
+    /// The right-hand mirror/AirPlay column (see `MirrorColumn`); created on demand.
+    var mirrorColumn: MirrorColumnHost?
+
     /// Fired at the end of `layout()`, once `bounds` is final, so the chrome re-renders
     /// with the settled size.
     var onLayout: (() -> Void)?
@@ -337,6 +340,7 @@ final class Arranger: NSView {
         super.layout()
         bannerTop?.constant = state.uniformMenuBarInset + 12
         layoutLabelCards()   // overlays track a bounds change (draw never places them)
+        layoutMirrorColumn()
         updateSeamEffects()
         onLayout?()          // re-render chrome now that bounds/frames are settled
     }
@@ -350,6 +354,7 @@ final class Arranger: NSView {
         }
         updateSolvePanel()
         layoutLabelCards()
+        layoutMirrorColumn()
         updateSeamEffects()
         repaintSchematic()
     }

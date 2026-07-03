@@ -45,7 +45,6 @@ extension Arranger {
         for d in displays where rects[d.id] != nil { drawAnchors(ctx, for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
         for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(ctx, e) }
         drawScreenMarkers(ctx, markers)           // alignment notches/arrows at this screen's real edges
-        drawMirrorColumn(ctx)                     // mirrored displays live in the right column
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
             if let over = display(at: p), !over.isMain, let r = rects[over.id] {
