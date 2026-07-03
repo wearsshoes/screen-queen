@@ -1,4 +1,5 @@
-import AppKit
+import QuartzCore
+import SwiftUI
 
 /// The ghost of the *active* screen (the one under the cursor), shown on every other
 /// screen. There is only ONE set of chrome per canvas — no parallel ghost structure.
