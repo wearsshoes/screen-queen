@@ -184,27 +184,19 @@ final class Arranger {
 
     // MARK: - Ghost mouse feed (see VirtualMouse.swift)
 
-    /// Quartz/CG global point (y-down, top-left of primary) → Cocoa global (y-up),
-    /// flipped about the primary display's height.
-    private func cocoaGlobal(fromCG p: CGPoint) -> CGPoint {
-        let primaryHeight = NSScreen.screens.first { $0.frame.origin == .zero }?.frame.height
-            ?? NSScreen.main?.frame.height ?? p.y
-        return CGPoint(x: p.x, y: primaryHeight - p.y)
-    }
-
     /// One cursor sample: reproject the chrome only when the active screen changed;
     /// always move the ghost mouse / beacon / tooltip.
     private func mouseDidMove() {
         guard isVisible else { return }
         let cursor = CGEvent(source: nil)?.location ?? .zero
-        let activeID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
-            ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
+        let activeID = GlobalMap.hostDisplayID(cursor: cursor, planeFirst: state.planeDisplays,
+                                               all: state.displays)
         let active = activeID.flatMap { id in stages.first { $0.centerID == id } }
         // The cursor in the active stage's view coords, derived from the same CGEvent
         // sample as `cursor` so the ghost and beacon can't disagree about where it is.
         var cursorActivePoint: CGPoint?
         if let activeID, let window = windows[activeID] {
-            let up = cocoaGlobal(fromCG: cursor)
+            let up = GlobalMap.cocoaPoint(fromCG: cursor)
             // The stage is flipped (y-down from the window top).
             cursorActivePoint = CGPoint(x: up.x - window.frame.minX, y: window.frame.maxY - up.y)
         }
@@ -240,22 +232,15 @@ final class Arranger {
 
     /// Refresh the unified chrome metrics (see `ArrangerState`).
     private func updateChromeMetrics() {
-        var dock: CGFloat = 0, menu: CGFloat = 0
-        var minW = CGFloat(100_000), minH = CGFloat(100_000)
-        for s in NSScreen.screens {
-            dock = max(dock, s.visibleFrame.minY - s.frame.minY)
-            menu = max(menu, s.frame.maxY - s.visibleFrame.maxY)
-            minW = min(minW, s.frame.width)
-            minH = min(minH, s.frame.height)
-        }
-        state.uniformDockInset = dock
-        state.uniformMenuBarInset = menu
-        state.minScreenExtent = CGSize(width: minW, height: minH)
+        let insets = GlobalMap.uniformInsets()
+        state.uniformDockInset = insets.dock
+        state.uniformMenuBarInset = insets.menuBar
+        state.minScreenExtent = insets.minExtent
     }
 
     private func rebuild() {
         updateChromeMetrics()
-        let screens = screenMap()
+        let screens = GlobalMap.screenMap()
         var live: Set<CGDirectDisplayID> = []
 
         for (id, screen) in screens {
@@ -333,11 +318,4 @@ final class Arranger {
                         isRepeat: e.isARepeat)
     }
 
-    private func screenMap() -> [CGDirectDisplayID: NSScreen] {
-        var result: [CGDirectDisplayID: NSScreen] = [:]
-        for screen in NSScreen.screens {
-            if let id = screen.displayID { result[id] = screen }
-        }
-        return result
-    }
 }

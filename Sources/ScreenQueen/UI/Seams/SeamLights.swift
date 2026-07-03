@@ -86,27 +86,19 @@ final class SeamLights {
                 // `line` is the shared x; the crossing interval [lo, hi] runs along y
                 // (global CG coords, y-down). One strip hugging each side of the line.
                 let h = s.hi - s.lo
-                strips.append(Strip(frame: cocoaRect(CGRect(x: s.line - thickness, y: s.lo,
-                                                            width: thickness, height: h)), color: color))
-                strips.append(Strip(frame: cocoaRect(CGRect(x: s.line, y: s.lo,
-                                                            width: thickness, height: h)), color: color))
+                strips.append(Strip(frame: GlobalMap.cocoaRect(fromCG: CGRect(
+                    x: s.line - thickness, y: s.lo, width: thickness, height: h)), color: color))
+                strips.append(Strip(frame: GlobalMap.cocoaRect(fromCG: CGRect(
+                    x: s.line, y: s.lo, width: thickness, height: h)), color: color))
             } else {
                 let w = s.hi - s.lo
-                strips.append(Strip(frame: cocoaRect(CGRect(x: s.lo, y: s.line - thickness,
-                                                            width: w, height: thickness)), color: color))
-                strips.append(Strip(frame: cocoaRect(CGRect(x: s.lo, y: s.line,
-                                                            width: w, height: thickness)), color: color))
+                strips.append(Strip(frame: GlobalMap.cocoaRect(fromCG: CGRect(
+                    x: s.lo, y: s.line - thickness, width: w, height: thickness)), color: color))
+                strips.append(Strip(frame: GlobalMap.cocoaRect(fromCG: CGRect(
+                    x: s.lo, y: s.line, width: w, height: thickness)), color: color))
             }
         }
         return strips
-    }
-
-    /// Global CG rect (y-down, origin at the primary display's top-left) → Cocoa window
-    /// frame (y-up, origin at the primary display's bottom-left). The primary display
-    /// anchors both spaces at (0,0), so the flip is about its height.
-    private func cocoaRect(_ r: CGRect) -> NSRect {
-        let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
-        return NSRect(x: r.minX, y: primaryHeight - r.maxY, width: r.width, height: r.height)
     }
 
     // MARK: - The strip windows
