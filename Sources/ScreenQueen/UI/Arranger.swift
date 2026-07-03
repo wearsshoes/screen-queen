@@ -44,10 +44,6 @@ final class Arranger: NSView {
     /// clear a bottom-edge alignment arrow, but no more — the Dock inset is added on top.
     let baseBottomMargin: CGFloat = 40
 
-    /// The button bar's bottom constraint, re-tuned in `layout()` to sit above the Dock
-    /// (the *uniform* Dock inset — see `ArrangerState.uniformDockInset`).
-    var buttonBarBottom: NSLayoutConstraint?
-
     /// Width cap on the bar container: the narrowest screen minus margin, identical on
     /// every canvas, so the bar compresses (slider first) rather than ever running out
     /// of bounds on an extreme-portrait girl.
@@ -197,20 +193,30 @@ final class Arranger: NSView {
     /// bar and the ghost mouse (one shared knob, `referenceMinimapScale`).
     static let panelNaturalSize = CGSize(width: 208, height: 144)
 
-    /// The panel's view rect on this canvas. Its **size** rides `chromeTileScale` (the same
-    /// scale as the bar and ghost mouse); its **position** is its own centre-relative state
-    /// (`solvePanelCenterOffsetInches`), placed as the screen centre plus that offset in
-    /// inches × the minimap scale. So it scales with the tiles but doesn't move when they do.
-    func panelViewRect() -> CGRect? {
+    /// Place a *map-relative* chrome element on this canvas, in one coherent model:
+    ///
+    /// - **size** = `naturalSize × chromeTileScale` — rides the tiles (grows/shrinks as you
+    ///   zoom the minimap), so chrome reads as part of the schematic.
+    /// - **centre** = `bounds.mid + centreOffsetInches × transform.scale`. `transform.scale`
+    ///   is view-pixels per **plane inch** (the schematic's physical-inch unit), so the
+    ///   offset is in *plane inches* — NOT real screen inches (a real inch is far more pixels
+    ///   at the minimap's zoom). The element therefore sits at the identical map-relative
+    ///   spot on every canvas and drifts with the minimap as tiles move/zoom.
+    ///
+    /// This one function places the granny viewer, the button bar, and the footer.
+    func chromeViewRect(naturalSize: CGSize, centreOffsetInches off: CGPoint) -> CGRect? {
         guard let t = drawTransform(currentRects()), t.scale > 0 else { return nil }
-        let off = state.solvePanelCenterOffsetInches
         let k = chromeTileScale
-        let size = CGSize(width: Self.panelNaturalSize.width * k,
-                          height: Self.panelNaturalSize.height * k)
+        let size = CGSize(width: naturalSize.width * k, height: naturalSize.height * k)
         let centre = CGPoint(x: bounds.midX + off.x * t.scale,
                              y: bounds.midY + off.y * t.scale)
         return CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2,
                       width: size.width, height: size.height)
+    }
+
+    /// The granny panel's rect — its centre-relative state through `chromeViewRect`.
+    func panelViewRect() -> CGRect? {
+        chromeViewRect(naturalSize: Self.panelNaturalSize, centreOffsetInches: state.solvePanelCenterOffsetInches)
     }
 
     override func viewDidMoveToWindow() {

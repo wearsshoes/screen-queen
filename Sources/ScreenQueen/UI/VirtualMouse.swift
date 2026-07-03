@@ -171,21 +171,17 @@ extension Arranger {
             ghostScale = 1
             ghostActiveCenter = CGPoint(x: bounds.midX, y: bounds.midY)
         }
-        // The button bar is *laid out* at this canvas's own tile scale (`restyleBar`), so
-        // it renders vector-crisp — no bitmap upscale. Its transform is then a pure
-        // *translation* to position it (identity when active; the ghost-mapped spot when
-        // inactive). `ghostScale · active.chromeTileScale == this.chromeTileScale`, so the
-        // ghost bar's laid-out size already matches; only its position needs mapping.
+        // The button bar is laid out at this canvas's tile scale (`restyleBar`, vector-
+        // crisp) and *frame-placed* by `layoutBar` through the same `chromeViewRect` the
+        // granny viewer uses — one positioning model, identical spot on every canvas.
         restyleBar(scale: chromeTileScale)
-        if let bar = barContainer { positionBar(bar, active: active, inactive: inactive) }
+        layoutBar()
         // The banner still rides the scaling transform (it's not laid out per-scale).
         for (view, activeView) in chromeViewPairs(active: active) where view !== barContainer {
             applyChromeTransform(view, activeCounterpart: activeView, active: active, inactive: inactive)
         }
-        // The footer line rides the *bar's* transform (scaled about the bar's centre), so it
-        // stays glued just below the bar as the bar grows/shrinks with the zoom — the two
-        // move as one instead of the footer being recomputed elsewhere.
-        applyFooterTransform(active: active, inactive: inactive)
+        // The footer sits under this canvas's own bar, scaled with it.
+        layoutFooter()
         // The tint lives in each element's own styling, not a flat overlay.
         for t in ghostGlassViews { t.setGhost(inactive) }
         for t in ghostTintTargets { t.setGhost(inactive) }
@@ -231,24 +227,6 @@ extension Arranger {
         if let bar = barContainer { pairs.append((bar, active?.barContainer)) }
         if let banner, !banner.isHidden { pairs.append((banner, active?.banner)) }
         return pairs
-    }
-
-    /// Position the (already correctly-*sized*, via `restyleBar`) button bar with a pure
-    /// translation — no scale, so nothing is blurred. Active: identity (the bar's own
-    /// constraints centre it). Inactive: shift its centre to the ghost-mapped spot of the
-    /// active bar, snapped to the pixel grid.
-    private func positionBar(_ bar: NSView, active: Arranger?, inactive: Bool) {
-        bar.wantsLayer = true
-        guard let layer = bar.layer else { return }
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
-        guard inactive, let active, let twin = active.barContainer else {
-            layer.setAffineTransform(.identity); return
-        }
-        let target = ghostPoint(CGPoint(x: twin.frame.midX, y: twin.frame.midY))
-        let vc = CGPoint(x: bar.frame.midX, y: bar.frame.midY)
-        layer.setAffineTransform(CGAffineTransform(translationX: pixelSnap(target.x - vc.x),
-                                                   y: pixelSnap(target.y - vc.y)))
     }
 
     /// Transform one chrome view for the mode:
@@ -328,41 +306,22 @@ extension Arranger {
         applyViews(view)
     }
 
-    /// Position the footer under the bar and size it to match — scaling the *font* (native,
-    /// always crisp) rather than layer-scaling a rasterised label (which blurred on low-PPI
-    /// displays where the tile scale runs large). It tracks the bar's *visual* bottom edge
-    /// (the bar is layer-scaled about its centre), so it stays glued below the bar at any
-    /// zoom. On a ghost canvas the bar's centre is the ghost-mapped one.
-    private func applyFooterTransform(active: Arranger?, inactive: Bool) {
+    /// Position the footer directly under *this* canvas's own bar, sized to match — the bar
+    /// sits at its own layout spot on every canvas (identity transform), so the footer just
+    /// reads `bar.frame` (no ghost mapping) and stays fixed too. The font scales with the
+    /// bar (native text at the target point size, always crisp — not a layer-scaled bitmap).
+    private func layoutFooter() {
         guard let bar = barContainer else { return }
-        let s: CGFloat
-        let barCentre: CGPoint
-        let barHeight: CGFloat
-        if inactive, let active, let twin = active.barContainer {
-            // The ghost bar mirrors the *active* canvas's bar, mapped by `ghostPoint` — so
-            // the footer must follow the active bar's centre/height, not this canvas's own
-            // (differently-sized) bar layout, exactly like `applyChromeTransform`.
-            s = ghostScale * active.chromeTileScale
-            barCentre = ghostPoint(CGPoint(x: twin.frame.midX, y: twin.frame.midY))
-            barHeight = twin.frame.height
-        } else {
-            s = chromeTileScale
-            barCentre = CGPoint(x: bar.frame.midX, y: bar.frame.midY)
-            barHeight = bar.frame.height
-        }
+        let s = chromeTileScale
         // Whole-point font hints crispest; a fractional 15.07pt smears slightly.
         footerLabel.font = .systemFont(ofSize: (11 * s).rounded())
         footerLabel.sizeToFit()
-        // Render the label's text at full backing density (belt-and-suspenders with the
-        // grid snap — a stray sub-1× contentsScale would soften it).
         footerLabel.wantsLayer = true
-        footerLabel.layer?.contentsScale = window?.backingScaleFactor ?? 2
-        let barVisualBottom = barCentre.y - barHeight / 2 * s
+        footerLabel.layer?.contentsScale = window?.backingScaleFactor ?? 2   // full text density
         let size = footerLabel.frame.size
-        // Snap the origin to whole device pixels so the text sits on the pixel grid
-        // instead of straddling it.
-        footerLabel.setFrameOrigin(CGPoint(x: pixelSnap(barCentre.x - size.width / 2),
-                                           y: pixelSnap(barVisualBottom - 8 * s - size.height)))
+        // Snap to whole device pixels so the text sits on the grid, not straddling it.
+        footerLabel.setFrameOrigin(CGPoint(x: pixelSnap(bar.frame.midX - size.width / 2),
+                                           y: pixelSnap(bar.frame.minY - 8 * s - size.height)))
     }
 
     /// Move the ghost mouse. `cursorActivePoint` is the real cursor in the active

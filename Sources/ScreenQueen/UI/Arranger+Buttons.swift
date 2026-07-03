@@ -147,17 +147,17 @@ extension Arranger {
             ghostTintTargets = [HUDBoxGhost(box: buttonBar), resSlider]
             container = buttonBar
         }
-        container.translatesAutoresizingMaskIntoConstraints = false
+        // The container is frame-placed each render by `layoutBar` through the *same*
+        // `chromeViewRect` the granny viewer uses — sized to its own fitting content, at
+        // the shared centre-relative spot. Its internal stack still autolayout-sizes the
+        // capsules (that's what gives `fittingSize`); we just position the whole box.
+        container.translatesAutoresizingMaskIntoConstraints = true
         addSubview(container)
-        container.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
-        buttonBarBottom = container.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -baseBottomMargin)
-        buttonBarBottom?.isActive = true
-        // Cap the bar to the narrowest screen (constant set in layout()); the slider's
-        // soft width above is what gives, so the whole bar compresses identically on
-        // every canvas instead of overflowing an extreme-portrait screen.
-        barMaxWidth = container.widthAnchor.constraint(lessThanOrEqualToConstant: 100_000)
+        // Cap the slider (the compressible member) so the bar never overflows a narrow
+        // screen; the container's fitting size then follows.
+        barMaxWidth = resSlider.widthAnchor.constraint(lessThanOrEqualToConstant: 100_000)
         barMaxWidth?.isActive = true
-        barContainer = container   // scaled on an inactive display; tint is per element
+        barContainer = container   // frame-placed by layoutBar; tint is per element
 
         // The instruction line, right under the bar and centred on it. It's a sibling (not
         // a child of the glass container, which only composites its contentView). It's
@@ -249,11 +249,32 @@ extension Arranger {
     /// of bounds on any of them, however extreme the aspect ratios.
     override func layout() {
         super.layout()
-        buttonBarBottom?.constant = -baseBottomMargin - state.uniformDockInset
         bannerTop?.constant = state.uniformMenuBarInset + 12
         barMaxWidth?.constant = Self.barWidthCap(minScreenWidth: state.minScreenExtent.width)
         onLayout?()   // re-render chrome now that bounds/frames are settled
     }
+
+    /// Place the button bar through `chromeViewRect` — the *same* positioning code as the
+    /// granny viewer (centre-relative, tile-scaled). Its natural size is its own fitting
+    /// content divided back out of the current scale (`chromeViewRect` re-applies the
+    /// scale). Position-agnostic: `barCentreOffsetInches` just says where the centre sits.
+    func layoutBar() {
+        guard let container = barContainer else { return }
+        container.layoutSubtreeIfNeeded()
+        let k = chromeTileScale
+        let fit = container.fittingSize
+        let natural = CGSize(width: fit.width / max(k, 0.01), height: fit.height / max(k, 0.01))
+        if let rect = chromeViewRect(naturalSize: natural, centreOffsetInches: barCentreOffsetInches) {
+            container.frame = rect
+        }
+    }
+
+    /// Where the bar's centre sits below the screen centre, in **plane inches** — the
+    /// schematic's own unit, which `chromeViewRect` maps to view pixels via `transform.scale`
+    /// (view-px per plane-inch). Map-relative like the granny viewer: drifts/rescales with
+    /// the minimap zoom. (A plane-inch is a real desk-arrangement inch shown shrunk on the
+    /// map, not a ruler-on-the-glass inch.)
+    private var barCentreOffsetInches: CGPoint { CGPoint(x: 0, y: -10) }
 
     /// Lay the bar out at `scale` (its true final size) so every element renders vector-
     /// crisp, instead of layer-scaling a rasterised bar (which blurred). Mutates the
