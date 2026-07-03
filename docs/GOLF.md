@@ -34,6 +34,21 @@ kind-keyed dictionary + `allCases` ordering is already the simplest true shape.
 Remaining open: **1, 5, 6, 7, 9, 11, 16** and the rest of #17 — all genuine
 design calls.
 
+**Third wave** (940ab07 → 9730e1d, Rachel ruled on the design calls): **#7**
+amputated (Moniker keeps only the XL suffix), **#6** unified (`statLines`, calibrate
+prompt on both cards), **#5** merged strict (any failed mode rolls the whole batch
+back; `setResolution` is a batch of one), **#9** unified (`DefaultsTable`, JSON blob
+per store — formats changed freely pre-release, and **PrefsMigration deleted** with
+them), **#11** became `Prefs` (UserDefaults-backed, default on — future Settings
+pane), and **#1 Phase 4 landed in its first slice**: `@Observable ArrangerState`;
+the solve panel and countdown banner observe state directly (their rootView-rebuild
+plumbing deleted); ten Stage forwarding accessors retired. Still on the Phase 4
+runway: the button bar (needs `sliderModes`/scale absorbed into observable state),
+the mirror column (frame follows fittingSize synchronously today), the label cards,
+and the schematic Canvas (blocked on Stage's own drag state not being observable).
+**#16** remains the one deliberately open design decision (the two chrome scaling
+regimes).
+
 ---
 
 ## The ledger
