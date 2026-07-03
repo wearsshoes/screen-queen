@@ -67,9 +67,9 @@ final class ArrangerState {
     enum SliderScope { case one, all }
     var sliderScope: SliderScope = .one
 
-    /// Active alignment anchors, for the tile arrow markers.
-    var activeV: (selfA: VAnchor, otherA: VAnchor, otherID: CGDirectDisplayID)?
-    var activeH: (selfA: HAnchor, otherA: HAnchor, otherID: CGDirectDisplayID)?
+    /// Active alignment anchors, for the tile arrow markers (V = vertical seam active).
+    var activeV: AnchorMarker?
+    var activeH: AnchorMarker?
 
     /// "Show the Full Wardrobe": reveal extended/off-native-aspect modes. Persisted.
     static let extendedModesKey = "showFullWardrobe"

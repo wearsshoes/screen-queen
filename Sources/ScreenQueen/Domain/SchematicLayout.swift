@@ -1,9 +1,13 @@
 import CoreGraphics
 
 /// Shared alignment vocabulary. Where along a seam two displays line up is one of
-/// these anchors; `SchematicLayout.physSnapsH/V` turn them into physical positions.
-enum VAnchor: Equatable { case top, center, bottom }
-enum HAnchor: Equatable { case left, center, right }
+/// these anchors; `SchematicLayout.physSnaps` turns them into physical positions.
+/// CGRect vocabulary, one enum for both axes (y-down: `.min` = top or left,
+/// `.max` = bottom or right).
+enum Anchor: Equatable { case min, center, max }
+
+/// An active alignment: the two anchors that met, and whose seam they met on.
+typealias AnchorMarker = (selfA: Anchor, otherA: Anchor, otherID: CGDirectDisplayID)
 
 /// A keyboard/arrow move direction (`SchematicSnapping` plans nudges per direction).
 enum MoveDirection {
@@ -636,30 +640,24 @@ enum SchematicLayout {
 
     /// The seven alignment configs per seam, in spatial order (the selected
     /// display sliding from one extreme to the other along the shared edge).
-    /// Index 3 is center↔center; (left,right)/(right,left) are intentionally
+    /// Index 3 is center↔center; (min,max)/(max,min) are intentionally
     /// absent (they'd pull the displays apart).
-    static let hPairs: [(HAnchor, HAnchor)] = [
-        (.center, .left), (.left, .left), (.right, .center), (.center, .center),
-        (.left, .center), (.right, .right), (.center, .right)
-    ]
-    static let vPairs: [(VAnchor, VAnchor)] = [
-        (.center, .top), (.top, .top), (.bottom, .center), (.center, .center),
-        (.top, .center), (.bottom, .bottom), (.center, .bottom)
+    static let anchorPairs: [(Anchor, Anchor)] = [
+        (.center, .min), (.min, .min), (.max, .center), (.center, .center),
+        (.min, .center), (.max, .max), (.center, .max)
     ]
 
-    static func frac(_ a: HAnchor) -> CGFloat { a == .left ? 0 : (a == .center ? 0.5 : 1) }
-    static func frac(_ a: VAnchor) -> CGFloat { a == .top ? 0 : (a == .center ? 0.5 : 1) }
+    static func frac(_ a: Anchor) -> CGFloat { a == .min ? 0 : (a == .center ? 0.5 : 1) }
 
-    /// The seven *physical* alignment positions along a horizontal seam: the child's
-    /// `minX` that lands each child anchor on the parent's matching anchor, sorted by
-    /// position (visual order) for cycling and drag-magnet targets.
-    static func physSnapsH(childWidth cw: CGFloat, parent pr: CGRect) -> [(along: CGFloat, selfAnchor: HAnchor, otherAnchor: HAnchor)] {
-        hPairs.map { (pr.minX + frac($0.1) * pr.width - frac($0.0) * cw, $0.0, $0.1) }
-            .sorted { $0.0 < $1.0 }
-    }
-
-    static func physSnapsV(childHeight ch: CGFloat, parent pr: CGRect) -> [(along: CGFloat, selfAnchor: VAnchor, otherAnchor: VAnchor)] {
-        vPairs.map { (pr.minY + frac($0.1) * pr.height - frac($0.0) * ch, $0.0, $0.1) }
+    /// The seven *physical* alignment positions along a seam: the child's leading
+    /// coordinate (`minY` for a vertical seam, `minX` for a horizontal one) that lands
+    /// each child anchor on the parent's matching anchor, sorted by position (visual
+    /// order) for cycling and drag-magnet targets.
+    static func physSnaps(childExtent ce: CGFloat, parent pr: CGRect,
+                          vertical: Bool) -> [(along: CGFloat, selfAnchor: Anchor, otherAnchor: Anchor)] {
+        let lo = vertical ? pr.minY : pr.minX
+        let extent = vertical ? pr.height : pr.width
+        return anchorPairs.map { (lo + frac($0.1) * extent - frac($0.0) * ce, $0.0, $0.1) }
             .sorted { $0.0 < $1.0 }
     }
 

@@ -130,35 +130,35 @@ extension Stage {
         return [:]
     }
 
-    private func vPos(facingRight: Bool, level: VAnchor) -> AnchorPos {
+    private func vPos(facingRight: Bool, level: Anchor) -> AnchorPos {
         switch (facingRight, level) {
-        case (true, .top): return .topRight
+        case (true, .min): return .topRight
         case (true, .center): return .rightMid
-        case (true, .bottom): return .bottomRight
-        case (false, .top): return .topLeft
+        case (true, .max): return .bottomRight
+        case (false, .min): return .topLeft
         case (false, .center): return .leftMid
-        case (false, .bottom): return .bottomLeft
+        case (false, .max): return .bottomLeft
         }
     }
-    private func hPos(facingBelow: Bool, level: HAnchor) -> AnchorPos {
+    private func hPos(facingBelow: Bool, level: Anchor) -> AnchorPos {
         switch (facingBelow, level) {
-        case (true, .left): return .bottomLeft
+        case (true, .min): return .bottomLeft
         case (true, .center): return .bottomMid
-        case (true, .right): return .bottomRight
-        case (false, .left): return .topLeft
+        case (true, .max): return .bottomRight
+        case (false, .min): return .topLeft
         case (false, .center): return .topMid
-        case (false, .right): return .topRight
+        case (false, .max): return .topRight
         }
     }
-    private func dirV(_ pos: AnchorPos, corner: Bool, partner: VAnchor) -> CGVector {
-        if corner { return pos.inward }
-        guard partner != .center else { return pos.inward }
-        return CGVector(dx: pos.inward.dx, dy: partner == .top ? -1 : 1)
+    /// The arrow's direction: corners point inward; a mid anchor leans toward its
+    /// partner's along-position (y for a vertical seam, x for a horizontal one).
+    private func dirV(_ pos: AnchorPos, corner: Bool, partner: Anchor) -> CGVector {
+        if corner || partner == .center { return pos.inward }
+        return CGVector(dx: pos.inward.dx, dy: partner == .min ? -1 : 1)
     }
-    private func dirH(_ pos: AnchorPos, corner: Bool, partner: HAnchor) -> CGVector {
-        if corner { return pos.inward }
-        guard partner != .center else { return pos.inward }
-        return CGVector(dx: partner == .left ? -1 : 1, dy: pos.inward.dy)
+    private func dirH(_ pos: AnchorPos, corner: Bool, partner: Anchor) -> CGVector {
+        if corner || partner == .center { return pos.inward }
+        return CGVector(dx: partner == .min ? -1 : 1, dy: pos.inward.dy)
     }
 
     private func drawNotch(_ ctx: GraphicsContext, at p: CGPoint, dir: CGVector) {

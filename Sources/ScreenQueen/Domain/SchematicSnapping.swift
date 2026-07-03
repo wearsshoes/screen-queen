@@ -10,16 +10,11 @@ import CoreGraphics
 /// testable in isolation.
 enum SchematicSnapping {
 
-    /// The two active-anchor markers, matching `ArrangerState`'s storage shape so call
-    /// sites assign the result directly without conversion.
-    typealias VMarker = (selfA: VAnchor, otherA: VAnchor, otherID: CGDirectDisplayID)
-    typealias HMarker = (selfA: HAnchor, otherA: HAnchor, otherID: CGDirectDisplayID)
-
     /// Result of a snap: where the tile lands, plus the markers it produced (nil ⇒ clear).
     struct Snap {
         let origin: CGPoint
-        let activeV: VMarker?
-        let activeH: HMarker?
+        let activeV: AnchorMarker?
+        let activeH: AnchorMarker?
     }
 
     // MARK: - Drag docking + magnet snapping
@@ -53,23 +48,21 @@ enum SchematicSnapping {
         }
         guard let o = neighbor else { return Snap(origin: free, activeV: nil, activeH: nil) }
 
-        var activeV: VMarker?
-        var activeH: HMarker?
+        var activeV: AnchorMarker?
+        var activeH: AnchorMarker?
 
         // 2) Magnet the slide to a physical anchor of the docked-to neighbor (within a
         //    few view px). The primary dock fixes the perpendicular axis; here we snap
         //    the *along* axis.
         let threshold = 5 / max(scale, 0.0001) // inches
-        if verticalSeam {
-            var bestD = threshold
-            for s in SchematicLayout.physSnapsV(childHeight: dP.height, parent: o.rect) where abs(s.along - best.y) < bestD {
-                bestD = abs(s.along - best.y); best.y = s.along; activeV = (s.selfAnchor, s.otherAnchor, o.id)
-            }
-        } else {
-            var bestD = threshold
-            for s in SchematicLayout.physSnapsH(childWidth: dP.width, parent: o.rect) where abs(s.along - best.x) < bestD {
-                bestD = abs(s.along - best.x); best.x = s.along; activeH = (s.selfAnchor, s.otherAnchor, o.id)
-            }
+        let snaps = SchematicLayout.physSnaps(childExtent: verticalSeam ? dP.height : dP.width,
+                                              parent: o.rect, vertical: verticalSeam)
+        var bestD = threshold
+        for s in snaps where abs(s.along - (verticalSeam ? best.y : best.x)) < bestD {
+            bestD = abs(s.along - (verticalSeam ? best.y : best.x))
+            let marker: AnchorMarker = (s.selfAnchor, s.otherAnchor, o.id)
+            if verticalSeam { best.y = s.along; activeV = marker }
+            else { best.x = s.along; activeH = marker }
         }
 
         // 3) Corner detent: with the tile docked to the primary neighbor, look for a
@@ -123,16 +116,13 @@ enum SchematicSnapping {
         }
         // Reflect the second seam in the perpendicular marker (self meets the second
         // neighbor edge-to-edge: our leading edge on its trailing edge, or vice versa).
-        var activeV: VMarker?
-        var activeH: HMarker?
+        var activeV: AnchorMarker?
+        var activeH: AnchorMarker?
         if snapped, let sid = snappedID {
             // snapEdgeIsMin ⇒ tile seated on the neighbor's max edge (tile below/right):
             // tile's leading edge meets the neighbor's trailing edge, and vice versa.
-            if verticalSeam {
-                activeV = snapEdgeIsMin ? (.top, .bottom, sid) : (.bottom, .top, sid)
-            } else {
-                activeH = snapEdgeIsMin ? (.left, .right, sid) : (.right, .left, sid)
-            }
+            let marker: AnchorMarker = snapEdgeIsMin ? (.min, .max, sid) : (.max, .min, sid)
+            if verticalSeam { activeV = marker } else { activeH = marker }
         }
         return Snap(origin: best, activeV: activeV, activeH: activeH)
     }
@@ -166,7 +156,7 @@ enum SchematicSnapping {
     /// read this, so what's previewed is what applies.
     static func plannedMoves(_ id: CGDirectDisplayID,
                              plane: [CGDirectDisplayID: CGRect],
-                             activeV: VMarker?, activeH: HMarker?) -> [MoveDirection: CGPoint] {
+                             activeV: AnchorMarker?, activeH: AnchorMarker?) -> [MoveDirection: CGPoint] {
         var moves: [MoveDirection: CGPoint] = [:]
         for d in [MoveDirection.up, .down, .left, .right] {
             if let o = plannedOrigin(id, d, plane: plane, activeV: activeV, activeH: activeH) {
@@ -182,7 +172,7 @@ enum SchematicSnapping {
     /// arrow flips the tile to the neighbor's edge, walking it around like a clock.
     static func plannedOrigin(_ id: CGDirectDisplayID, _ dir: MoveDirection,
                               plane: [CGDirectDisplayID: CGRect],
-                              activeV: VMarker?, activeH: HMarker?) -> CGPoint? {
+                              activeV: AnchorMarker?, activeH: AnchorMarker?) -> CGPoint? {
         guard let join = currentJoin(id, plane: plane) else { return nil }
         if join.vertical {   // seam is vertical → along = up/down, across = left/right
             return dir.isVertical ? cycleOrigin(id, other: join.otherID, vertical: true, increasing: dir == .down, plane: plane, activeV: activeV, activeH: activeH)
@@ -196,26 +186,22 @@ enum SchematicSnapping {
     /// Origin one anchor along the seam; at an extreme, wraps around the corner.
     static func cycleOrigin(_ id: CGDirectDisplayID, other oid: CGDirectDisplayID, vertical: Bool,
                             increasing: Bool, plane: [CGDirectDisplayID: CGRect],
-                            activeV: VMarker?, activeH: HMarker?) -> CGPoint? {
+                            activeV: AnchorMarker?, activeH: AnchorMarker?) -> CGPoint? {
         guard let r = plane[id], let oR = plane[oid] else { return nil }
-        let step = increasing ? 1 : -1
-        if vertical {
-            let snaps = SchematicLayout.physSnapsV(childHeight: r.height, parent: oR)
-            let cur = activeV?.otherID == oid
-                ? (snaps.firstIndex { $0.selfAnchor == activeV!.selfA && $0.otherAnchor == activeV!.otherA } ?? nearestIndex(snaps.map(\.along), r.minY))
-                : nearestIndex(snaps.map(\.along), r.minY)
-            let next = cur + step
-            if next < 0 || next >= snaps.count { return wrapOrigin(id, around: oid, fromVerticalSeam: true, increasing: increasing, plane: plane) }
-            return CGPoint(x: r.minX, y: snaps[next].along)
-        } else {
-            let snaps = SchematicLayout.physSnapsH(childWidth: r.width, parent: oR)
-            let cur = activeH?.otherID == oid
-                ? (snaps.firstIndex { $0.selfAnchor == activeH!.selfA && $0.otherAnchor == activeH!.otherA } ?? nearestIndex(snaps.map(\.along), r.minX))
-                : nearestIndex(snaps.map(\.along), r.minX)
-            let next = cur + step
-            if next < 0 || next >= snaps.count { return wrapOrigin(id, around: oid, fromVerticalSeam: false, increasing: increasing, plane: plane) }
-            return CGPoint(x: snaps[next].along, y: r.minY)
+        let snaps = SchematicLayout.physSnaps(childExtent: vertical ? r.height : r.width,
+                                              parent: oR, vertical: vertical)
+        let coord = vertical ? r.minY : r.minX
+        let active = vertical ? activeV : activeH
+        let cur = active?.otherID == oid
+            ? (snaps.firstIndex { $0.selfAnchor == active!.selfA && $0.otherAnchor == active!.otherA }
+                ?? nearestIndex(snaps.map(\.along), coord))
+            : nearestIndex(snaps.map(\.along), coord)
+        let next = cur + (increasing ? 1 : -1)
+        if next < 0 || next >= snaps.count {
+            return wrapOrigin(id, around: oid, fromVerticalSeam: vertical, increasing: increasing, plane: plane)
         }
+        return vertical ? CGPoint(x: r.minX, y: snaps[next].along)
+                        : CGPoint(x: snaps[next].along, y: r.minY)
     }
 
     static func nearestIndex(_ values: [CGFloat], _ current: CGFloat) -> Int {
@@ -247,12 +233,12 @@ enum SchematicSnapping {
         if fromVerticalSeam {
             let onRight = abs(r.minX - O.maxX) < 0.1
             let y = increasing ? O.maxY : O.minY - r.height        // below / above O
-            let snaps = SchematicLayout.physSnapsH(childWidth: r.width, parent: O)
+            let snaps = SchematicLayout.physSnaps(childExtent: r.width, parent: O, vertical: false)
             return CGPoint(x: (onRight ? snaps.last! : snaps.first!).along, y: y)
         } else {
             let below = abs(r.minY - O.maxY) < 0.1
             let x = increasing ? O.maxX : O.minX - r.width         // right / left of O
-            let snaps = SchematicLayout.physSnapsV(childHeight: r.height, parent: O)
+            let snaps = SchematicLayout.physSnaps(childExtent: r.height, parent: O, vertical: true)
             return CGPoint(x: x, y: (below ? snaps.last! : snaps.first!).along)
         }
     }
@@ -260,18 +246,14 @@ enum SchematicSnapping {
     /// The active-anchor marker for a tile's current join (nil ⇒ no join). Returns which
     /// axis is active via the tuple that's non-nil.
     static func markerForJoin(_ id: CGDirectDisplayID,
-                              plane: [CGDirectDisplayID: CGRect]) -> (v: VMarker?, h: HMarker?) {
+                              plane: [CGDirectDisplayID: CGRect]) -> (v: AnchorMarker?, h: AnchorMarker?) {
         guard let r = plane[id], let join = currentJoin(id, plane: plane), let oR = plane[join.otherID] else {
             return (nil, nil)
         }
-        if join.vertical {
-            let snaps = SchematicLayout.physSnapsV(childHeight: r.height, parent: oR)
-            let i = nearestIndex(snaps.map(\.along), r.minY)
-            return ((snaps[i].selfAnchor, snaps[i].otherAnchor, join.otherID), nil)
-        } else {
-            let snaps = SchematicLayout.physSnapsH(childWidth: r.width, parent: oR)
-            let i = nearestIndex(snaps.map(\.along), r.minX)
-            return (nil, (snaps[i].selfAnchor, snaps[i].otherAnchor, join.otherID))
-        }
+        let snaps = SchematicLayout.physSnaps(childExtent: join.vertical ? r.height : r.width,
+                                              parent: oR, vertical: join.vertical)
+        let i = nearestIndex(snaps.map(\.along), join.vertical ? r.minY : r.minX)
+        let marker: AnchorMarker = (snaps[i].selfAnchor, snaps[i].otherAnchor, join.otherID)
+        return join.vertical ? (marker, nil) : (nil, marker)
     }
 }
