@@ -270,8 +270,8 @@ final class Arranger: NSView {
     // Handle clicks even when this window isn't key (no activate-first click).
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// Called by the state after a mutation: place the overlay subviews (cards, solve
-    /// panel — `draw(_:)` never mutates the view tree), then repaint.
+    /// Called by the state after a mutation: place the overlay subviews and feed the
+    /// effect layers (`draw(_:)` never mutates the view tree or layers), then repaint.
     func refresh() {
         syncButtons(); syncBanner()
         if let rect = panelViewRect(), solvePanel.frame != rect {
@@ -279,6 +279,7 @@ final class Arranger: NSView {
         }
         updateSolvePanel()
         layoutLabelCards()
+        updateSeamEffects()
         needsDisplay = true
     }
 

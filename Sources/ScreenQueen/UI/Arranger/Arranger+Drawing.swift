@@ -37,15 +37,12 @@ extension Arranger {
                 drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
             }
         }
-        // The bar passes register the current seam edges with both layer overlays.
-        seamEmitters.begin()
-        seamGlow.begin()
-        drawReferenceBars(bars, t: t, seamColor: seamColor)
+        // Seam glows, painted from the same edge sets `updateSeamEffects` feeds to the
+        // emitter/glow layers (on the refresh path — draw registers nothing).
+        for e in miniBarEdges(bars, t: t, seamColor: seamColor) { drawBehindGlow(e) }
         let markers = activeMarkers(rects)
         for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
-        drawEdgeBars(bars, seamColor: seamColor)   // full-screen reference bars hugging this screen's real edges
-        seamEmitters.commit()
-        seamGlow.commit()
+        for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(e) }
         drawScreenMarkers(markers)                // alignment notches/arrows at this screen's real edges
         drawMirrorColumn()                        // mirrored displays live in the right column
         if let p = draggingMenuBar {

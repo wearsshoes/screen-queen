@@ -216,7 +216,8 @@ extension Arranger {
         super.layout()
         bannerTop?.constant = state.uniformMenuBarInset + 12
         barMaxWidth?.constant = Self.barWidthCap(minScreenWidth: state.minScreenExtent.width)
-        layoutLabelCards()   // overlay subviews track a bounds change (draw never places them)
+        layoutLabelCards()   // overlays track a bounds change (draw never places them)
+        updateSeamEffects()
         onLayout?()          // re-render chrome now that bounds/frames are settled
     }
 
