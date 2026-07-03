@@ -7,15 +7,6 @@
 **Before strangers run it (recommended, not blocking):**
 * tests for the hotplug/profile logic (handleProfiles, repinSurvivors) — the code most
   likely to silently scramble someone's monitors
-* let's change the ghost snapping behavior, let's just make it so that whenever a ghost cursor crosses onto any button outside of a drag action, we ghost-highlight that button, and put a ghost cursor onto the active screen there? -- hmm i can see that getting weird with many screens. you tell me what's up.
-* switch yellow and pink chalks; x should be yellow y should be pink.
-* start at 90% tape length on the trusted screen so the two tapes don't overlap.
-* keep the boundary glow on while calibration is going, so the user still knows how to get from screen a to screen b. in fact overall, the calibration tool should just be an overlay over the normal arranger screen, on the most trusted screen and the actively calibrated one.
-* also maybe when an unrecognized new screen comes in the measuring tape comes up immediately.
-* start at best-guess true length on false screen (length if ppi = trusted screen.) if this is over 90% of false screen, instead shorten trusted screen measuring tape.
-* maaaaaaybe add more spaced out dashed lines in the perpendicular direction for x/y, so if the user really wants to flip one of their screens to compare, they can. (so a set of dashier ghost pink lines perpendicular to the primary ones, and the same for yellow)
-* bugfix: in "tell me her actual size" we're reporting current guess, not original EDID.
-* bugfix: "believe her lies again" doesn't trigger re-render.
 
 **Post-launch (can wait):**
 * Homebrew cask
@@ -33,15 +24,67 @@
   `UserDefaults`. These are Core-level C/system APIs with no UI-framework equivalent.
 * Portable to SwiftUI (was AppKit by choice, not necessity):
   - Menu-bar 👑 item + menu → `MenuBarExtra` (first-class now; supports `.window` style for
-    rich content). Replaces `NSStatusItem`.
+    rich content). Replaces `NSStatusItem`. Caveat: no programmatic open/close and less
+    NSStatusItem control — fine for this menu; global hotkeys stay CGEvent either way.
   - The custom arranger canvas (`Arranger.draw(_:)` — tiles, wallpaper, labels, seam
-    glitter, transform math) → SwiftUI `Canvas`, which is immediate-mode "very similar to
-    drawRect" and has `withCGContext` to run the existing CoreGraphics draw code largely
-    unchanged. Biggest single piece; most of the geometry/`Transform` math ports directly.
-  - Per-screen borderless overlay windows at a custom level → `.windowLevel(.floating)`
-    (macOS 15+) or a thin `NSWindow` bridge; transparent/borderless is a small AppKit hook.
-  - Glass chrome (button bar) → SwiftUI `.glassEffect` / materials.
+    glitter, transform math) → SwiftUI `Canvas`, which is immediate-mode and has
+    `GraphicsContext.withCGContext` to run the existing CoreGraphics draw code. Biggest
+    single piece; the geometry/`Transform` math ports directly. Caveat: `Canvas` closures
+    are *stateless* — today's `draw(_:)` also places subviews (solve panel, label cards),
+    registers seam emitters, and records hit-test rects, all of which must move out of the
+    draw path first (see prep list below).
+  - Per-screen borderless overlay windows: NOT portable, keep `ArrangerWindows`. SwiftUI's
+    `.windowLevel` (macOS 15+) only offers preset levels — it can't express our
+    `mainMenuWindow − 1` — and SwiftUI scenes can't pin one window per screen with exact
+    frames, `collectionBehavior`, or the reconfig teardown/rebuild dance. The port seam is
+    `window.contentView = NSHostingView(rootView:)` per screen, everything above unchanged.
+  - Glass chrome (button bar) → SwiftUI `.glassEffect` / materials. The whole `BarMetrics`
+    constraint-scaling machinery dissolves: fonts/spacings as functions of the tile scale
+    is SwiftUI's native idiom.
   - Stationary windows (setup/permissions, debug, granny panel, countdown banner) → plain
     SwiftUI views; these have no hard AppKit requirement at all.
+  - Stays as NSViewRepresentable indefinitely: the seam sparkle/glow (`CAEmitterLayer` is
+    the point), and `Arranger`'s keyboard/drag input until last (gesture parity is the
+    riskiest part — port chrome first, Canvas second, input last).
+* Prep refactors that make the port mechanical (do these first, as normal cleanups):
+  1. Hoist the pure geometry (`Transform`, the fit math, `chromeViewRect`/`chromeTileScale`,
+     `ghostPoint`, hit-rect computation) off the NSView into a framework-free
+     `ArrangerGeometry` + tests, shared by both implementations.
+  2. Make `draw(_:)` side-effect-free (subview placement → refresh/layout path; hit rects →
+     pure functions of state). The mirror column is the worst offender.
+  3. Collapse `ArrangerState`'s ~15 `onFoo` closures into one `DisplayCommanding` protocol
+     (AppDelegate implements); route mutations through named state methods so
+     `changed()`/`notify()` can later become `@Observable`.
+  4. Gather the seam/ghost/beacon layers behind one `EffectsOverlayView` (inputs: seam
+     edges + cursor points) — one representable at port time instead of four layers.
+  5. Gather the event plumbing (mouse monitors + slider-drag timer in ArrangerWindows,
+     hotkey monitors + debounce in AppDelegate, FocusPolicy) into one `EventPlumbing`
+     type: cursor samples / hotkey firings / focus changes come out, nothing else touches
+     NSEvent/CGEvent monitors. Isolate by responsibility, not framework — no AppKit
+     grab-bag file. (Don't pre-isolate chrome/canvas AppKit; it's replaced wholesale.)
+  6. Split AppDelegate (742 lines, three programs in a trenchcoat): the display command
+     executor (setResolution(s)/setMain/mirror/commit + applyRevertable/preservingCursor)
+     becomes the `DisplayCommanding` impl from #3; the hotplug/profile logic
+     (handleProfiles, repinSurvivors, arrangementIsValid, edgeAdjacent, dockNewcomer)
+     gets its own file with the pure parts in Domain/ — which is also what unblocks the
+     hotplug tests wanted above. App shell (menu, hotkey, launch) stays.
+  7. Calibration.swift (1104 lines) wants the same subject split as Arranger
+     (controller / panel / tape drawing) — its own pass.
+  8. Done (mechanical moves): Arranger+Drawing split into Seams/Tiles/Markers +
+     orchestrator; SeamColorBook + palette out of ArrangerState.swift into SeamPalette
+     (SeamLights no longer imports the arranger's state file); DragFont → Services;
+     systemCPUUsage out of ScreenCaptureManager → Services/SystemLoad; UI/ subfolders
+     (Arranger/, Chrome/, Seams/, Calibration/) marking the port's replace-vs-keep line.
+* Level assignments (decided; don't relitigate in either direction):
+  - Window shell: stays NSWindow. Below it is private SkyLight/CGS — notarization risk,
+    breaks across releases. NSWindow is the thinnest *stable* wrapper and it's ~40 lines.
+  - Seam particles: stay CAEmitterLayer (render-server GPU, zero app frame loop). Metal is
+    the door only if the art direction wants shader glitter someday.
+  - Hotkey/mouse: NSEvent monitors + debounce, deliberately. The known upgrade is a
+    CGEventTap: one deduped stream, and it can *consume* ⌘⌥F1 instead of leaking it to
+    the frontmost app. Cheaper than first assumed — Backstage Pass already requests
+    Accessibility (the key monitors need it), and a tap generally rides the same grant
+    (verify on a clean machine). Still: switch when something wants the tap's powers
+    (consume semantics, or event *injection* — ghost cursor clicking), not before.
 * Refs: Apple "Customizing window styles… in macOS", "Canvas" docs; nilcoalescing
-  "Build a macOS menu bar utility in SwiftUI"; rampatra "change the window level in SwiftUI".
+  "Build a macOS menu bar utility in SwiftUI".
