@@ -17,7 +17,29 @@ enum ResolutionLadder {
     ///   real entry even when the current mode sits below the crisp band.
     static func modesList(all: [DisplayMode], isBuiltin: Bool, notched: Bool,
                           extended: Bool, current: CGDisplayMode?) -> [DisplayMode] {
-        guard isBuiltin, !extended else { return all }
+        // The full wardrobe is on → everything, unfiltered, for any display.
+        guard !extended else { return all }
+
+        // A non-built-in display: surface only modes matching its *native* aspect ratio;
+        // stretched/letterboxed resolutions stay behind the "full wardrobe" toggle. The
+        // current mode is always kept so the slider/menu land on a real entry.
+        if !isBuiltin {
+            guard let native = all.max(by: { $0.pixelWidth * $0.pixelHeight < $1.pixelWidth * $1.pixelHeight }),
+                  native.pixelHeight > 0 else { return all }
+            let nativeAspect = Double(native.pixelWidth) / Double(native.pixelHeight)
+            func onAspect(_ m: DisplayMode) -> Bool {
+                guard m.pixelHeight > 0 else { return false }
+                return abs(Double(m.pixelWidth) / Double(m.pixelHeight) - nativeAspect) / nativeAspect <= 0.02
+            }
+            var kept = all.filter(onAspect)
+            if let cur = current, !kept.contains(where: { ModeCatalog.sameMode(cur, $0.cgMode) }),
+               let curMode = all.first(where: { ModeCatalog.sameMode(cur, $0.cgMode) }) {
+                kept.append(curMode)
+            }
+            return kept.isEmpty ? all : kept
+        }
+
+        // Built-in from here.
 
         // Standard = clean 2× Retina modes.
         var filtered = all.filter { $0.pixelWidth == 2 * $0.pointWidth }

@@ -17,8 +17,10 @@ enum Copy {
 
     /// The status-item glyph itself — she lives in the menu bar, this is her face.
     static let menuBarGlyph = "👑"
-    /// First menu item; opens the arranger on every screen at once. It's an entrance.
-    static let menuShowArranger = "Places, Everyone  (⌘⌥F1)"
+    /// First menu item; toggles the arranger on every screen at once. It's an entrance.
+    /// The ⌘⌥F1 shortcut is set as the item's key equivalent, so the OS shows it greyed
+    /// at the right — don't bake it into the title.
+    static let menuShowArranger = "Places, Everyone"
     /// The permissions/setup window (see `SetupWindow`).
     static let menuSetup = "Backstage Pass…"
     /// Toggle for the always-on seam lights (see `SeamLights`): a thin colored bar on

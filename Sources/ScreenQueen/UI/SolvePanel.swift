@@ -20,10 +20,15 @@ final class SolvePanel: NSView {
     private var content = Content()
     private let titleBarHeight: CGFloat = 16
 
-    /// Dragging reports the desired origin here instead of moving the panel itself —
-    /// the canvas converts it to a centre offset in shared state
-    /// (`ArrangerState.solvePanelCenterOffset`), so the panel sits at the same
-    /// centre-relative spot on every canvas; all reposition on the resulting notify.
+    /// Ghost mode (inactive display): the plate and its outlines redraw in pink so the
+    /// granny view reads as the active screen's ghost, matching the rest of the chrome.
+    private var ghost = false
+
+    /// Dragging reports the desired frame origin here instead of moving the panel
+    /// itself — the canvas converts it to a centre-relative inch offset in shared state
+    /// (`ArrangerState.solvePanelCenterOffsetInches`), so the panel sits at the same
+    /// centre-relative spot (scaled with the minimap) on every canvas; all reposition on
+    /// the resulting notify.
     var onMoved: ((CGPoint) -> Void)?
 
     func update(_ content: Content) {
@@ -32,17 +37,17 @@ final class SolvePanel: NSView {
         needsDisplay = true
     }
 
-    // MARK: - Title-bar dragging (the body is click-through)
+    // MARK: - Dragging (grab anywhere on the panel)
 
     private var titleBar: NSRect {
         NSRect(x: 0, y: bounds.height - titleBarHeight, width: bounds.width, height: titleBarHeight)
     }
 
-    /// Only the title bar is interactive — it's the drag handle. Everywhere else the panel
-    /// is transparent to clicks so the canvas underneath keeps working.
+    /// The whole panel is the drag handle — grab it anywhere to move it. (It still floats
+    /// over the schematic; drop it somewhere out of the way if it covers a tile.)
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, let sup = superview else { return nil }
-        return titleBar.contains(convert(point, from: sup)) ? self : nil
+        return bounds.contains(convert(point, from: sup)) ? self : nil
     }
 
     private var dragOffset: CGPoint?
@@ -66,20 +71,24 @@ final class SolvePanel: NSView {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        // Chrome: dark rounded plate with a slightly lighter title strip (the drag handle).
+        // Foreground for outlines/labels/text: white normally, pink in ghost mode.
+        let ink = ghost ? VirtualMouse.pink : NSColor.white
+        // Chrome: dark rounded plate with a slightly lighter title strip (the drag
+        // handle). Ghosting tints the plate itself toward pink.
         let plate = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
-        NSColor.black.withAlphaComponent(0.6).setFill()
+        (ghost ? VirtualMouse.pink.blended(withFraction: 0.55, of: .black) ?? .black : .black)
+            .withAlphaComponent(0.6).setFill()
         plate.fill()
         NSGraphicsContext.saveGraphicsState()
         plate.addClip()
-        NSColor.white.withAlphaComponent(0.12).setFill()
+        ink.withAlphaComponent(0.12).setFill()
         titleBar.fill()
         NSGraphicsContext.restoreGraphicsState()
 
         let ambiguous = content.rects.contains { $0.ambiguous }
         let title = Copy.solvePanelTitle + (ambiguous ? Copy.solvePanelAmbiguous : "")
         let ta: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 9),
-                                                 .foregroundColor: NSColor.white.withAlphaComponent(0.8)]
+                                                 .foregroundColor: ink.withAlphaComponent(0.8)]
         (title as NSString).draw(at: CGPoint(x: 6, y: bounds.height - titleBarHeight + 3), withAttributes: ta)
 
         // Fit the point-rect union into the body (point space is y-down; the view is y-up).
@@ -101,10 +110,10 @@ final class SolvePanel: NSView {
         // the shared edge, so its color wins there.
         for e in content.rects {
             let vr = map(e.rect)
-            (e.ambiguous ? NSColor.systemRed : NSColor.white).setStroke()
+            (e.ambiguous ? NSColor.systemRed : ink).setStroke()
             let path = NSBezierPath(rect: vr); path.lineWidth = e.ambiguous ? 2 : 1; path.stroke()
             let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 9),
-                                                    .foregroundColor: e.ambiguous ? NSColor.systemRed : NSColor.white]
+                                                    .foregroundColor: e.ambiguous ? NSColor.systemRed : ink]
             ("\(e.id % 1000)" as NSString).draw(at: CGPoint(x: vr.minX + 2, y: vr.midY - 5), withAttributes: a)
         }
         // The seam pair arrives in arbitrary order, so sort the two view rects geometrically —
@@ -126,5 +135,14 @@ final class SolvePanel: NSView {
             }
             p.stroke()
         }
+    }
+}
+
+extension SolvePanel: GhostTintable {
+    /// Repaint the panel in pink (or restore) for the inactive-display ghost.
+    func setGhost(_ on: Bool) {
+        guard ghost != on else { return }
+        ghost = on
+        needsDisplay = true
     }
 }

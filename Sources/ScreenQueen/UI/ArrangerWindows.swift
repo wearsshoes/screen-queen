@@ -32,6 +32,7 @@ final class ArrangerWindows {
             self?.canvases.forEach { $0.refresh() }
             self?.rerenderChrome()   // a layout/panel change moves the projection
         }
+        state.onSliderDragChanged = { [weak self] dragging in self?.trackSliderDrag(dragging) }
         state.capture = capture
         // A new frame from any display just repaints the tiles (coalesced by AppKit).
         capture.onFrame = { [weak self] in self?.canvases.forEach { $0.needsDisplay = true } }
@@ -119,6 +120,22 @@ final class ArrangerWindows {
         installMouseMonitors()
         activeDisplayID = nil
         mouseDidMove()   // seed the active screen + render the ghost + place the ghost mouse
+        if state.feedEnabled { scheduleFeedLoadCheck() }   // one follow-up, then never again
+    }
+
+    /// One follow-up CPU check ~½s after going live: the load reading at open predates
+    /// the streams, so this catches a feed that's actually chewing up the machine and
+    /// cuts it. Sampled off-main (the sample blocks ~120ms), acted on back on main. This
+    /// is deliberately a *single* check — no continuous repolling.
+    private func scheduleFeedLoadCheck() {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            let pegged = (ScreenCaptureManager.systemCPUUsage() ?? 0) > 0.85
+            guard pegged else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isVisible, self.state.feedEnabled else { return }
+                self.setFeed(false)
+            }
+        }
     }
 
     /// Make the arranger window on the main display key (falling back to any window).
@@ -166,6 +183,31 @@ final class ArrangerWindows {
         }) { mouseMonitors.append(l) }
     }
 
+    /// Convert a global point from Quartz/CG coordinates (y-down, origin at the top-left
+    /// of the primary display) to Cocoa global coordinates (y-up, origin at its
+    /// bottom-left). The flip is about the primary display's height — the screen whose
+    /// frame origin is (0, 0).
+    private func cocoaGlobal(fromCG p: CGPoint) -> CGPoint {
+        let primaryHeight = NSScreen.screens.first { $0.frame.origin == .zero }?.frame.height
+            ?? NSScreen.main?.frame.height ?? p.y
+        return CGPoint(x: p.x, y: primaryHeight - p.y)
+    }
+
+    /// A slider drag runs a modal tracking loop that starves the mouse monitors, and the
+    /// resolution preview only notifies when the *value* changes (crossing a detent) — so
+    /// between detents, and while moving the mouse without changing the value (vertically,
+    /// or pinned at an end), the ghost aids froze. Drive them from a timer while the slider
+    /// is held. It's added in `.common` mode so it ticks during the `.eventTracking` loop.
+    private var sliderDragTimer: Timer?
+
+    private func trackSliderDrag(_ dragging: Bool) {
+        sliderDragTimer?.invalidate(); sliderDragTimer = nil
+        guard dragging else { return }
+        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.mouseDidMove() }
+        RunLoop.main.add(t, forMode: .common)
+        sliderDragTimer = t
+    }
+
     /// One cursor sample: reproject the chrome only when the active screen changed,
     /// and always move the ghost mouse (both ride the same per-canvas affine).
     private func mouseDidMove() {
@@ -174,18 +216,34 @@ final class ArrangerWindows {
         let activeID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
             ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
         let active = activeID.flatMap { id in canvases.first { $0.centerID == id } }
-        // The cursor in the active canvas's own view coords (Cocoa global is y-up).
+        // The cursor in the active canvas's own view coords (y-up). Derive it from the
+        // *same* `CGEvent` sample as `activeID` — not `NSEvent.mouseLocation`, which during
+        // a slider's modal tracking loop reports where the slider clamped the mouse (x
+        // pinned to the track, y stale), making the ghost cursor jump.
         var cursorActivePoint: CGPoint?
         if let activeID, let window = windows[activeID] {
-            let loc = NSEvent.mouseLocation
-            cursorActivePoint = CGPoint(x: loc.x - window.frame.minX, y: loc.y - window.frame.minY)
+            let up = cocoaGlobal(fromCG: cursor)   // CG (y-down, top-left) → Cocoa (y-up)
+            cursorActivePoint = CGPoint(x: up.x - window.frame.minX, y: up.y - window.frame.minY)
         }
         if activeID != activeDisplayID {
             activeDisplayID = activeID
+            // The selected tile follows the cursor's screen: moving to another screen
+            // re-selects it, overriding any manual pick (a click still selects *within*
+            // a screen, but crossing screens wins). Only for a real plane display.
+            if let activeID, state.plane[activeID] != nil, state.selectedID != activeID {
+                state.selectedID = activeID
+                state.activeV = nil; state.activeH = nil   // drop stale alignment anchors
+                state.notify()   // repaint the highlight + resync the slider everywhere
+            }
             for canvas in canvases { canvas.renderChrome(active: canvas === active ? nil : active) }
         }
+        // Which bar control (if any) the cursor hovers on the active screen — its fun
+        // tooltip then trails the (ghost) cursor on *every* canvas.
+        let tip = active.flatMap { a in cursorActivePoint.flatMap { a.hoveredTooltip(at: $0) } }
         for canvas in canvases {
             canvas.updateGhostArrow(cursorActivePoint: cursorActivePoint, isActive: canvas === active)
+            canvas.updatePlaneMarker(cursor: cursor, hostID: activeID)
+            canvas.updateTooltip(text: tip, cursorActivePoint: cursorActivePoint)
         }
     }
 
@@ -265,6 +323,9 @@ final class ArrangerWindows {
         let canvas = Arranger(state: state, frame: fullFrame)
         canvas.centerID = centerID
         canvas.autoresizingMask = [.width, .height]
+        // Re-render this canvas's chrome once its layout settles (first show / resize), so
+        // the tile-scaled bar isn't stuck at the pre-layout size.
+        canvas.onLayout = { [weak self] in self?.rerenderChrome() }
 
         if #available(macOS 26.0, *) {
             // `NSGlassEffectView` draws a light rim at its edges (the Liquid Glass border).

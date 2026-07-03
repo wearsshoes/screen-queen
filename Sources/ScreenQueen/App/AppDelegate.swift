@@ -34,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var baselineModes: [CGDirectDisplayID: CGDisplayMode] = [:]
 
     private var hotkeyMonitors: [Any] = []
+    /// Debounce for the ⌘⌥F1 toggle: the same press can hit both the local and global
+    /// monitors (or auto-repeat), which double-toggled. Ignore repeats within a short window.
+    private var lastHotkeyToggle: TimeInterval = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Snappy tooltips (the buttons are icon-only; their tooltips carry the copy, so
@@ -89,7 +92,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let keyCode = (event.data1 & 0xFFFF0000) >> 16
             let keyDown = (event.data1 & 0xFF00) >> 8 == 0x0A
             guard keyCode == NX_KEYTYPE_BRIGHTNESS_DOWN, keyDown else { return false }
-            self?.toggleArranger()
+            // When the arranger is open and our app is active, the *same* press can reach
+            // both the local and global monitors (and the key can auto-repeat), which
+            // toggled twice and appeared to "not close". Collapse bursts to one toggle.
+            guard let self else { return true }
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - self.lastHotkeyToggle > 0.25 else { return true }
+            self.lastHotkeyToggle = now
+            self.toggleArranger()
             return true
         }
         if let g = NSEvent.addGlobalMonitorForEvents(matching: .systemDefined, handler: { _ = handler($0) }) {
@@ -119,12 +129,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private lazy var statusMenu: NSMenu = {
         let menu = NSMenu()
-        menu.addItem(withTitle: Copy.menuShowArranger, action: #selector(showWindow), keyEquivalent: "")
+        // Toggles the arranger; the OS renders the ⌘⌥F1 shortcut greyed at the right.
+        let show = NSMenuItem(title: Copy.menuShowArranger, action: #selector(toggleArranger),
+                              keyEquivalent: "\u{F704}")   // F1 function key
+        show.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(show)
         menu.addItem(withTitle: Copy.menuSetup, action: #selector(showSetup), keyEquivalent: "")
         let lights = NSMenuItem(title: Copy.menuSeamLights, action: #selector(toggleSeamLights(_:)),
                                 keyEquivalent: "")
         lights.state = seamLights.enabled ? .on : .off
         menu.addItem(lights)
+        // Reveal off-native-aspect (and the built-in's extended) resolutions everywhere.
+        let wardrobe = NSMenuItem(title: Copy.menuShowExtendedResolutions,
+                                  action: #selector(toggleWardrobe(_:)), keyEquivalent: "")
+        wardrobe.state = arranger.state.extendedBuiltinModes ? .on : .off
+        wardrobeItem = wardrobe
+        menu.addItem(wardrobe)
         menu.addItem(withTitle: Copy.menuDebug, action: #selector(showDebug), keyEquivalent: "")
         menu.addItem(.separator())
         // Version line (disabled): only the bundled app has an Info.plist to read.
@@ -150,10 +170,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if seamLights.enabled { seamLights.refresh(displays: DisplayManager.snapshot()) }
     }
 
+    /// The "Show the Full Wardrobe" item — kept so its checkmark can be refreshed each
+    /// time the menu opens (the state can also change from within the arranger).
+    private weak var wardrobeItem: NSMenuItem?
+
+    @objc private func toggleWardrobe(_ sender: NSMenuItem) {
+        arranger.state.extendedBuiltinModes.toggle()
+        sender.state = arranger.state.extendedBuiltinModes ? .on : .off
+        arranger.state.notify()   // re-derive the slider/menu mode lists everywhere
+    }
+
     @objc private func statusItemClicked() {
         let rightClick = NSApp.currentEvent?.type == .rightMouseUp
             || NSApp.currentEvent?.modifierFlags.contains(.control) == true
         if rightClick {
+            wardrobeItem?.state = arranger.state.extendedBuiltinModes ? .on : .off   // may have changed
             statusItem.menu = statusMenu
             statusItem.button?.performClick(nil)   // pop the menu
             statusItem.menu = nil                  // detach so the next left-click hits our action
@@ -675,6 +706,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showWindow() {
+        guard !arranger.isVisible else { return }   // already up — don't rebuild on top
         let displays = DisplayManager.snapshot()
         // Capture the current layout + resolutions as the "Reset" baseline.
         baselineOrigins = originMap(of: displays)

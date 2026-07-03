@@ -25,6 +25,9 @@ final class Arranger: NSView {
     let doneButton = NSButton(title: "Done", target: nil, action: nil)
     /// Resolution slider (A ↔ a) for the selected display, in the bottom cluster.
     let resSlider = NSSlider()
+    /// The feed button's currently-rendered SF Symbol name, so `syncButtons` rebuilds the
+    /// icon only when the feed state flips (not on every notify).
+    var feedButtonSymbol: String?
     /// One/All scope toggle for the slider (single rectangle vs. overlapping rectangles).
     let scopeButton = NSButton(title: "", target: nil, action: nil)
     let buttonBar = NSVisualEffectView()
@@ -61,15 +64,72 @@ final class Arranger: NSView {
     /// canvases (see VirtualMouse.swift).
     weak var barContainer: NSView?
 
+    /// The bar is *laid out* at `chromeTileScale` (not layer-scaled) so every element —
+    /// glass, icons, text — renders vector-crisp at its final size instead of a bitmap
+    /// being blown up. `restyleBar(scale:)` mutates these captured constraints/views; the
+    /// layer transform is then translation-only (for the ghost projection). See
+    /// VirtualMouse.swift.
+    struct BarMetrics {
+        /// (constraint, base constant) pairs — length-like dimensions scaled together.
+        var lengths: [(NSLayoutConstraint, CGFloat)] = []
+        /// Stack views whose `spacing` scales (base spacing captured).
+        var spacings: [(NSStackView, CGFloat)] = []
+        /// Glass views whose `cornerRadius` scales (base radius).
+        var corners: [(NSView, CGFloat)] = []
+        /// The A / a end glyphs (label, base font size).
+        var glyphs: [(NSTextField, CGFloat)] = []
+        var currentScale: CGFloat = 1
+    }
+    var barMetrics = BarMetrics()
+    /// The instruction line under the bar (see `Copy.footer`). A sibling of the bar,
+    /// constrained just below it and scaled with it (part of the chrome), so it tracks the
+    /// bar at every zoom instead of being recomputed in the draw code.
+    let footerLabel = NSTextField(labelWithString: "")
+
     /// On an inactive display the one set of chrome (VirtualMouse.swift) restyles pink
-    /// and scales (from the minimap centre) to the active screen's minimap scale.
-    /// `ghostArrow` is the ghost mouse; `ghostScale` (this minimap's px-per-inch ÷ the
-    /// active's) and `ghostActiveCenter` are what both ride, recomputed only on
-    /// active-screen change; `chromeWashes` are the pink overlays per chrome view.
+    /// and repositions to represent the active screen. `ghostScale` is this canvas's
+    /// minimap scale ÷ the active canvas's — so the ghost is drawn as part of *this*
+    /// minimap, as different from the active screen's chrome as the tiles are. `ghostArrow`
+    /// (the ghost mouse) and the chrome both ride `ghostScale` + `ghostActiveCenter`,
+    /// recomputed only on active-screen change.
     var ghostArrow: GhostCursorLayer?
     var ghostScale: CGFloat = 1
     var ghostActiveCenter: CGPoint = .zero
-    var chromeWashes: [ObjectIdentifier: CALayer] = [:]
+    /// True while this canvas is showing the pink ghost chrome (cursor is on another
+    /// screen). `syncButtons` reads it so a rebuilt icon (e.g. the feed toggle) keeps the
+    /// ghost's pink tint instead of resetting to the normal label colour.
+    var isGhost = false
+    /// The beacon (VirtualMouse.swift): a pulsing pink map-pin at the cursor's location
+    /// on *this* canvas's schematic tiles — where you are on the map, on every screen.
+    var planeMarkerLayer: PlaneMouseMarkerLayer?
+
+    /// The frosted info card per display (see `LabelCard`) — a real backdrop-blur subview,
+    /// so it can't be drawn in `draw(_:)`. Repositioned to the tile each frame; created on
+    /// demand, and any not touched this pass are hidden.
+    var labelCards: [CGDirectDisplayID: LabelCard] = [:]
+
+    /// Fired at the end of `layout()`, once `bounds` is final — ArrangerWindows re-renders
+    /// the chrome so its tile-scaled transform uses the settled size (not the pre-layout
+    /// `bounds` that made the bar render too small on first show).
+    var onLayout: (() -> Void)?
+
+    /// The fun tooltip (comic-sans white bubble, pink outline) — shown on *every* canvas
+    /// at the mirrored position of whatever bar control the cursor hovers on the active
+    /// screen, not just the screen the real mouse is on. Created on demand.
+    var tooltipBubble: TooltipBubble?
+
+    /// The bar controls that carry a fun tooltip, in hit-test order. Their `toolTip` text
+    /// (set in Arranger+Buttons) is what the bubble shows — one source of copy.
+    var tooltipControls: [NSControl] { [feedButton, resetButton, undoButton, resSlider, scopeButton, doneButton] }
+
+    /// The chrome elements that carry the ghost tint *in their own styling* on an
+    /// inactive display (see VirtualMouse.swift) — glass capsules go pink, the slider's
+    /// track fills pink, the end glyphs and button icons tint pink. Populated in
+    /// `setupButtonBar`; empty on the pre-26 HUD path (which pinks its own box).
+    var ghostGlassViews: [GhostTintable] = []
+    /// The bottom bar's non-glass tintables: the slider (track), scope button, and the
+    /// A/a end glyphs — retinted alongside the glass in ghost mode.
+    var ghostTintTargets: [GhostTintable] = []
 
     /// The top-of-screen countdown banner (auto-revert / feed guard) — built on demand
     /// and driven in Arranger+Banner.swift. nil until a countdown first appears.
@@ -117,29 +177,40 @@ final class Arranger: NSView {
         let p = SolvePanel(frame: NSRect(origin: .zero, size: NSSize(width: 240, height: 166)))
         p.wantsLayer = true
         p.layer?.zPosition = 3
-        // A drag updates the shared centre offset so every canvas's panel moves together.
+        // A drag stores the panel's centre as an *inch* offset from the screen centre —
+        // its own state, independent of the tiles (so moving a tile never moves it), but
+        // in inches so it scales with the minimap. Every canvas re-derives from it.
         p.onMoved = { [weak self] origin in
-            guard let self else { return }
-            self.state.solvePanelCenterOffset = self.panelOffset(forOrigin: origin, size: p.frame.size)
+            guard let self, let t = self.drawTransform(self.currentRects()), t.scale > 0 else { return }
+            let centre = CGPoint(x: origin.x + p.frame.width / 2, y: origin.y + p.frame.height / 2)
+            self.state.solvePanelCenterOffsetInches = CGPoint(
+                x: (centre.x - self.bounds.midX) / t.scale,
+                y: (centre.y - self.bounds.midY) / t.scale)
             self.state.notify()
         }
         addSubview(p)
         return p
     }()
 
-    /// The panel's frame origin on this canvas from the shared centre offset.
-    func panelOrigin(size: NSSize) -> CGPoint {
-        CGPoint(x: bounds.midX + state.solvePanelCenterOffset.x - size.width / 2,
-                y: bounds.midY + state.solvePanelCenterOffset.y - size.height / 2)
-    }
+    /// The granny panel's natural size in points, at `chromeTileScale == 1`. Multiplied
+    /// by `chromeTileScale` so it grows/shrinks with the tiles in lockstep with the button
+    /// bar and the ghost mouse (one shared knob, `referenceMinimapScale`).
+    static let panelNaturalSize = CGSize(width: 208, height: 144)
 
-    /// A drag's new frame origin → a centre offset, clamped so the panel stays
-    /// grabbable on *this* (the dragged) canvas. Other canvases render the offset raw
-    /// (see `refresh`), so a smaller screen can push its panel partly off — fine.
-    private func panelOffset(forOrigin o: CGPoint, size: NSSize) -> CGPoint {
-        let cx = min(max(o.x + size.width / 2, size.width / 2), bounds.width - size.width / 2)
-        let cy = min(max(o.y + size.height / 2, size.height / 2), bounds.height - size.height / 2)
-        return CGPoint(x: cx - bounds.midX, y: cy - bounds.midY)
+    /// The panel's view rect on this canvas. Its **size** rides `chromeTileScale` (the same
+    /// scale as the bar and ghost mouse); its **position** is its own centre-relative state
+    /// (`solvePanelCenterOffsetInches`), placed as the screen centre plus that offset in
+    /// inches × the minimap scale. So it scales with the tiles but doesn't move when they do.
+    func panelViewRect() -> CGRect? {
+        guard let t = drawTransform(currentRects()), t.scale > 0 else { return nil }
+        let off = state.solvePanelCenterOffsetInches
+        let k = chromeTileScale
+        let size = CGSize(width: Self.panelNaturalSize.width * k,
+                          height: Self.panelNaturalSize.height * k)
+        let centre = CGPoint(x: bounds.midX + off.x * t.scale,
+                             y: bounds.midY + off.y * t.scale)
+        return CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2,
+                      width: size.width, height: size.height)
     }
 
     override func viewDidMoveToWindow() {
@@ -262,10 +333,13 @@ final class Arranger: NSView {
     /// Called by the state after a mutation so this view repaints.
     func refresh() {
         syncButtons(); syncBanner()
-        // Every canvas's panel sits at the shared centre offset — a drag on any canvas
-        // moved it for all of them; a smaller screen may clip it, which is fine.
-        let origin = panelOrigin(size: solvePanel.frame.size)
-        if solvePanel.frame.origin != origin { solvePanel.setFrameOrigin(origin) }
+        // Every canvas's panel is the same plane rect (size in inches at the shared
+        // anchor), mapped through this canvas's transform — so it scales with the minimap
+        // and its corner lands on the same tile corner everywhere. A smaller screen may
+        // clip it, which is fine.
+        if let rect = panelViewRect(), solvePanel.frame != rect {
+            solvePanel.frame = rect
+        }
         needsDisplay = true
     }
 

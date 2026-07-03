@@ -9,6 +9,10 @@ final class ArrangerState {
 
     // App callbacks (wired once by the AppDelegate).
     var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)?
+    /// Resolution-slider drag began (true) / ended (false). ArrangerWindows drives the
+    /// ghost aids from a timer while it's held (the modal tracking loop starves the mouse
+    /// monitors, and the value-preview only notifies on detent changes).
+    var onSliderDragChanged: ((Bool) -> Void)?
     /// Set the main display (dragging the menu-bar strip onto another tile).
     var onSetMain: ((CGDirectDisplayID) -> Void)?
     var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)?
@@ -95,7 +99,12 @@ final class ArrangerState {
     var activeV: (selfA: VAnchor, otherA: VAnchor, otherID: CGDirectDisplayID)?
     var activeH: (selfA: HAnchor, otherA: HAnchor, otherID: CGDirectDisplayID)?
 
-    var extendedBuiltinModes = false
+    /// "Show the Full Wardrobe": reveal the built-in's extended modes and every display's
+    /// off-native-aspect resolutions. A global UI preference, persisted across launches.
+    static let extendedModesKey = "showFullWardrobe"
+    var extendedBuiltinModes = UserDefaults.standard.bool(forKey: ArrangerState.extendedModesKey) {
+        didSet { UserDefaults.standard.set(extendedBuiltinModes, forKey: Self.extendedModesKey) }
+    }
 
     /// True while ⌘⇧ is held: every canvas ghosts the possible alignment destinations.
     var showAlignGhosts = false
@@ -117,11 +126,13 @@ final class ArrangerState {
     var uniformMenuBarInset: CGFloat = 0
     var minScreenExtent = CGSize(width: 100_000, height: 100_000)
 
-    /// The granny panel's centre, as an offset from the screen centre (points) — the
-    /// same centre-based math the ghost chrome scales by, so it sits consistently
-    /// across screens (and off a smaller one where it can't fit). Movable: drag its
-    /// title bar. Dragging on any canvas moves it on all of them.
-    var solvePanelCenterOffset = CGPoint(x: -360, y: -300)
+    /// The granny panel's centre as an offset from the screen centre, in **inches**
+    /// (minimap plane units). Position is its own state — independent of the tiles, so
+    /// moving a tile never moves it — while being in inches means it scales with the
+    /// minimap. Placed the same way on every canvas (centre + offset × scale), so it sits
+    /// consistently across screens. Movable: grab it anywhere; a drag on any canvas moves
+    /// it on all of them.
+    var solvePanelCenterOffsetInches = CGPoint(x: -5, y: -4)   // lower-left of centre
 
     // MARK: - Countdowns (the top-of-screen banner)
 

@@ -36,6 +36,10 @@ extension Arranger {
         // so the shadow reads under it (the tile lifts off the plane, macOS-style).
         if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
         for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!), scale: t.scale) }
+        // Hide info cards for displays not drawn this pass (removed, or now in the mirror
+        // column) so a stale frosted card doesn't linger.
+        let drawn = Set(displays.filter { rects[$0.id] != nil }.map(\.id))
+        for (id, card) in labelCards where !drawn.contains(id) { card.isHidden = true }
         // Predicted Dock: a strip hugging the Dock edge of the screen it'll land on.
         // With the live feed on, the tiles already show the real desktop (Dock included),
         // so only surface the indicator when it's informative: the Dock would move, or a
@@ -61,7 +65,6 @@ extension Arranger {
         seamGlow.commit()
         drawScreenMarkers(markers)                // alignment notches/arrows at this screen's real edges
         drawMirrorColumn()                        // mirrored displays live in the right column
-        drawFooter(Copy.footer)
         updateSolvePanel(seamColor: seamColor)    // the "what she sees" panel (floats above)
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
@@ -314,20 +317,26 @@ extension Arranger {
         return p
     }
 
-    /// A soft drop shadow behind the selected tile, lifting it off the plane. Drawn
-    /// before the tile so the tile covers the fill and only the offset blur shows.
+    /// A pink glow halo behind the selected tile — how you tell which screen the cursor
+    /// (the active window) is on. It's drawn *before* the tile, so the tile covers the fill
+    /// and only the blur bleeds out all around; the seam glitter/glow, drawn later on top,
+    /// is untouched. Two passes — a wide soft outer bloom and a tight bright inner ring —
+    /// give it presence without an offset "drop shadow" look.
     private func drawSelectedShadow(_ tileRect: NSRect) {
-        NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.systemPink.withAlphaComponent(0.85)
-        shadow.shadowBlurRadius = 14
-        shadow.shadowOffset = NSSize(width: 0, height: -3)   // -y casts the shadow downward
-        shadow.set()
         let path = NSBezierPath(roundedRect: tileRect.insetBy(dx: 1.5, dy: 1.5),
                                 xRadius: tileCornerRadius, yRadius: tileCornerRadius)
-        NSColor.black.setFill()
-        path.fill()
-        NSGraphicsContext.restoreGraphicsState()
+        // (blur radius, glow alpha) — outer bloom first, then a brighter tight halo.
+        for (blur, alpha) in [(30.0, 0.55), (12.0, 0.95)] as [(CGFloat, CGFloat)] {
+            NSGraphicsContext.saveGraphicsState()
+            let glow = NSShadow()
+            glow.shadowColor = NSColor.systemPink.withAlphaComponent(alpha)
+            glow.shadowBlurRadius = blur
+            glow.shadowOffset = .zero          // even glow all around, not a drop shadow
+            glow.set()
+            NSColor.black.setFill()
+            path.fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
     }
 
     /// A mini Dock hugging the predicted Dock edge of a tile: three app squircles, a
@@ -592,54 +601,39 @@ extension Arranger {
             lines.append((diag + Copy.calibratePrompt, f(13), secondary, nil))
         }
 
-        // Text is centered in the *whole* tile. The slider is pinned to a fixed spot near
-        // the tile bottom (clear of a bottom Dock strip) — it never moves as the text
-        // zooms. If large text reaches the slider, the slider is drawn *last*, on top, over
-        // an opaque plate that masks the text beneath it.
+        // The card holds only the lines that fit the tile width; oversized lines are
+        // dropped (same as before). The card is a real backdrop-blur subview (`LabelCard`),
+        // sized to the widest fitting line and positioned centred in the tile.
         let gap: CGFloat = 3
-        let sizes = lines.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]) }
-        let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(lines.count - 1)
-        // The block is vertically centered; `bottom` is its lower edge.
-        let bottom = rect.midY - total / 2
-
-        // A rounded translucent plate behind the info block so it reads against the
-        // wallpaper. Sized to the widest visible line, capped to the tile.
-        let visibleWidths = sizes.filter { $0.width <= rect.width - 8 }.map(\.width)
-        if let widest = visibleWidths.max() {
-            let padX: CGFloat = 11, padY: CGFloat = 6
-            let boxW = min(widest + padX * 2, rect.width - 4)
-            let box = NSRect(x: rect.midX - boxW / 2, y: bottom - padY,
-                             width: boxW, height: total + padY * 2)
-            // A dark plate under the label so the pink glow actually reads as a glow
-            // (a light backdrop just makes it look like a soft blur) and the text pops
-            // off any wallpaper.
-            let fill = selected
-                ? NSColor.black.withAlphaComponent(0.55)
-                : NSColor.black.withAlphaComponent(0.4)
-            fill.setFill()
-            NSBezierPath(roundedRect: box, xRadius: 11, yRadius: 11).fill()
+        let visible = lines.filter { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).width <= rect.width - 8 }
+        let sizes = visible.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]) }
+        guard let widest = sizes.map(\.width).max() else {
+            labelCards[display.id]?.isHidden = true
+            return
         }
+        let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(max(0, visible.count - 1))
+        let padX: CGFloat = 11, padY: CGFloat = 6
+        let boxW = min(widest + padX * 2, rect.width - 4)
+        let box = NSRect(x: rect.midX - boxW / 2, y: rect.midY - total / 2 - padY,
+                         width: boxW, height: total + padY * 2)
 
-        // Stack lines top-down (y-up): start at the block's top and drop each line's height.
-        var y = bottom + total
-        for (i, (text, font, color, glow)) in lines.enumerated() {
-            let s = sizes[i]
-            y -= s.height
-            if s.width <= rect.width - 8 {
-                var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-                if let glow {
-                    let shadow = NSShadow()
-                    shadow.shadowColor = glow
-                    shadow.shadowBlurRadius = 6
-                    shadow.shadowOffset = .zero
-                    attrs[.shadow] = shadow
-                }
-                (text as NSString).draw(at: CGPoint(x: rect.midX - s.width / 2, y: y), withAttributes: attrs)
-            }
-            y -= gap
-        }
+        let card = ensureLabelCard(for: display.id)
+        card.frame = box
+        card.isHidden = false
+        card.update(LabelCard.Content(
+            lines: visible.map { LabelCard.Line(text: $0.0, font: $0.1, color: $0.2, glow: $0.3) },
+            selected: selected, gap: gap))
         // The resolution slider now lives in the bottom control cluster (between Undo and
         // Done), acting on the selected display — no longer drawn on the tile.
+    }
+
+    /// The frosted info card for `id`, created on demand and added above the drawn tiles.
+    private func ensureLabelCard(for id: CGDirectDisplayID) -> LabelCard {
+        if let c = labelCards[id] { return c }
+        let c = LabelCard(frame: .zero)
+        addSubview(c)
+        labelCards[id] = c
+        return c
     }
 
     /// The eight perimeter anchor positions (corners + edge midpoints).
@@ -833,12 +827,6 @@ extension Arranger {
     private func unit(_ v: CGVector) -> CGVector {
         let len = max(hypot(v.dx, v.dy), 0.001)
         return CGVector(dx: v.dx / len, dy: v.dy / len)
-    }
-
-    private func drawFooter(_ text: String) {
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.tertiaryLabelColor]
-        let size = (text as NSString).size(withAttributes: attrs)
-        (text as NSString).draw(at: CGPoint(x: (bounds.width - size.width) / 2, y: 8), withAttributes: attrs)
     }
 
     /// Feed the "what she sees" panel the current point solve (rendering lives in

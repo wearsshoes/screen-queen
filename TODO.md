@@ -21,3 +21,27 @@
 * Homebrew cask
 * Sparkle auto-update
 * hardware matrix: Intel, clamshell, hub/dock, 3+ monitors, DisplayLink
+
+**SwiftUI port (for someone more familiar — the UI layer is more portable than it looks):**
+* Context: the app is almost entirely hand-rolled AppKit + CoreGraphics. On investigation,
+  much of the UI layer *could* be SwiftUI; it's AppKit mostly for paradigm consistency,
+  low-level control, and the imperative `ArrangerState.changed → needsDisplay` architecture
+  mapping 1:1 to AppKit — not because SwiftUI can't do it.
+* Genuinely framework-agnostic (stays as-is, called identically from SwiftUI): the display
+  guts (`CGDirectDisplay`, `CGDisplayMode`, arrangement/mirroring), event/hotkey plumbing
+  (`CGEvent`, `CGEventSource`), ScreenCaptureKit feeds, EDID/PPI via IOKit, Dock config via
+  `UserDefaults`. These are Core-level C/system APIs with no UI-framework equivalent.
+* Portable to SwiftUI (was AppKit by choice, not necessity):
+  - Menu-bar 👑 item + menu → `MenuBarExtra` (first-class now; supports `.window` style for
+    rich content). Replaces `NSStatusItem`.
+  - The custom arranger canvas (`Arranger.draw(_:)` — tiles, wallpaper, labels, seam
+    glitter, transform math) → SwiftUI `Canvas`, which is immediate-mode "very similar to
+    drawRect" and has `withCGContext` to run the existing CoreGraphics draw code largely
+    unchanged. Biggest single piece; most of the geometry/`Transform` math ports directly.
+  - Per-screen borderless overlay windows at a custom level → `.windowLevel(.floating)`
+    (macOS 15+) or a thin `NSWindow` bridge; transparent/borderless is a small AppKit hook.
+  - Glass chrome (button bar) → SwiftUI `.glassEffect` / materials.
+  - Stationary windows (setup/permissions, debug, granny panel, countdown banner) → plain
+    SwiftUI views; these have no hard AppKit requirement at all.
+* Refs: Apple "Customizing window styles… in macOS", "Canvas" docs; nilcoalescing
+  "Build a macOS menu bar utility in SwiftUI"; rampatra "change the window level in SwiftUI".
