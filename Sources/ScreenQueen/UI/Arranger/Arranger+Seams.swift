@@ -1,4 +1,4 @@
-import AppKit
+import SwiftUI
 
 /// The seam system: mini-map reference bars and full-screen edge bars, with their
 /// shared glow / D-path / emitter plumbing. One seam's two depictions share color,
@@ -162,11 +162,11 @@ extension Arranger {
 
     /// The wide, soft glow behind the sparkles: opaque at the seam edge, fading to clear
     /// ~2× the bar depth into the tile, clipped to a D-shape extended to that reach.
-    func drawBehindGlow(_ e: SeamEdgeGlow) {
-        drawBehindGlow(e.rect, roundedOn: e.inward, color: e.color)
+    func drawBehindGlow(_ ctx: GraphicsContext, _ e: SeamEdgeGlow) {
+        drawBehindGlow(ctx, e.rect, roundedOn: e.inward, color: e.color)
     }
 
-    private func drawBehindGlow(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
+    private func drawBehindGlow(_ ctx: GraphicsContext, _ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
         let depth = (inward == .minX || inward == .maxX) ? rect.width : rect.height
         let reach = depth * behindGlowReach
         // Grow the rect inward so its inward edge lands at the glow's end.
@@ -177,10 +177,11 @@ extension Arranger {
         case .minY: ext = NSRect(x: rect.minX, y: rect.maxY - reach, width: rect.width, height: reach)
         case .maxY: ext = NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: reach)
         }
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        NSGraphicsContext.saveGraphicsState()
-        defer { NSGraphicsContext.restoreGraphicsState() }
-        dPath(ext, roundedOn: inward).addClip()
+        // Geometry above is y-up; flip the path and gradient points at the draw boundary.
+        let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height)
+        func fp(_ p: CGPoint) -> CGPoint { p.applying(flip) }
+        let clipShape = Path(dPath(ext, roundedOn: inward).cgPath).applying(flip)
+
         // Gradient from the seam edge → the extended inward edge: opaque → clear.
         let (start, end): (CGPoint, CGPoint)
         switch inward {
@@ -189,28 +190,35 @@ extension Arranger {
         case .minY: start = CGPoint(x: ext.midX, y: ext.maxY); end = CGPoint(x: ext.midX, y: ext.minY)
         case .maxY: start = CGPoint(x: ext.midX, y: ext.minY); end = CGPoint(x: ext.midX, y: ext.maxY)
         }
-        let gradient = NSGradient(colors: [color.withAlphaComponent(0.7), color.withAlphaComponent(0)],
-                                  atLocations: [0, 1], colorSpace: .sRGB)
-        // Own transparency layer, so the destination-out end feathers below erase only
-        // the glow, not the canvas painted beneath it.
-        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-        gradient?.draw(from: start, to: end, options: [])
-        let vertical = inward == .minX || inward == .maxX
-        let alongLen = vertical ? ext.height : ext.width
-        let ramp = min(22, alongLen * 0.3)
-        if ramp > 1, let fade = NSGradient(colors: [.black, NSColor.black.withAlphaComponent(0)],
-                                           atLocations: [0, 1], colorSpace: .sRGB) {
-            ctx.setBlendMode(.destinationOut)
-            if vertical {
-                fade.draw(from: CGPoint(x: ext.midX, y: ext.minY), to: CGPoint(x: ext.midX, y: ext.minY + ramp), options: [])
-                fade.draw(from: CGPoint(x: ext.midX, y: ext.maxY), to: CGPoint(x: ext.midX, y: ext.maxY - ramp), options: [])
-            } else {
-                fade.draw(from: CGPoint(x: ext.minX, y: ext.midY), to: CGPoint(x: ext.minX + ramp, y: ext.midY), options: [])
-                fade.draw(from: CGPoint(x: ext.maxX, y: ext.midY), to: CGPoint(x: ext.maxX - ramp, y: ext.midY), options: [])
+        // Own layer, so the destination-out end feathers below erase only the glow,
+        // not the canvas painted beneath it.
+        ctx.drawLayer { layer in
+            layer.clip(to: clipShape)
+            layer.fill(Path(yDown(ext)), with: .linearGradient(
+                Gradient(colors: [Color(nsColor: color).opacity(0.7), Color(nsColor: color).opacity(0)]),
+                startPoint: fp(start), endPoint: fp(end)))
+
+            let vertical = inward == .minX || inward == .maxX
+            let alongLen = vertical ? ext.height : ext.width
+            let ramp = min(22, alongLen * 0.3)
+            guard ramp > 1 else { return }
+            layer.blendMode = .destinationOut
+            let fade = Gradient(colors: [.black, .black.opacity(0)])
+            func feather(_ strip: NSRect, from a: CGPoint, to b: CGPoint) {
+                layer.fill(Path(yDown(strip)), with: .linearGradient(fade, startPoint: fp(a), endPoint: fp(b)))
             }
-            ctx.setBlendMode(.normal)
+            if vertical {
+                feather(NSRect(x: ext.minX, y: ext.minY, width: ext.width, height: ramp),
+                        from: CGPoint(x: ext.midX, y: ext.minY), to: CGPoint(x: ext.midX, y: ext.minY + ramp))
+                feather(NSRect(x: ext.minX, y: ext.maxY - ramp, width: ext.width, height: ramp),
+                        from: CGPoint(x: ext.midX, y: ext.maxY), to: CGPoint(x: ext.midX, y: ext.maxY - ramp))
+            } else {
+                feather(NSRect(x: ext.minX, y: ext.minY, width: ramp, height: ext.height),
+                        from: CGPoint(x: ext.minX, y: ext.midY), to: CGPoint(x: ext.minX + ramp, y: ext.midY))
+                feather(NSRect(x: ext.maxX - ramp, y: ext.minY, width: ramp, height: ext.height),
+                        from: CGPoint(x: ext.maxX, y: ext.midY), to: CGPoint(x: ext.maxX - ramp, y: ext.midY))
+            }
         }
-        ctx.endTransparencyLayer()
     }
 
     /// The behind glow reaches this multiple of the bar depth toward the display center.

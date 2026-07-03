@@ -3,24 +3,10 @@ import SwiftUI
 /// The render pass: `drawSchematic(in:size:)` orchestrates the schematic in paint order,
 /// called from the SwiftUI Canvas host (see SchematicCanvas.swift). The subjects live in
 /// their own files — seams (Arranger+Seams), tiles (Arranger+Tiles), alignment markers
-/// (Arranger+Markers), mirror column (Arranger+Sidebar). Migration state: subjects draw
-/// natively into the GraphicsContext one at a time; the rest run inside `legacyDraw`
-/// (the y-up AppKit-idiom shim), interleaved so paint order never changes.
+/// (Arranger+Markers), mirror column (Arranger+Sidebar). Fully native GraphicsContext —
+/// geometry is computed y-up (the Transform/hit-test space) and flipped at each
+/// subject's draw boundary.
 extension Arranger {
-
-    /// Run not-yet-native draw code (NSBezierPath / NSString idiom reading
-    /// NSGraphicsContext.current) inside `ctx`, flipped to the y-up view space it speaks.
-    func legacyDraw(_ ctx: GraphicsContext, _ body: () -> Void) {
-        ctx.withCGContext { cg in
-            cg.translateBy(x: 0, y: bounds.height)
-            cg.scaleBy(x: 1, y: -1)
-            let ns = NSGraphicsContext(cgContext: cg, flipped: false)
-            let prev = NSGraphicsContext.current
-            NSGraphicsContext.current = ns
-            body()
-            NSGraphicsContext.current = prev
-        }
-    }
 
     /// A y-up view rect in the Canvas's y-down space (native subjects use this at their
     /// boundary; geometry sources like `Transform.viewRect` stay y-up).
@@ -59,16 +45,12 @@ extension Arranger {
                 drawDockIndicator(ctx, in: t.viewRect(r), edge: DockPredictor.edge())
             }
         }
-        legacyDraw(ctx) {
-            // Seam glows, painted from the same edge sets `updateSeamEffects` feeds to the
-            // emitter/glow layers (on the refresh path — draw registers nothing).
-            for e in miniBarEdges(bars, t: t, seamColor: seamColor) { drawBehindGlow(e) }
-        }
+        // Seam glows, painted from the same edge sets `updateSeamEffects` feeds to the
+        // emitter/glow layers (on the refresh path — draw registers nothing).
+        for e in miniBarEdges(bars, t: t, seamColor: seamColor) { drawBehindGlow(ctx, e) }
         let markers = activeMarkers(rects)
         for d in displays where rects[d.id] != nil { drawAnchors(ctx, for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
-        legacyDraw(ctx) {
-            for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(e) }
-        }
+        for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(ctx, e) }
         drawScreenMarkers(ctx, markers)           // alignment notches/arrows at this screen's real edges
         drawMirrorColumn(ctx)                     // mirrored displays live in the right column
         if let p = draggingMenuBar {
