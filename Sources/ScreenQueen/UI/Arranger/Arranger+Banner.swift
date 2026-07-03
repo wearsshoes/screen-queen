@@ -32,7 +32,7 @@ struct CountdownBannerView: View {
                 .lineLimit(1)
             Button(c.keepTitle) { resolve(kind, true) }
                 .buttonStyle(.borderedProminent)
-                .tint(Color(nsColor: .systemPink).opacity(0.85))
+                .tint(Color.pink.opacity(0.85))
             Button(c.actTitle) { resolve(kind, false) }
         }
     }

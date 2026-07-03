@@ -71,7 +71,7 @@ extension Arranger {
         for (dir, rect) in alignGhosts() {
             let g = t.viewRect(rect)
             let box = Path(roundedRect: yDown(g.insetBy(dx: 1.5, dy: 1.5)), cornerRadius: tileCornerRadius)
-            ctx.fill(box, with: .color(Color(nsColor: .gray).opacity(0.35)))
+            ctx.fill(box, with: .color(Color(white: 0.5).opacity(0.35)))
             ctx.stroke(box, with: .color(.white.opacity(0.5)), lineWidth: 1)   // lighter outline
 
             // The overlap is covered by the current tile (drawn on top), so aim the

@@ -26,7 +26,7 @@ extension Arranger {
         let rects = currentRects()
         guard let t = drawTransform(rects) else {
             ctx.draw(Text(Copy.emptyState).font(.system(size: 14))
-                .foregroundStyle(Color(nsColor: .secondaryLabelColor)),
+                .foregroundStyle(.secondary),
                      at: CGPoint(x: size.width / 2, y: size.height / 2))
             return
         }
@@ -65,7 +65,7 @@ extension Arranger {
         // Option-mirror drag: highlight the tile the dragged display would mirror onto.
         if let p = mirrorDragPoint, let over = display(at: p), over.id != draggedID, let r = rects[over.id] {
             let vr = yDown(t.viewRect(r).insetBy(dx: 1.5, dy: 1.5))
-            let pink = Color(nsColor: .systemPink)
+            let pink = Color.pink
             let path = Path(roundedRect: vr, cornerRadius: tileCornerRadius)
             ctx.fill(path, with: .color(pink.opacity(0.35)))
             ctx.stroke(path, with: .color(pink), lineWidth: 2)
@@ -93,7 +93,7 @@ extension Arranger {
                 guard let s = SchematicLayout.seam(content.rects[i].rect, content.rects[j].rect) else { continue }
                 let key = DisplayGraph.SeamKey(content.rects[i].id, content.rects[j].id)
                 content.seams.append((content.rects[i].id, content.rects[j].id, s.vertical,
-                                      seamColor[key] ?? .systemPink))
+                                      Color(nsColor: seamColor[key] ?? .systemPink)))
             }
         }
         solvePanel.update(content)

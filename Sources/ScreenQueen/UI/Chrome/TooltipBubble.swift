@@ -15,12 +15,12 @@ struct TooltipBubbleView: View {
     var body: some View {
         Text(text)
             .font(Font(Self.font))
-            .foregroundStyle(Color(nsColor: NSColor(calibratedRed: 0.86, green: 0.16, blue: 0.5, alpha: 1)))
+            .foregroundStyle(Color(red: 0.86, green: 0.16, blue: 0.5))
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 9).fill(.white.opacity(0.8)))
             .overlay(RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(Color(nsColor: NSColor(calibratedRed: 0.95, green: 0.28, blue: 0.6, alpha: 1)),
+                .strokeBorder(Color(red: 0.95, green: 0.28, blue: 0.6),
                               lineWidth: 2.5))
             .padding(1.5)   // room so the stroke never kisses the hosting frame
     }

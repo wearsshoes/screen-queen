@@ -48,7 +48,7 @@ struct ArrangerBarView: View {
     var onControlFrame: (BarControl, CGRect) -> Void = { _, _ in }
 
     private var k: CGFloat { model.scale }
-    private var pink: Color { Color(nsColor: VirtualMouse.pink) }
+    private var pink: Color { VirtualMouse.pink }
 
     var body: some View {
         // No width cap here: `layoutBar` clamps the hosting frame to `barWidthCap`,
@@ -221,10 +221,10 @@ struct ArrangerBarView: View {
     /// Ghost mode tints only the *icon* — a washed capsule read as a solid pink blob.
     private func iconColor(enabled: Bool) -> Color {
         guard enabled else { return .secondary }
-        return model.isGhost ? pink : Color(nsColor: .labelColor)
+        return model.isGhost ? pink : Color.primary
     }
 
-    private var glyphColor: Color { model.isGhost ? pink : Color(nsColor: .labelColor) }
+    private var glyphColor: Color { model.isGhost ? pink : Color.primary }
 }
 
 /// The resolution slider, drawn by hand: the stock control dims in non-key windows and

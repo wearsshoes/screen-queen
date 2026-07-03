@@ -5,7 +5,7 @@ import SwiftUI
 /// in pink).
 struct SolvePanelContent {
     var rects: [(id: CGDirectDisplayID, rect: CGRect, ambiguous: Bool)] = []
-    var seams: [(a: CGDirectDisplayID, b: CGDirectDisplayID, vertical: Bool, color: NSColor)] = []
+    var seams: [(a: CGDirectDisplayID, b: CGDirectDisplayID, vertical: Bool, color: Color)] = []
     var ghost = false
 }
 
@@ -22,9 +22,9 @@ struct SolvePanelView: View {
     var body: some View {
         Canvas { ctx, size in
             let bounds = CGRect(origin: .zero, size: size)
-            let ink: Color = content.ghost ? Color(nsColor: VirtualMouse.pink) : .white
+            let ink: Color = content.ghost ? VirtualMouse.pink : .white
             let plateColor: Color = content.ghost
-                ? Color(nsColor: (VirtualMouse.pink.blended(withFraction: 0.55, of: .black) ?? .black))
+                ? Color(nsColor: (SeamPalette.colors[0].blended(withFraction: 0.55, of: .black) ?? .black))
                 : .black
 
             // Dark rounded plate with a lighter title strip; ghosting tints it toward pink.
@@ -57,7 +57,7 @@ struct SolvePanelView: View {
 
             for e in content.rects {
                 let vr = map(e.rect)
-                let stroke: Color = e.ambiguous ? Color(nsColor: .systemRed) : ink
+                let stroke: Color = e.ambiguous ? .red : ink
                 ctx.stroke(Path(vr), with: .color(stroke), lineWidth: e.ambiguous ? 2 : 1)
                 ctx.draw(Text("\(e.id % 1000)").font(.system(size: 9)).foregroundStyle(stroke),
                          at: CGPoint(x: vr.minX + 2, y: vr.midY), anchor: .leading)
@@ -82,7 +82,7 @@ struct SolvePanelView: View {
                     line.move(to: CGPoint(x: max(va.minX, vb.minX), y: y))
                     line.addLine(to: CGPoint(x: min(va.maxX, vb.maxX), y: y))
                 }
-                ctx.stroke(line, with: .color(Color(nsColor: seam.color)), lineWidth: 3)
+                ctx.stroke(line, with: .color(seam.color), lineWidth: 3)
             }
         }
     }

@@ -169,12 +169,12 @@ extension Arranger {
         let nameText = ctx.resolve((
             Text("\(Image(systemName: "airplayvideo")) ").font(.system(size: 18, weight: .semibold))
             + Text(name).font(.system(size: 20, weight: .bold))
-        ).foregroundStyle(Color(nsColor: .labelColor)))
+        ).foregroundStyle(Color.primary))
         let h = nameText.measure(in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity)).height
         ty -= h
         ctx.draw(nameText, at: CGPoint(x: inner.minX, y: bounds.height - ty - h), anchor: .topLeading)
         ty -= 5
-        line(Copy.airplayBody, .system(size: 15), Color(nsColor: .labelColor))
+        line(Copy.airplayBody, .system(size: 15), Color.primary)
         line(Copy.airplayFinePrint, .system(size: 13), .secondary)
 
         // Hands off to Control Center's Screen Mirroring menu (Display Settings doesn't

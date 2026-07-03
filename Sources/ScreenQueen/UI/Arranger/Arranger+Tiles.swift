@@ -38,7 +38,7 @@ extension Arranger {
         for (blur, alpha) in [(30.0, 0.55), (12.0, 0.95)] as [(CGFloat, CGFloat)] {
             var glow = ctx
             // Even glow, not a drop shadow (offset zero).
-            glow.addFilter(.shadow(color: Color(nsColor: .systemPink).opacity(alpha),
+            glow.addFilter(.shadow(color: Color.pink.opacity(alpha),
                                    radius: blur, x: 0, y: 0))
             glow.fill(path, with: .color(.black))
         }

@@ -73,7 +73,7 @@ struct SetupView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(Copy.setupTitle)
                 .font(Font(DragFont.script(size: 34)))
-                .foregroundStyle(Color(nsColor: .systemPink))
+                .foregroundStyle(.pink)
             Text(Copy.setupIntro)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -112,7 +112,7 @@ struct SetupView: View {
                     Text(name).font(.system(size: 13, weight: .bold))
                     Text(granted ? Copy.setupGranted : Copy.setupNotYet)
                         .font(.system(size: 12))
-                        .foregroundStyle(granted ? Color(nsColor: .systemGreen) : .secondary)
+                        .foregroundStyle(granted ? .green : .secondary)
                 }
                 Text(why)
                     .font(.system(size: 11))

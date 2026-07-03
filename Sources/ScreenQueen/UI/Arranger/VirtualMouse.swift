@@ -13,8 +13,9 @@ enum VirtualMouse {
     /// Feature flag: pink chrome on inactive displays.
     static let ghostChromeEnabled = true
 
-    /// The one ghost tint — hot pink from the seam palette.
-    static var pink: NSColor { SeamPalette.colors[0] }
+    /// The one ghost tint — hot pink from the seam palette, as the SwiftUI currency
+    /// (the layer world takes its CGColor from `SeamPalette.colors[0]` directly).
+    static var pink: Color { Color(nsColor: SeamPalette.colors[0]) }
 }
 
 /// A chrome element that wears the ghost tint *in its own look* (pink glass, pink
