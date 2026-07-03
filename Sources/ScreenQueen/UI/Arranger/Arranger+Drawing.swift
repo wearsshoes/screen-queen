@@ -27,10 +27,7 @@ extension Arranger {
         if showAlignGhosts { drawAlignGhosts(t: t) }   // under the tiles
         // Selection halo before the tiles, so it reads under the lifted tile.
         if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
-        for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!), scale: t.scale) }
-        // Hide info cards for displays not drawn this pass so a stale card doesn't linger.
-        let drawn = Set(displays.filter { rects[$0.id] != nil }.map(\.id))
-        for (id, card) in labelCards where !drawn.contains(id) { card.isHidden = true }
+        for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!)) }
         // Predicted Dock strip. With the live feed on the tiles already show the real
         // Dock, so only surface it when informative (Dock would move / mid menu-bar drag).
         if let dockID = predictedDockDisplay(), let r = rects[dockID] {
@@ -51,7 +48,6 @@ extension Arranger {
         seamGlow.commit()
         drawScreenMarkers(markers)                // alignment notches/arrows at this screen's real edges
         drawMirrorColumn()                        // mirrored displays live in the right column
-        updateSolvePanel(seamColor: seamColor)    // the "what she sees" panel (floats above)
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
             if let over = display(at: p), !over.isMain, let r = rects[over.id] {
@@ -76,8 +72,10 @@ extension Arranger {
     }
 
     /// Feed the "what she sees" panel the *actual* origins the seam detection uses (the
-    /// locked solve during a drag), so the panel shows the truth.
-    private func updateSolvePanel(seamColor: [DisplayGraph.SeamKey: NSColor]) {
+    /// locked solve during a drag), so the panel shows the truth. Subview work — called
+    /// from the refresh path, not from `draw(_:)`.
+    func updateSolvePanel() {
+        let seamColor = seamColors(currentBars())
         let origins = state.pointOrigins()
         let trace = SchematicLayout.solveTrace(rects: state.plane, displays: state.sizedDisplays())
         let ambiguousIDs = Set(trace.pointRects.filter(\.ambiguous).map(\.id))

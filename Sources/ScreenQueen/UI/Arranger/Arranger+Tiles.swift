@@ -4,7 +4,7 @@ import AppKit
 /// indicator, the selected halo, and the info-card feed.
 extension Arranger {
 
-    func drawTile(for display: DisplaySnapshot, in rect: NSRect, scale: CGFloat) {
+    func drawTile(for display: DisplaySnapshot, in rect: NSRect) {
         // Tiles stay neutral — color lives on the seams; selection gets the accent wash.
         let selected = display.id == selectedID
         let color = selected
@@ -16,7 +16,6 @@ extension Arranger {
         color.setStroke(); path.lineWidth = 1.5; path.stroke()
         drawWallpaper(for: display, in: inset, selected: selected)
         drawBoxing(for: display, in: inset, color: color)
-        drawLabel(for: display, in: inset, selected: selected, viewScale: scale, tileColor: color)
         // The main display carries a menu-bar strip (drag it to another tile to move main).
         if display.isMain, draggingMenuBar == nil { drawMenuBar(in: menuBarRect(inTile: inset)) }
     }
@@ -220,7 +219,26 @@ extension Arranger {
         NSColor.white.withAlphaComponent(0.6).setFill(); clip.fill()
     }
 
-    private func drawLabel(for display: DisplaySnapshot, in rect: NSRect, selected: Bool, viewScale: CGFloat, tileColor: NSColor) {
+    /// Place/update every tile's frosted info card, and hide cards for displays not on
+    /// the plane this pass. Subview work, so it lives on the refresh path — `draw(_:)`
+    /// must not mutate the view tree (a Canvas port can't).
+    func layoutLabelCards() {
+        let rects = currentRects()
+        guard let t = drawTransform(rects) else {
+            labelCards.values.forEach { $0.isHidden = true }
+            return
+        }
+        var placed = Set<CGDirectDisplayID>()
+        for d in displays {
+            guard let r = rects[d.id] else { continue }
+            placed.insert(d.id)
+            layoutLabelCard(for: d, in: t.viewRect(r).insetBy(dx: 1.5, dy: 1.5),
+                            selected: d.id == selectedID, viewScale: t.scale)
+        }
+        for (id, card) in labelCards where !placed.contains(id) { card.isHidden = true }
+    }
+
+    private func layoutLabelCard(for display: DisplaySnapshot, in rect: NSRect, selected: Bool, viewScale: CGFloat) {
         let sz = pointSize(display)
         let pending = state.pendingMode(for: display.id)
         let pixelW = pending?.pixelWidth ?? Int(display.pixelSize.width)

@@ -270,12 +270,6 @@ final class Arranger: NSView {
         mirroredDisplays.isEmpty && airplaySession == nil ? 0 : 360
     }
 
-    /// Un-mirror button rects from the last draw, per mirrored display id (hit-testing).
-    var unmirrorButtonRects: [CGDirectDisplayID: NSRect] = [:]
-
-    /// The AirPlay card's "Open Settings" button rect from the last draw (hit-testing).
-    var airplaySettingsButtonRect: NSRect?
-
     /// Cached native pixel aspect per display (fixed per panel; stale entries harmless).
     var nativeAspectCache: [CGDirectDisplayID: Double?] = [:]
 
@@ -286,12 +280,15 @@ final class Arranger: NSView {
     // Handle clicks even when this window isn't key (no activate-first click).
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// Called by the state after a mutation so this view repaints.
+    /// Called by the state after a mutation: place the overlay subviews (cards, solve
+    /// panel — `draw(_:)` never mutates the view tree), then repaint.
     func refresh() {
         syncButtons(); syncBanner()
         if let rect = panelViewRect(), solvePanel.frame != rect {
             solvePanel.frame = rect
         }
+        updateSolvePanel()
+        layoutLabelCards()
         needsDisplay = true
     }
 

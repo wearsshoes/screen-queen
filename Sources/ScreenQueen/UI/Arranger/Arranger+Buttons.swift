@@ -216,7 +216,8 @@ extension Arranger {
         super.layout()
         bannerTop?.constant = state.uniformMenuBarInset + 12
         barMaxWidth?.constant = Self.barWidthCap(minScreenWidth: state.minScreenExtent.width)
-        onLayout?()   // re-render chrome now that bounds/frames are settled
+        layoutLabelCards()   // overlay subviews track a bounds change (draw never places them)
+        onLayout?()          // re-render chrome now that bounds/frames are settled
     }
 
     /// Place the bar through `chromeViewRect` — the same positioning code as the granny

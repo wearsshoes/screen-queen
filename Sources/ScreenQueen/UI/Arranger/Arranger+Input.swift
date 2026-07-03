@@ -24,13 +24,13 @@ extension Arranger {
         window?.makeKeyAndOrderFront(nil)   // focus this screen's arranger
         window?.makeFirstResponder(self)
         let p = convert(event.locationInWindow, from: nil)
-        // Clicking a mirror card's un-mirror button returns that display to the plane.
-        if let id = unmirrorButtonRects.first(where: { $0.value.contains(p) })?.key {
-            onUnmirror?(id); return
-        }
-        // The AirPlay card's "Open Settings" button hands off to Screen Mirroring.
-        if airplaySettingsButtonRect?.contains(p) == true {
-            onOpenAirPlaySettings?(); return
+        // Mirror-column buttons, hit-tested against the same pure layout the draw uses.
+        if let hit = mirrorColumnHit(at: p) {
+            switch hit {
+            case .unmirror(let id): onUnmirror?(id)
+            case .airplaySettings: onOpenAirPlaySettings?()
+            }
+            return
         }
         // Grabbing the main tile's menu-bar strip starts a "move main" drag.
         if mainMenuBarViewRect()?.contains(p) == true {
