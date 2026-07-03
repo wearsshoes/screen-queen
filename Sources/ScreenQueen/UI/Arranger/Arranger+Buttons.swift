@@ -145,6 +145,18 @@ extension Arranger {
     /// like the granny viewer — drifts/rescales with the minimap).
     private var barCentreOffsetInches: CGPoint { CGPoint(x: 0, y: -10) }
 
+    /// Position the footer under this canvas's own bar, font scaled with it (text laid
+    /// out at the target point size — crisp, not a layer-scaled bitmap). Called from
+    /// renderChrome right after `layoutBar`, so the bar frame is settled.
+    func layoutFooter(scale s: CGFloat) {
+        guard let bar = barHost, let footer = footerHost else { return }
+        if footer.rootView.scale != s { footer.rootView = FooterView(scale: s) }
+        let size = footer.fittingSize
+        footer.frame = CGRect(x: pixelSnap(bar.frame.midX - size.width / 2),
+                              y: pixelSnap(bar.frame.minY - 8 * s - size.height),
+                              width: size.width, height: size.height)
+    }
+
     // MARK: - Slider preview/commit
 
     /// Live-preview resolution as the slider moves (one display, or all by the same step
