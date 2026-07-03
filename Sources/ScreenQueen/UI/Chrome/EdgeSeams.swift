@@ -11,13 +11,13 @@ extension Stage {
     func edgeBarEdges(_ bars: [SeamBar],
                       seamColor: [DisplayGraph.SeamKey: NSColor]) -> [SeamEdgeGlow] {
         guard let me = centerID else { return [] }
+        let mine = displays.first { $0.id == me }
         // Constant *physical* thickness: convert inches → points via this screen's density.
         let thicknessInches: CGFloat = 0.08
-        let ppi = displays.first { $0.id == me }?.pointsPerInch
-        let thickness: CGFloat = ppi.map { thicknessInches * CGFloat($0) } ?? 9
+        let thickness: CGFloat = mine?.pointsPerInch.map { thicknessInches * CGFloat($0) } ?? 9
         // Bar offsets/lengths are in *previewed* point space but drawn against the real
         // window bounds — scale them across, or spacing drifts during a zoom preview.
-        let previewed = displays.first { $0.id == me }.map { pointSize($0) }
+        let previewed = mine.map { pointSize($0) }
         var edges: [SeamEdgeGlow] = []
         for bar in bars where bar.aID == me || bar.bID == me {
             let weAreA = (bar.aID == me)

@@ -67,35 +67,27 @@ final class SeamLights {
     /// layout. Mirrored slaves have no seams of their own and are skipped.
     private func computeStrips(displays: [DisplaySnapshot]) -> [Strip] {
         let plane = displays.filter { !$0.isMirrored }
-        var pairs: [(CGDirectDisplayID, CGDirectDisplayID)] = []
         var seams: [(a: DisplaySnapshot, b: DisplaySnapshot, s: SchematicLayout.Seam)] = []
         for i in 0..<plane.count {
             for j in (i + 1)..<plane.count {
                 guard let s = SchematicLayout.seam(plane[i].bounds, plane[j].bounds) else { continue }
-                pairs.append((plane[i].id, plane[j].id))
                 seams.append((plane[i], plane[j], s))
             }
         }
-        let colors = SeamColorBook.shared.colors(for: pairs)
+        let colors = SeamColorBook.shared.colors(for: seams.map { ($0.a.id, $0.b.id) })
 
         let thickness: CGFloat = 2
         var strips: [Strip] = []
         for (a, b, s) in seams {
             let color = colors[DisplayGraph.SeamKey(a.id, b.id)] ?? .systemPink
-            if s.vertical {
-                // `line` is the shared x; the crossing interval [lo, hi] runs along y
-                // (global CG coords, y-down). One strip hugging each side of the line.
-                let h = s.hi - s.lo
-                strips.append(Strip(frame: GlobalMap.cocoaRect(fromCG: CGRect(
-                    x: s.line - thickness, y: s.lo, width: thickness, height: h)), color: color))
-                strips.append(Strip(frame: GlobalMap.cocoaRect(fromCG: CGRect(
-                    x: s.line, y: s.lo, width: thickness, height: h)), color: color))
-            } else {
-                let w = s.hi - s.lo
-                strips.append(Strip(frame: GlobalMap.cocoaRect(fromCG: CGRect(
-                    x: s.lo, y: s.line - thickness, width: w, height: thickness)), color: color))
-                strips.append(Strip(frame: GlobalMap.cocoaRect(fromCG: CGRect(
-                    x: s.lo, y: s.line, width: w, height: thickness)), color: color))
+            let len = s.hi - s.lo
+            // `line` is the shared coordinate; the crossing interval [lo, hi] runs along
+            // it (global CG coords, y-down). One strip hugging each side of the line.
+            for side in [-thickness, CGFloat(0)] {
+                let cg = s.vertical
+                    ? CGRect(x: s.line + side, y: s.lo, width: thickness, height: len)
+                    : CGRect(x: s.lo, y: s.line + side, width: len, height: thickness)
+                strips.append(Strip(frame: GlobalMap.cocoaRect(fromCG: cg), color: color))
             }
         }
         return strips

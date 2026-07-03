@@ -15,21 +15,23 @@ extension Stage {
         // The built-in's EDID physical size is authoritative — no size overrides for it.
         if !d.isBuiltin {
             menu.addItem(.separator())
-            let calItem = NSMenuItem(title: Copy.menuInputSize, action: #selector(calibrateFromMenu(_:)), keyEquivalent: "")
-            calItem.target = self; calItem.representedObject = NSNumber(value: d.id)
-            menu.addItem(calItem)
+            menu.addItem(displayItem(Copy.menuInputSize, #selector(calibrateFromMenu(_:)), d.id))
             if displays.count > 1 {
-                let matchItem = NSMenuItem(title: Copy.menuManualCalibration, action: #selector(calibrateVisualFromMenu(_:)), keyEquivalent: "")
-                matchItem.target = self; matchItem.representedObject = NSNumber(value: d.id)
-                menu.addItem(matchItem)
+                menu.addItem(displayItem(Copy.menuManualCalibration, #selector(calibrateVisualFromMenu(_:)), d.id))
             }
             if d.physicalSizeIsCalibrated {
-                let resetItem = NSMenuItem(title: Copy.menuResetSizeToEDID, action: #selector(resetCalibrationFromMenu(_:)), keyEquivalent: "")
-                resetItem.target = self; resetItem.representedObject = NSNumber(value: d.id)
-                menu.addItem(resetItem)
+                menu.addItem(displayItem(Copy.menuResetSizeToEDID, #selector(resetCalibrationFromMenu(_:)), d.id))
             }
         }
         return menu
+    }
+
+    /// A menu item targeting this stage, carrying the display id it acts on.
+    private func displayItem(_ title: String, _ action: Selector, _ id: CGDirectDisplayID) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = NSNumber(value: id)
+        return item
     }
 
     private func resolutionMenuItem(for d: DisplaySnapshot) -> NSMenuItem {

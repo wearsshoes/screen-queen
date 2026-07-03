@@ -5,9 +5,12 @@ import SwiftUI
 /// screen, because the whole point is surviving the case where some screens went dark.
 /// One row per live countdown (`ArrangerState.countdowns`).
 struct CountdownBannerView: View {
+    struct Row {
+        let message: String, keepTitle: String, actTitle: String
+    }
     /// The message is composed by the stage (system facts like the screen count are
     /// model inputs, not something the view goes and reads).
-    let countdowns: [ArrangerState.CountdownKind: (message: String, keepTitle: String, actTitle: String)]
+    let countdowns: [ArrangerState.CountdownKind: Row]
     let resolve: (ArrangerState.CountdownKind, _ keep: Bool) -> Void
 
     var body: some View {
@@ -26,8 +29,7 @@ struct CountdownBannerView: View {
     }
 
     /// One countdown's line: message · Keep (pink — she wants you to commit) · act-now.
-    private func row(_ kind: ArrangerState.CountdownKind,
-                     _ c: (message: String, keepTitle: String, actTitle: String)) -> some View {
+    private func row(_ kind: ArrangerState.CountdownKind, _ c: Row) -> some View {
         HStack(spacing: 12) {
             Text(c.message)
                 .font(.system(size: 13, weight: .semibold))
@@ -57,14 +59,15 @@ extension Stage {
     }
 
     private func bannerView() -> CountdownBannerView {
-        var rows: [ArrangerState.CountdownKind: (message: String, keepTitle: String, actTitle: String)] = [:]
+        var rows: [ArrangerState.CountdownKind: CountdownBannerView.Row] = [:]
         for (kind, c) in state.countdowns {
             switch kind {
             case .revertModes:
-                rows[kind] = (Copy.revertCountdown(c.remaining), Copy.revertKeep, Copy.revertNow)
+                rows[kind] = .init(message: Copy.revertCountdown(c.remaining),
+                                   keepTitle: Copy.revertKeep, actTitle: Copy.revertNow)
             case .feedGuard:
-                rows[kind] = (Copy.feedGuardCountdown(NSScreen.screens.count, c.remaining),
-                              Copy.feedKeep, Copy.feedCutNow)
+                rows[kind] = .init(message: Copy.feedGuardCountdown(NSScreen.screens.count, c.remaining),
+                                   keepTitle: Copy.feedKeep, actTitle: Copy.feedCutNow)
             }
         }
         return CountdownBannerView(countdowns: rows) { [weak self] kind, keep in

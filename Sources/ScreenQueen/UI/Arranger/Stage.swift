@@ -388,7 +388,6 @@ enum ChromeMetrics {
     /// its absolute size (`chromeTileScale` = transform scale over this).
     static let referenceMinimapScale: CGFloat = 40
 
-    /// The ghost tint as SwiftUI currency (the layer world takes its CGColor from
-    /// `SeamPalette.colors[0]` directly).
-    static var ghostPink: Color { Color(nsColor: SeamPalette.colors[0]) }
+    /// The ghost tint as SwiftUI currency (the layer world takes `SeamPalette.pinkCG`).
+    static var ghostPink: Color { Color(nsColor: SeamPalette.pink) }
 }

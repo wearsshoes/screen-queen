@@ -49,28 +49,25 @@ final class Ensemble {
         for (id, screen) in screens where includes(id) {
             live.insert(id)
             if let existing = windows[id], existing.frame != screen.frame {
-                existing.orderOut(nil)
-                windows[id] = nil
-                retire(id)
+                retireMember(id)
             }
             let window = windows[id] ?? makeWindow(id: id, frame: screen.frame)
             windows[id] = window
             window.orderFrontRegardless()
         }
-        for (id, window) in windows where !live.contains(id) {
-            window.orderOut(nil)
-            windows[id] = nil
-            retire(id)
-        }
+        for id in windows.keys where !live.contains(id) { retireMember(id) }
     }
 
     /// Strike the set.
     func dismiss() {
-        for (id, window) in windows {
-            window.orderOut(nil)
-            retire(id)
-        }
-        windows.removeAll()
+        windows.keys.forEach { retireMember($0) }
+    }
+
+    /// Take one member off the glass and undo its dressing.
+    private func retireMember(_ id: CGDirectDisplayID) {
+        windows[id]?.orderOut(nil)
+        windows[id] = nil
+        retire(id)
     }
 
     /// Key the member on `screen` (focus-follows-cursor). No-op when that member

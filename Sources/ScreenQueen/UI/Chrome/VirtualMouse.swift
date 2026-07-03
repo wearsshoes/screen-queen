@@ -41,7 +41,7 @@ final class GhostCursorLayer: CAShapeLayer {
         self.path = path
         bounds = CGRect(x: 0, y: 0, width: 12.0 * s, height: 18.4 * s)
         anchorPoint = CGPoint(x: 0, y: 0)           // the tip is the hotspot
-        let pink = SeamPalette.colors[0]
+        let pink = SeamPalette.pink
         fillColor = pink.withAlphaComponent(0.35).cgColor
         strokeColor = pink.cgColor
         lineWidth = 2
