@@ -1,13 +1,10 @@
 import AppKit
 
-/// The bottom button bar (feed · reset · undo · [resolution slider] · done) — its
-/// construction (real Liquid Glass capsules on macOS 26, HUD fallback below), Dock-
-/// aware placement, the tap/slider actions, and syncing to shared state. The bar's
-/// views and cursor-state live as stored properties on Arranger.
+/// The bottom button bar (feed · reset · undo · [resolution slider] · done): real Liquid
+/// Glass capsules on macOS 26, HUD fallback below, plus the tap/slider actions and state
+/// syncing. The bar's views live as stored properties on Arranger.
 extension Arranger {
 
-    /// Idiomatic bottom button bar (Reset · Undo · Done) grouped in a rounded box,
-    /// on every screen, sitting above the Dock.
     func setupButtonBar() {
         resetButton.keyEquivalent = "\u{8}"; resetButton.keyEquivalentModifierMask = .command  // ⌘Delete
         resetButton.target = self; resetButton.action = #selector(resetTapped)
@@ -21,22 +18,16 @@ extension Arranger {
             b.bezelStyle = .push
             b.controlSize = .large
         }
-        // Icon-only round glass buttons (like the Spotlight icon pills). Titles are
-        // dropped for the label; the images (rendered at the current bar scale, crisp) are
-        // set by `refreshBarIcons`, called here and whenever state/scale change.
-        // Copy lives in `Arranger.tooltipText(for:)` and shows via the fun bubble on every
-        // canvas (VirtualMouse.swift) — no native `.toolTip` (it would pop on the hovered
-        // screen only, doubling up). Accessibility labels ride the images' descriptions.
+        // Icon-only buttons; copy shows via the fun bubble on every canvas, so no native
+        // `.toolTip`. Accessibility labels ride the images' descriptions.
         for b in allButtons {
             b.imagePosition = .imageOnly
             b.title = ""
         }
         refreshBarIcons()
 
-        // Resolution slider for the selected display: left = larger UI (lower res),
-        // right = more space (higher res), matching macOS "Larger Text ↔ More Space".
-        // A custom cell draws the bar so the ghost's pink track survives on non-key
-        // canvases (where macOS would grey the stock track out).
+        // Resolution slider: left = larger UI, right = more space (matching macOS).
+        // The custom cell keeps the ghost's pink track on non-key windows.
         let sliderCell = ArrangerSliderCell()
         sliderCell.sliderType = .linear
         sliderCell.controlSize = .large
@@ -48,32 +39,26 @@ extension Arranger {
         resSlider.target = self
         resSlider.action = #selector(resSliderChanged)
 
-        // One/All scope toggle (icon set in syncButtons to reflect the current scope).
         scopeButton.isBordered = false
         scopeButton.imagePosition = .imageOnly
         scopeButton.target = self
         scopeButton.action = #selector(scopeTapped)
 
-        // Each button is its own glass capsule (like the Spotlight icon pills), grouped
-        // in a container so nearby glass samples the backdrop consistently and merges
-        // fluidly. On macOS 26+ (Tahoe) this is real Liquid Glass; older systems keep
-        // the ordinary buttons in a plain stack.
+        // Each button is its own glass capsule, grouped so neighboring glass merges.
         let container: NSView
         if #available(macOS 26.0, *) {
-            // Chromeless buttons so the glass capsule *is* the surface; the label/icon
-            // still draws (border off ≠ content off).
+            // Chromeless buttons: the glass capsule *is* the surface (border off ≠ content off).
             for b in [feedButton, resetButton, undoButton, doneButton] {
                 b.isBordered = false
                 b.contentTintColor = .labelColor
             }
 
-            // Wrap each button in a padding container, and set THAT as the glass view's
-            // contentView. (Adding a control directly to the glass view renders it blank
-            // — the glass only composites its `contentView`.)
+            // Wrap each button in a padding container and set THAT as the glass view's
+            // contentView — a control added directly to the glass renders blank.
             let diameter: CGFloat = 56
             let glassy = zip([feedButton, resetButton, undoButton, doneButton], [false, false, false, true]).map {
                 (button, prominent) -> HoverGlassView in
-                // A square content box → the glass renders as a circle (radius = ½ side).
+                // A square content box → the glass renders as a circle.
                 let pad = NSView()
                 pad.translatesAutoresizingMaskIntoConstraints = false
                 button.translatesAutoresizingMaskIntoConstraints = false
@@ -83,8 +68,7 @@ extension Arranger {
                 barMetrics.lengths += [(w, diameter), (h, diameter)]
                 NSLayoutConstraint.activate([
                     w, h,
-                    // The button *fills* the capsule (not just its icon-sized centre), so
-                    // the whole bubble is the hover/click target — icon stays centred.
+                    // The button fills the capsule so the whole bubble is the click target.
                     button.leadingAnchor.constraint(equalTo: pad.leadingAnchor),
                     button.trailingAnchor.constraint(equalTo: pad.trailingAnchor),
                     button.topAnchor.constraint(equalTo: pad.topAnchor),
@@ -97,15 +81,14 @@ extension Arranger {
                         ?? .systemPink).withAlphaComponent(0.4)
                     : nil
                 let g = HoverGlassView(baseTint: base)
-                g.button = button         // hover only lights up while the button is enabled
-                g.cornerRadius = diameter / 2   // full circle
-                g.style = .clear          // high-transparency variant — see the backdrop through it
+                g.button = button         // hover only lights up while enabled
+                g.cornerRadius = diameter / 2
+                g.style = .clear
                 g.contentView = pad
                 barMetrics.corners.append((g, diameter / 2))
                 return g
             }
-            ghostGlassViews = glassy       // pinked in ghost mode via GhostTintable
-            // The slider lives in its own wider glass pill, inserted between Undo and Done.
+            ghostGlassViews = glassy
             let sliderPill = makeSliderPill(height: diameter)
             ghostGlassViews.append(sliderPill)
             var pieces: [NSView] = glassy
@@ -147,22 +130,17 @@ extension Arranger {
             ghostTintTargets = [HUDBoxGhost(box: buttonBar), resSlider]
             container = buttonBar
         }
-        // The container is frame-placed each render by `layoutBar` through the *same*
-        // `chromeViewRect` the granny viewer uses — sized to its own fitting content, at
-        // the shared centre-relative spot. Its internal stack still autolayout-sizes the
-        // capsules (that's what gives `fittingSize`); we just position the whole box.
+        // Frame-placed each render by `layoutBar`; the internal stack still autolayouts
+        // (that's what gives `fittingSize`).
         container.translatesAutoresizingMaskIntoConstraints = true
         addSubview(container)
-        // Cap the slider (the compressible member) so the bar never overflows a narrow
-        // screen; the container's fitting size then follows.
+        // Cap the slider (the compressible member) so the bar never overflows a narrow screen.
         barMaxWidth = resSlider.widthAnchor.constraint(lessThanOrEqualToConstant: 100_000)
         barMaxWidth?.isActive = true
-        barContainer = container   // frame-placed by layoutBar; tint is per element
+        barContainer = container
 
-        // The instruction line, right under the bar and centred on it. It's a sibling (not
-        // a child of the glass container, which only composites its contentView). It's
-        // positioned + font-sized in `layoutFooter` (called from renderChrome) to track the
-        // bar at any zoom — scaling the *font*, not a rasterised bitmap, so it stays crisp.
+        // The instruction line under the bar — a sibling (the glass container only
+        // composites its contentView). Positioned + font-sized in `layoutFooter`.
         footerLabel.stringValue = Copy.footer
         footerLabel.textColor = .tertiaryLabelColor
         footerLabel.alignment = .center
@@ -170,9 +148,7 @@ extension Arranger {
     }
 
 
-    /// A glass pill hosting the resolution slider, flanked by "A" / "a" end glyphs —
-    /// wider than the round button capsules, same height. In ghost mode the pill glass,
-    /// the end glyphs, and the slider's track all wear pink (see `GhostGlassPill`).
+    /// A glass pill hosting the resolution slider, flanked by "A" / "a" end glyphs.
     @available(macOS 26.0, *)
     private func makeSliderPill(height: CGFloat) -> GhostGlassPill {
         let big = NSTextField(labelWithString: "A")
@@ -184,8 +160,7 @@ extension Arranger {
         resSlider.translatesAutoresizingMaskIntoConstraints = false
         setSoftSliderWidth(preferred: 144)
 
-        // Pin the scope toggle to a fixed width — the one/all symbols differ slightly in
-        // intrinsic width, and without this the whole bar nudged when it swapped.
+        // Fixed width: the one/all symbols differ slightly and would nudge the bar.
         scopeButton.translatesAutoresizingMaskIntoConstraints = false
         let scopeW = scopeButton.widthAnchor.constraint(equalToConstant: 24)
         scopeW.isActive = true
@@ -195,7 +170,7 @@ extension Arranger {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
-        row.setCustomSpacing(14, after: small)   // a little gap before the scope toggle
+        row.setCustomSpacing(14, after: small)
         barMetrics.spacings.append((row, 8))     // (the custom 14 after `small` stays fixed)
 
         let pad = NSView()
@@ -216,23 +191,16 @@ extension Arranger {
         g.style = .clear
         g.contentView = pad
         barMetrics.corners.append((g, height / 2))
-        // The pill drives its own contents pink in ghost mode: the slider's track and
-        // the A/a end glyphs. (The scope button keeps its own accent — it's a toggle.)
+        // The pill drives its own contents pink in ghost mode (track + end glyphs).
         g.slider = resSlider
         g.glyphs = [big, small]
         return g
     }
 
 
-    /// The slider is the bar's one compressible member: a preferred width the
-    /// `barMaxWidth` cap can squeeze, with a firm-but-breakable floor so it never
-    /// collapses to nothing before the cap gives up.
-    ///
-    /// The preferred width is high (not `.defaultLow`): the slider hugs its intrinsic
-    /// size by default, so a *low*-priority width can't grow the bar past that — the
-    /// slider just stays short. We also drop its horizontal hugging so it's happy to
-    /// stretch. It's still below `barMaxWidth` (a `≤`), so an extreme-portrait screen can
-    /// still squeeze it via the floor.
+    /// The slider is the bar's one compressible member: a high-priority preferred width
+    /// (a low one couldn't grow the bar — the slider hugs its intrinsic size) that
+    /// `barMaxWidth` can squeeze, with a breakable floor so it never collapses first.
     private func setSoftSliderWidth(preferred: CGFloat) {
         resSlider.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         let pref = resSlider.widthAnchor.constraint(equalToConstant: preferred)
@@ -243,10 +211,7 @@ extension Arranger {
         barMetrics.lengths += [(pref, preferred), (floor, 60)]
     }
 
-    /// Place the bar and banner at the *uniform* anchor offsets (`ArrangerState`'s
-    /// unified metrics): the same bottom/top insets and width cap on every canvas, so
-    /// the chrome sits at identical anchor-space positions on every screen — never out
-    /// of bounds on any of them, however extreme the aspect ratios.
+    /// Re-tune the unified chrome metrics (same values on every canvas) once bounds settle.
     override func layout() {
         super.layout()
         bannerTop?.constant = state.uniformMenuBarInset + 12
@@ -254,32 +219,22 @@ extension Arranger {
         onLayout?()   // re-render chrome now that bounds/frames are settled
     }
 
-    /// Place the button bar through `chromeViewRect` — the *same* positioning code as the
-    /// granny viewer (centre-relative, tile-scaled). Its natural size is its own fitting
-    /// content divided back out of the current scale (`chromeViewRect` re-applies the
-    /// scale). Position-agnostic: `barCentreOffsetInches` just says where the centre sits.
-    func layoutBar() {
+    /// Place the bar through `chromeViewRect` — the same positioning code as the granny
+    /// viewer. The bar is laid out at final size, so `fittingSize` is the on-screen size.
+    func layoutBar(in t: Transform) {
         guard let container = barContainer else { return }
         container.layoutSubtreeIfNeeded()
-        let k = chromeTileScale
-        let fit = container.fittingSize
-        let natural = CGSize(width: fit.width / max(k, 0.01), height: fit.height / max(k, 0.01))
-        if let rect = chromeViewRect(naturalSize: natural, centreOffsetInches: barCentreOffsetInches) {
-            container.frame = rect
-        }
+        container.frame = chromeViewRect(finalSize: container.fittingSize,
+                                         centreOffsetInches: barCentreOffsetInches, in: t)
     }
 
-    /// Where the bar's centre sits below the screen centre, in **plane inches** — the
-    /// schematic's own unit, which `chromeViewRect` maps to view pixels via `transform.scale`
-    /// (view-px per plane-inch). Map-relative like the granny viewer: drifts/rescales with
-    /// the minimap zoom. (A plane-inch is a real desk-arrangement inch shown shrunk on the
-    /// map, not a ruler-on-the-glass inch.)
+    /// The bar centre's offset from the screen centre, in **plane inches** (map-relative,
+    /// like the granny viewer — drifts/rescales with the minimap).
     private var barCentreOffsetInches: CGPoint { CGPoint(x: 0, y: -10) }
 
-    /// Lay the bar out at `scale` (its true final size) so every element renders vector-
-    /// crisp, instead of layer-scaling a rasterised bar (which blurred). Mutates the
-    /// captured constraints/fonts and re-renders the icons; the ghost transform is then a
-    /// pure translation. No-op when the scale hasn't changed.
+    /// Lay the bar out at `scale` — its true final size, so every element renders
+    /// vector-crisp instead of layer-scaling a rasterised bar (which blurred). No-op when
+    /// the scale hasn't changed.
     func restyleBar(scale: CGFloat) {
         guard abs(scale - barMetrics.currentScale) > 0.001 else { return }
         barMetrics.currentScale = scale
@@ -291,15 +246,15 @@ extension Arranger {
         let backing = window?.backingScaleFactor ?? 2
         for (glyph, base) in barMetrics.glyphs {
             let bold = glyph.font?.fontDescriptor.symbolicTraits.contains(.bold) ?? false
-            let pt = (base * scale).rounded()   // whole point hints crispest (see the footer)
+            let pt = (base * scale).rounded()   // whole point hints crispest
             glyph.font = bold ? .boldSystemFont(ofSize: pt) : .systemFont(ofSize: pt)
             glyph.wantsLayer = true
-            glyph.layer?.contentsScale = backing   // render the text at full display density
+            glyph.layer?.contentsScale = backing
         }
         refreshBarIcons()
     }
 
-    /// The base symbol point sizes (at scale 1); icons render at `× barMetrics.currentScale`.
+    /// Base symbol point sizes (at scale 1); icons render at `× barMetrics.currentScale`.
     private var iconPt: CGFloat { 22 }
     private var scopePt: CGFloat { 15 }
 
@@ -308,10 +263,8 @@ extension Arranger {
         return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(cfg)
     }
 
-    /// (Re)render every bar icon at the current scale — crisp, since the symbol is
-    /// rasterised at its final point size rather than a small image being layer-scaled up.
-    /// Feed and scope reflect state. Called on setup, on state change (`syncButtons`), and
-    /// on scale change (`restyleBar`).
+    /// (Re)render every bar icon at the current scale — rasterised at final point size,
+    /// so crisp. Called on setup, state change, and scale change.
     func refreshBarIcons() {
         resetButton.image = symbol("arrow.counterclockwise", pt: iconPt)
         undoButton.image = symbol("arrow.uturn.backward", pt: iconPt)
@@ -331,15 +284,14 @@ extension Arranger {
     }
 
 
-    /// Live-preview resolution as the slider moves — the selected display in `.one` scope,
-    /// or every display by the same step delta in `.all` scope. Commit on mouse-up.
+    /// Live-preview resolution as the slider moves (one display, or all by the same step
+    /// delta). Commit on mouse-up.
     @objc private func resSliderChanged() {
         guard let id = selectedID, sliderModes.count > 1 else { return }
         let n = sliderModes.count
         let idx = max(0, min(n - 1, Int((Double(n - 1) * resSlider.doubleValue).rounded())))
         resSlider.doubleValue = Double(idx) / Double(n - 1)   // snap knob to the detent
 
-        // Remember where the drag started (first change since a fresh mouse-down).
         let event = NSApp.currentEvent?.type
         if sliderDragStartIndex == nil {
             sliderDragStartIndex = currentModeIndex(for: displays.first { $0.id == id }!, in: sliderModes)
@@ -357,12 +309,12 @@ extension Arranger {
         if event == .leftMouseUp {
             commitPendingResolution()
             sliderDragStartIndex = nil
-            state.onSliderDragChanged?(false)   // stop the drag-driven ghost updates
+            state.onSliderDragChanged?(false)
         }
     }
 
-    /// Preview every display shifted by `stepDelta` detents from its *current* mode
-    /// (clamped to each display's own range), for `.all` scope.
+    /// Preview every display shifted by `stepDelta` detents from its current mode
+    /// (clamped per display), for `.all` scope.
     private func previewProportional(stepDelta: Int) {
         state.pendingModes.removeAll(); pendingSize.removeAll()
         for d in displays where !d.isMirrored {
@@ -375,27 +327,21 @@ extension Arranger {
         emitPreview()
     }
 
-    /// Reflect undo availability and sync the resolution slider to the selected display.
+    /// Reflect undo availability and sync the slider to the selected display.
     func syncButtons() {
-        // Undo and Reset are both no-ops until something's changed — `canUndo` is true
-        // exactly when there's an edit (or pending revert) to step back or reset. So both
-        // start disabled on open and light up on the first change.
+        // `canUndo` is true exactly when there's an edit or pending revert to step back.
         undoButton.isEnabled = state.canUndo
         resetButton.isEnabled = state.canUndo
 
-        // Feed (run/stand) + scope (one/all) icons reflect state. Re-render only when the
-        // feed symbol actually flips — `syncButtons` runs on every notify, and rebuilding
-        // the images each time is churn. `refreshBarIcons` renders all icons at the current
-        // bar scale (crisp). The scope symbol also flips, so guard on either changing.
+        // Rebuild icons only when a state symbol actually flips (this runs every notify).
         let feedSymbol = state.feedEnabled ? "figure.run" : "figure.stand"
         if feedSymbol != feedButtonSymbol {
             refreshBarIcons()
         } else {
-            // Scope can flip without the feed changing — refresh just its icon.
             scopeButton.image = symbol(state.sliderScope == .all ? "rectangle.stack" : "rectangle", pt: scopePt)
         }
 
-        applyStateIconGhostTint()   // feed + scope icons: pink on a ghost canvas, else black
+        applyStateIconGhostTint()
 
         let selected = selectedID.flatMap { id in displays.first(where: { $0.id == id }) }
         sliderModes = selected.map { sortedModes(for: $0) } ?? []
@@ -405,26 +351,20 @@ extension Arranger {
             let pending = state.pendingMode(for: d.id)
             if let pending, isGhost,
                let idx = sliderModes.firstIndex(where: { ModeCatalog.sameMode(pending, $0.cgMode) }) {
-                // A ghost canvas isn't the one being dragged, so mirror the live preview —
-                // the drag consumes the cursor on the active screen, so this is the only
-                // place the resolution change shows up over here.
+                // A ghost canvas mirrors the live preview (the drag consumes the cursor
+                // on the active screen).
                 resSlider.doubleValue = Double(idx) / Double(sliderModes.count - 1)
             } else if pending == nil {
-                // Not mid-drag: re-sync from the committed mode. (On the *active* canvas we
-                // never fight the live drag — the slider drives itself there.)
+                // Not mid-drag: re-sync from the committed mode (never fight a live drag).
                 let idx = currentModeIndex(for: d, in: sliderModes) ?? (sliderModes.count - 1) / 2
                 resSlider.doubleValue = Double(idx) / Double(sliderModes.count - 1)
             }
         }
     }
 
-    /// Tint the icons/slider whose look is driven by *state* (feed, scope, slider track)
-    /// for the current ghost mode: pink on a ghost canvas, black/normal on the active one.
-    ///
-    /// Called both from `syncButtons` and from `renderChrome`. The catch: `syncButtons`
-    /// runs *before* `renderChrome` sets `isGhost`, so right after an active-screen change
-    /// it reads a stale value and would show pink/black inverted for a beat — `renderChrome`
-    /// re-runs this with the fresh `isGhost` to settle it.
+    /// Tint the state-driven icons/track for the current ghost mode. Called from both
+    /// `syncButtons` and `renderChrome` — the former can run with a stale `isGhost` right
+    /// after an active-screen change, so the latter re-applies with the fresh value.
     func applyStateIconGhostTint() {
         let tint: NSColor = isGhost ? VirtualMouse.pink : .labelColor
         feedButton.contentTintColor = tint

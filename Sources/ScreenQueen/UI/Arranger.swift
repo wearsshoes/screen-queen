@@ -2,51 +2,41 @@ import AppKit
 
 /// Interactive visualization + editor of the display arrangement.
 ///
-/// The schematic is drawn at true physical sizes. While the user manipulates it
-/// (drag / keyboard), a **physical plane** — `plane`, a rect per display in inches
-/// — is the source of truth: dragging moves a rect on the plane 1:1 with the
-/// cursor, and snapping/alignment are physical. Only when the manipulation ends
-/// (mouse up / modifier released) do we convert the plane back to a macOS *point*
-/// arrangement (via `SchematicLayout.toPoints`) and commit. The point↔
-/// physical seam map is thus applied at exactly two boundaries — interpret the
-/// committed layout onto the plane, convert the plane back — never per frame.
+/// The schematic is drawn at true physical sizes. While the user manipulates it, a
+/// **physical plane** (`plane`, a rect per display in inches) is the source of truth;
+/// only when the manipulation ends is the plane converted back to a macOS *point*
+/// arrangement (`SchematicLayout.toPoints`) and committed. The point↔physical map is
+/// applied at exactly those two boundaries, never per frame.
 ///
-/// Keys (selected display): ⌘+arrows/WASD change selection; arrows/WASD nudge;
-/// ⌘⇧+arrows/WASD step alignment; ⌘ +/−/0 change resolution.
+/// Keys: ⌘+arrows/WASD change selection; arrows/WASD nudge; ⌘⇧+arrows/WASD step
+/// alignment; ⌘ +/−/0 change resolution.
 final class Arranger: NSView {
 
     /// Shared editing state — one instance across every per-screen canvas.
     let state: ArrangerState
-    // The bottom button bar's views + state — constructed and driven in
-    // Arranger+Buttons.
+    // The bottom button bar's views + state — built and driven in Arranger+Buttons.
     let feedButton = NSButton(title: "", target: nil, action: nil)
     let resetButton = NSButton(title: "Reset", target: nil, action: nil)
     let undoButton = NSButton(title: "Undo", target: nil, action: nil)
     let doneButton = NSButton(title: "Done", target: nil, action: nil)
-    /// Resolution slider (A ↔ a) for the selected display, in the bottom cluster.
     let resSlider = NSSlider()
-    /// The feed button's currently-rendered SF Symbol name, so `syncButtons` rebuilds the
-    /// icon only when the feed state flips (not on every notify).
+    /// The feed button's rendered symbol name, so `syncButtons` only rebuilds on a flip.
     var feedButtonSymbol: String?
-    /// One/All scope toggle for the slider (single rectangle vs. overlapping rectangles).
+    /// One/All scope toggle for the slider.
     let scopeButton = NSButton(title: "", target: nil, action: nil)
     let buttonBar = NSVisualEffectView()
 
-    /// The selected display's sorted modes, cached while the slider drives them so a
-    /// live preview doesn't recompute per tick. Rebuilt in `syncButtons`.
+    /// The selected display's sorted modes, cached while the slider drives them.
     var sliderModes: [DisplayMode] = []
 
-    /// The selected display's mode index at the moment a slider drag began, so `.all`
-    /// scope can apply the same *step delta* to every display.
+    /// Mode index at slider-drag start, so `.all` scope applies the same step delta everywhere.
     var sliderDragStartIndex: Int?
 
-    /// Base clearance above the screen bottom (before adding the Dock height): enough to
-    /// clear a bottom-edge alignment arrow, but no more — the Dock inset is added on top.
+    /// Clearance above the screen bottom before the Dock inset is added.
     let baseBottomMargin: CGFloat = 40
 
-    /// Width cap on the bar container: the narrowest screen minus margin, identical on
-    /// every canvas, so the bar compresses (slider first) rather than ever running out
-    /// of bounds on an extreme-portrait girl.
+    /// Width cap on the bar container — identical on every canvas, so the bar compresses
+    /// rather than running out of bounds on an extreme-portrait screen.
     var barMaxWidth: NSLayoutConstraint?
 
     /// The cap rule: narrowest screen minus breathing room, floored so pathological
@@ -55,80 +45,57 @@ final class Arranger: NSView {
         max(320, minScreenWidth - 64)
     }
 
-    /// The button bar's outermost container (glass group on macOS 26, the HUD box
-    /// otherwise) — kept so the ghost cursor can map bar-relative positions across
-    /// canvases (see VirtualMouse.swift).
+    /// The button bar's outermost container (glass group on macOS 26, HUD box otherwise).
     weak var barContainer: NSView?
 
-    /// The bar is *laid out* at `chromeTileScale` (not layer-scaled) so every element —
-    /// glass, icons, text — renders vector-crisp at its final size instead of a bitmap
-    /// being blown up. `restyleBar(scale:)` mutates these captured constraints/views; the
-    /// layer transform is then translation-only (for the ghost projection). See
-    /// VirtualMouse.swift.
+    /// The bar is *laid out* at `chromeTileScale` (not layer-scaled) so everything renders
+    /// vector-crisp at its final size. `restyleBar(scale:)` mutates these captured
+    /// constraints/views.
     struct BarMetrics {
         /// (constraint, base constant) pairs — length-like dimensions scaled together.
         var lengths: [(NSLayoutConstraint, CGFloat)] = []
-        /// Stack views whose `spacing` scales (base spacing captured).
         var spacings: [(NSStackView, CGFloat)] = []
-        /// Glass views whose `cornerRadius` scales (base radius).
         var corners: [(NSView, CGFloat)] = []
         /// The A / a end glyphs (label, base font size).
         var glyphs: [(NSTextField, CGFloat)] = []
         var currentScale: CGFloat = 1
     }
     var barMetrics = BarMetrics()
-    /// The instruction line under the bar (see `Copy.footer`). A sibling of the bar,
-    /// constrained just below it and scaled with it (part of the chrome), so it tracks the
-    /// bar at every zoom instead of being recomputed in the draw code.
+    /// The instruction line under the bar (see `Copy.footer`), scaled/positioned with it.
     let footerLabel = NSTextField(labelWithString: "")
 
-    /// On an inactive display the one set of chrome (VirtualMouse.swift) restyles pink
-    /// and repositions to represent the active screen. `ghostScale` is this canvas's
-    /// minimap scale ÷ the active canvas's — so the ghost is drawn as part of *this*
-    /// minimap, as different from the active screen's chrome as the tiles are. `ghostArrow`
-    /// (the ghost mouse) and the chrome both ride `ghostScale` + `ghostActiveCenter`,
-    /// recomputed only on active-screen change.
+    /// Ghost-mapping state for `ghostPoint` (the ghost mouse + tooltip): this canvas's
+    /// minimap scale ÷ the active canvas's, and the active canvas's centre. Recomputed
+    /// in `renderChrome` on active-screen change.
     var ghostArrow: GhostCursorLayer?
     var ghostScale: CGFloat = 1
     var ghostActiveCenter: CGPoint = .zero
-    /// True while this canvas is showing the pink ghost chrome (cursor is on another
-    /// screen). `syncButtons` reads it so a rebuilt icon (e.g. the feed toggle) keeps the
-    /// ghost's pink tint instead of resetting to the normal label colour.
+    /// True while this canvas shows the pink ghost chrome (cursor is on another screen).
     var isGhost = false
-    /// The beacon (VirtualMouse.swift): a pulsing pink map-pin at the cursor's location
-    /// on *this* canvas's schematic tiles — where you are on the map, on every screen.
+    /// The beacon: a pulsing pink map-pin at the cursor's location on this canvas's tiles.
     var planeMarkerLayer: PlaneMouseMarkerLayer?
 
     /// The frosted info card per display (see `LabelCard`) — a real backdrop-blur subview,
-    /// so it can't be drawn in `draw(_:)`. Repositioned to the tile each frame; created on
-    /// demand, and any not touched this pass are hidden.
+    /// repositioned to the tile each frame; created on demand, hidden when untouched.
     var labelCards: [CGDirectDisplayID: LabelCard] = [:]
 
-    /// Fired at the end of `layout()`, once `bounds` is final — ArrangerWindows re-renders
-    /// the chrome so its tile-scaled transform uses the settled size (not the pre-layout
-    /// `bounds` that made the bar render too small on first show).
+    /// Fired at the end of `layout()`, once `bounds` is final, so the chrome re-renders
+    /// with the settled size.
     var onLayout: (() -> Void)?
 
-    /// The fun tooltip (comic-sans white bubble, pink outline) — shown on *every* canvas
-    /// at the mirrored position of whatever bar control the cursor hovers on the active
-    /// screen, not just the screen the real mouse is on. Created on demand.
+    /// The fun tooltip bubble — shown on *every* canvas at the mirrored cursor position.
     var tooltipBubble: TooltipBubble?
 
-    /// The bar controls that carry a fun tooltip, in hit-test order. Their `toolTip` text
-    /// (set in Arranger+Buttons) is what the bubble shows — one source of copy.
+    /// The bar controls that carry a fun tooltip, in hit-test order.
     var tooltipControls: [NSControl] { [feedButton, resetButton, undoButton, resSlider, scopeButton, doneButton] }
 
-    /// The chrome elements that carry the ghost tint *in their own styling* on an
-    /// inactive display (see VirtualMouse.swift) — glass capsules go pink, the slider's
-    /// track fills pink, the end glyphs and button icons tint pink. Populated in
-    /// `setupButtonBar`; empty on the pre-26 HUD path (which pinks its own box).
+    /// Chrome that wears the ghost tint in its own styling (see `GhostTintable`).
+    /// Populated in `setupButtonBar`; empty on the pre-26 HUD path.
     var ghostGlassViews: [GhostTintable] = []
-    /// The bottom bar's non-glass tintables: the slider (track), scope button, and the
-    /// A/a end glyphs — retinted alongside the glass in ghost mode.
+    /// Non-glass tintables: slider track, scope button, A/a glyphs.
     var ghostTintTargets: [GhostTintable] = []
 
-    /// The top-of-screen countdown banner (auto-revert / feed guard) — built on demand
-    /// and driven in Arranger+Banner.swift. nil until a countdown first appears.
+    /// The top-of-screen countdown banner — built on demand in Arranger+Banner.swift.
     var banner: CountdownBanner?
     /// The banner's top constraint, re-tuned in `layout()` to clear the menu bar.
     var bannerTop: NSLayoutConstraint?
@@ -140,9 +107,8 @@ final class Arranger: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// GPU-backed seam particles (CAEmitterLayer). Their simulation runs on the GPU, so
-    /// no per-frame draw work or animation timer is needed — `draw(_:)` only repositions
-    /// the emitters when the layout changes.
+    /// GPU-backed seam particles (CAEmitterLayer) — no per-frame draw work or timer;
+    /// `draw(_:)` only repositions the emitters when the layout changes.
     private(set) lazy var seamEmitters: SeamEmitters = {
         wantsLayer = true
         let host = CALayer()
@@ -153,29 +119,26 @@ final class Arranger: NSView {
         return SeamEmitters(host: host)
     }()
 
-    /// The front seam glow: a layer *above* the sparkle emitters (higher zPosition), so its
-    /// bright per-seam glow reads in front of the shimmer (the wide soft glow is drawn behind
-    /// them, in `draw(_:)`).
+    /// The front seam glow — above the sparkle emitters (the wide soft glow is drawn
+    /// behind them, in `draw(_:)`).
     private(set) lazy var seamGlow: SeamGlow = {
         wantsLayer = true
         let host = CALayer()
         host.frame = bounds
         host.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        host.zPosition = 2               // front glow above the particles
+        host.zPosition = 2
         layer?.addSublayer(host)
         return SeamGlow(host: host)
     }()
 
-    /// The floating "what she sees" panel (see SolvePanel): a subview on its own layer,
-    /// lifted above the sparkle emitters (zPosition 1) and the front seam glow (2), so the
-    /// map never draws over its own readout. Draggable by its title bar; body click-through.
+    /// The floating "what she sees" panel (see SolvePanel), on its own layer above the
+    /// seam layers. Draggable; body click-through.
     private(set) lazy var solvePanel: SolvePanel = {
         let p = SolvePanel(frame: NSRect(origin: .zero, size: NSSize(width: 240, height: 166)))
         p.wantsLayer = true
         p.layer?.zPosition = 3
-        // A drag stores the panel's centre as an *inch* offset from the screen centre —
-        // its own state, independent of the tiles (so moving a tile never moves it), but
-        // in inches so it scales with the minimap. Every canvas re-derives from it.
+        // A drag stores the panel's centre as an inch offset from the screen centre —
+        // its own state (moving a tile never moves it), scaling with the minimap.
         p.onMoved = { [weak self] origin in
             guard let self, let t = self.drawTransform(self.currentRects()), t.scale > 0 else { return }
             let centre = CGPoint(x: origin.x + p.frame.width / 2, y: origin.y + p.frame.height / 2)
@@ -188,26 +151,26 @@ final class Arranger: NSView {
         return p
     }()
 
-    /// The granny panel's natural size in points, at `chromeTileScale == 1`. Multiplied
-    /// by `chromeTileScale` so it grows/shrinks with the tiles in lockstep with the button
-    /// bar and the ghost mouse (one shared knob, `referenceMinimapScale`).
+    /// The granny panel's natural size in points, at `chromeTileScale == 1`.
     static let panelNaturalSize = CGSize(width: 208, height: 144)
 
-    /// Place a *map-relative* chrome element on this canvas, in one coherent model:
-    ///
-    /// - **size** = `naturalSize × chromeTileScale` — rides the tiles (grows/shrinks as you
-    ///   zoom the minimap), so chrome reads as part of the schematic.
-    /// - **centre** = `bounds.mid + centreOffsetInches × transform.scale`. `transform.scale`
-    ///   is view-pixels per **plane inch** (the schematic's physical-inch unit), so the
-    ///   offset is in *plane inches* — NOT real screen inches (a real inch is far more pixels
-    ///   at the minimap's zoom). The element therefore sits at the identical map-relative
-    ///   spot on every canvas and drifts with the minimap as tiles move/zoom.
-    ///
-    /// This one function places the granny viewer, the button bar, and the footer.
+    /// Place a *map-relative* chrome element: size = `naturalSize × chromeTileScale`
+    /// (rides the tiles), centre = `bounds.mid + offset × transform.scale`. The offset is
+    /// in **plane inches** (the schematic's physical unit, shown shrunk on the map) — NOT
+    /// real on-glass inches. Same map-relative spot on every canvas.
+    /// Places the granny viewer, the button bar, and the footer.
     func chromeViewRect(naturalSize: CGSize, centreOffsetInches off: CGPoint) -> CGRect? {
         guard let t = drawTransform(currentRects()), t.scale > 0 else { return nil }
-        let k = chromeTileScale
-        let size = CGSize(width: naturalSize.width * k, height: naturalSize.height * k)
+        let k = chromeTileScale(t)
+        return chromeViewRect(finalSize: CGSize(width: naturalSize.width * k,
+                                                height: naturalSize.height * k),
+                              centreOffsetInches: off, in: t)
+    }
+
+    /// The `finalSize` variant, for chrome laid out at the tile scale (the button bar)
+    /// whose measured size is already final — only the centre needs mapping.
+    func chromeViewRect(finalSize size: CGSize, centreOffsetInches off: CGPoint,
+                        in t: Transform) -> CGRect {
         let centre = CGPoint(x: bounds.midX + off.x * t.scale,
                              y: bounds.midY + off.y * t.scale)
         return CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2,
@@ -257,14 +220,11 @@ final class Arranger: NSView {
     var dragMoved = false
 
     /// This canvas's transform, frozen while a tile drag is live on ANY canvas
-    /// (`state.draggingDisplayID` broadcasts one) — so no screen's map recenters
-    /// mid-drag. The drag host froze its own in `dragTransform`; everyone else
-    /// holds their blocking too. Cleared on the first draw after the drag ends.
+    /// (`state.draggingDisplayID`), so no screen's map recenters mid-drag.
     var sharedDragTransform: Transform?
 
-    /// The transform to render with — frozen for the duration of a tile drag
-    /// anywhere, live otherwise. All drawing and mouse-overlay placement should go
-    /// through this (not `transform(_:)` directly) so the map and its markers agree.
+    /// The transform to render with — frozen for the duration of a tile drag anywhere,
+    /// live otherwise. All drawing and mouse-overlay placement goes through this.
     func drawTransform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
         guard state.draggingDisplayID != nil else {
             sharedDragTransform = nil
@@ -293,43 +253,35 @@ final class Arranger: NSView {
     // Resolution preview flag (commits the pending mode when ⌘ is released).
     var zoomPending = false
 
-    // Global (⌘⇧ ±) zoom run state. `globalZoomLevel` is a continuous, *unclamped* scale
-    // applied to every display's starting PPI; each display picks the achievable mode
-    // nearest `startPPI × level`, clamped to its range. Tracking the unclamped level (not
-    // per-display detent positions) is what makes a maxed-out display stay pinned while
-    // the level keeps rising, then rejoin proportionally as it falls. Reset each run.
+    // Global (⌘⇧ ±) zoom run state: a continuous, *unclamped* scale on every display's
+    // starting PPI. Tracking the unclamped level lets a maxed-out display stay pinned
+    // while the level rises, then rejoin proportionally as it falls. Reset each run.
     var globalZoomLevel: Double = 1
     var globalZoomStartPPI: [CGDirectDisplayID: Double] = [:]
 
     var showAlignGhosts: Bool { get { state.showAlignGhosts } set { state.showAlignGhosts = newValue } }
 
-    /// The display this canvas's window sits on — its tile is centered in the view.
-    /// nil ⇒ center the main display (single-window fallback).
+    /// The display this canvas's window sits on. nil ⇒ center the main display.
     var centerID: CGDirectDisplayID?
 
     let outerPadding: CGFloat = 32
     let tileCornerRadius: CGFloat = 8
 
-    /// Width of the right-hand column overlay (0 when it holds nothing). Home to both
-    /// mirrored-display cards and a macOS-managed AirPlay session card.
+    /// Width of the right-hand column overlay (0 when it holds nothing).
     var mirrorColumnWidth: CGFloat {
         mirroredDisplays.isEmpty && airplaySession == nil ? 0 : 360
     }
 
-    /// The un-mirror button rects from the most recent draw, per mirrored display id,
-    /// for click hit-testing (view-local, so per-canvas).
+    /// Un-mirror button rects from the last draw, per mirrored display id (hit-testing).
     var unmirrorButtonRects: [CGDirectDisplayID: NSRect] = [:]
 
-    /// The "Open Settings" button rect on the AirPlay card from the most recent draw,
-    /// for click hit-testing. nil when no AirPlay card was drawn.
+    /// The AirPlay card's "Open Settings" button rect from the last draw (hit-testing).
     var airplaySettingsButtonRect: NSRect?
 
-    /// Cached native pixel aspect per display (see `nativeAspect`). Fixed per physical
-    /// panel, so a stale entry for a disconnected id is harmless.
+    /// Cached native pixel aspect per display (fixed per panel; stale entries harmless).
     var nativeAspectCache: [CGDirectDisplayID: Double?] = [:]
 
-    /// Cached desktop wallpaper per display, keyed by (id, image URL) so a changed
-    /// wallpaper reloads. `nil` value = looked up, none available.
+    /// Cached desktop wallpaper per display, keyed by (id, image URL) so changes reload.
     var wallpaperCache: [CGDirectDisplayID: (url: URL, image: NSImage)?] = [:]
 
     override var acceptsFirstResponder: Bool { true }
@@ -339,10 +291,6 @@ final class Arranger: NSView {
     /// Called by the state after a mutation so this view repaints.
     func refresh() {
         syncButtons(); syncBanner()
-        // Every canvas's panel is the same plane rect (size in inches at the shared
-        // anchor), mapped through this canvas's transform — so it scales with the minimap
-        // and its corner lands on the same tile corner everywhere. A smaller screen may
-        // clip it, which is fine.
         if let rect = panelViewRect(), solvePanel.frame != rect {
             solvePanel.frame = rect
         }
@@ -372,37 +320,30 @@ final class Arranger: NSView {
         let unionOrigin: CGPoint
         let viewHeight: CGFloat       // for the single plane→view y-flip
 
-        // The physical plane is y-down (top-left origin, from `CGDisplayBounds`); this view
-        // is a standard y-up NSView. Flip y exactly here — the one gate — so everything that
-        // enters view space through `viewRect`/`viewPoint` (tiles, bars, particles, markers,
-        // ghosts) is oriented correctly without any per-consumer flipping downstream.
+        // The physical plane is y-down (top-left origin, from `CGDisplayBounds`); the view
+        // is y-up. Flip y exactly here — the one gate — so no consumer flips downstream.
         private func flipY(_ y: CGFloat) -> CGFloat { viewHeight - y }
 
         func viewRect(_ r: CGRect) -> CGRect {
             let x = offset.x + (r.minX - unionOrigin.x) * scale
             let yDown = offset.y + (r.minY - unionOrigin.y) * scale
             let h = r.height * scale
-            // Flip the rect's *top* edge to a y-up bottom-left origin.
             return CGRect(x: x, y: flipY(yDown + h), width: r.width * scale, height: h)
         }
         func viewPoint(_ g: CGPoint) -> CGPoint {
             CGPoint(x: offset.x + (g.x - unionOrigin.x) * scale,
                     y: flipY(offset.y + (g.y - unionOrigin.y) * scale))
         }
-        /// Inverse of `viewPoint` — a view point back onto the physical plane. Rides the
-        /// same single y-flip gate (`flipY` is its own inverse), so the round-trip is exact.
+        /// Inverse of `viewPoint` (`flipY` is its own inverse, so the round-trip is exact).
         func planePoint(_ v: CGPoint) -> CGPoint {
             CGPoint(x: (v.x - offset.x) / scale + unionOrigin.x,
                     y: (flipY(v.y) - offset.y) / scale + unionOrigin.y)
         }
     }
 
-    /// The y-flip gate for content drawn in *this screen's own point space* against the real
-    /// window `bounds` — the on-glass edge bars. macOS point space is y-down (top-left origin);
-    /// this view is y-up. This is the point-space counterpart of `Transform.flipY` (which gates
-    /// the physical *plane* → view): the same single-flip rule, applied to the one path that
-    /// doesn't ride the plane transform. Callers pass a top-origin point offset and get a y-up
-    /// view coordinate; no consumer flips y itself.
+    /// The y-flip gate for content drawn in *this screen's own point space* (y-down)
+    /// against the real window bounds (y-up) — the point-space counterpart of
+    /// `Transform.flipY`, for the one path that doesn't ride the plane transform.
     func pointYToView(_ y: CGFloat) -> CGFloat { bounds.height - y }
 
     func transform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
@@ -411,30 +352,25 @@ final class Arranger: NSView {
         let union = values.dropFirst().reduce(first) { $0.union($1) }
         guard union.width > 0, union.height > 0 else { return nil }
 
-        // Center the whole arrangement (the union) at the view midpoint — the same layout
-        // on every screen, rather than pivoting each canvas around its own tile.
+        // Center the whole arrangement at the view midpoint — the same layout on every
+        // screen, rather than pivoting each canvas around its own tile.
         let focus = CGPoint(x: union.midX, y: union.midY)
 
-        // The mirror column overlays on the right; the plane stays centered in the full
-        // bounds (not offset by the column), so mirroring doesn't shift the arrangement.
         let availW = bounds.width - outerPadding * 2, availH = bounds.height - outerPadding * 2
 
         // Target zoom: three of the physically-largest display fit across the view,
-        // matching axes — 3 widths across the view width, 3 heights down its height —
-        // so a landscape screen isn't over-shrunk by its (smaller) height.
+        // matching axes, so a landscape screen isn't over-shrunk by its height.
         let largestW = rects.values.map(\.width).max() ?? union.width
         let largestH = rects.values.map(\.height).max() ?? union.height
         let targetScale = min(availW / (3 * max(largestW, 0.0001)),
                               availH / (3 * max(largestH, 0.0001)))
 
-        // But never let the layout overflow: cap so the union fits with padding.
-        // The focus tile is centered, so each axis is limited by the union's farther side.
+        // But never overflow: cap so the union fits with padding.
         let reachX = max(focus.x - union.minX, union.maxX - focus.x)
         let reachY = max(focus.y - union.minY, union.maxY - focus.y)
         let fitScale = min(availW / 2 / max(reachX, 0.0001), availH / 2 / max(reachY, 0.0001))
         let scale = min(targetScale, fitScale)
 
-        // Offset so the focus tile lands at the view midpoint.
         let offset = CGPoint(x: bounds.midX - (focus.x - union.minX) * scale,
                              y: bounds.midY - (focus.y - union.minY) * scale)
         return Transform(scale: scale, offset: offset, unionOrigin: union.origin, viewHeight: bounds.height)

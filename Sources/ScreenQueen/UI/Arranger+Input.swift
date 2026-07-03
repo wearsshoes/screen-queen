@@ -32,9 +32,7 @@ extension Arranger {
         if airplaySettingsButtonRect?.contains(p) == true {
             onOpenAirPlaySettings?(); return
         }
-        // Grabbing the main tile's menu-bar strip starts a "move main" drag. The Dock
-        // indicator appears immediately (grabbing signals intent to move main); until the
-        // cursor is over another tile the would-be main stays the current one.
+        // Grabbing the main tile's menu-bar strip starts a "move main" drag.
         if mainMenuBarViewRect()?.contains(p) == true {
             draggingMenuBar = p
             state.pendingMainID = displays.first { $0.isMain }?.id
@@ -60,20 +58,17 @@ extension Arranger {
         let p = convert(event.locationInWindow, from: nil)
         if draggingMenuBar != nil {
             draggingMenuBar = p
-            // Would-be main = the tile under the cursor (else the current main), so the
-            // Dock prediction follows the strip live during the drag.
+            // Would-be main follows the strip, so the Dock prediction updates live.
             let over = display(at: p)
             state.pendingMainID = over?.id ?? displays.first { $0.isMain }?.id
             state.notify()
             return
         }
-        // Option-mirror drag: don't move the plane; just track the cursor for the drop
-        // target and highlight the tile under it (drawn like the menu-bar drop hint).
+        // Option-mirror drag: don't move the plane; just track the drop target.
         if optionMirrorDrag { mirrorDragPoint = p; dragMoved = true; needsDisplay = true; return }
         guard let id = draggedID, let dragged = displays.first(where: { $0.id == id }),
               let t = dragTransform ?? transform(plane) else { return }
-        // The tile tracks the cursor 1:1: view delta ÷ scale = physical delta. The plane is
-        // y-down (the view y-up), so the y delta is negated.
+        // 1:1 cursor tracking: view delta ÷ scale = physical delta (plane y-down → negate y).
         let free = CGPoint(x: dragStartPhys.x + (p.x - dragStartMouse.x) / t.scale,
                            y: dragStartPhys.y - (p.y - dragStartMouse.y) / t.scale)
         let snap = SchematicSnapping.dockAndSnap(dragged: SchematicLayout.physSize(dragged), id: id,
@@ -153,8 +148,7 @@ extension Arranger {
 
     override func flagsChanged(with event: NSEvent) {
         let f = event.modifierFlags
-        // Ghost the possible ⌘⇧ alignment destinations while ⌘⇧ is held — on every
-        // display, so broadcast the shared flag.
+        // Ghost the ⌘⇧ alignment destinations on every display while ⌘⇧ is held.
         let ghosts = f.contains(.command) && f.contains(.shift) && selectedID != nil && !zoomPending
         if ghosts != showAlignGhosts { showAlignGhosts = ghosts; emitPreview() }
         if alignPending, !(f.contains(.command) && f.contains(.shift)) {
@@ -163,8 +157,6 @@ extension Arranger {
             commitPlane()
         }
         if zoomPending, !f.contains(.command) {
-            // A resolution change leaves the physical plane untouched; commit the point
-            // arrangement that reproduces it at the new size, preserving alignment.
             commitPendingResolution()
         }
         super.flagsChanged(with: event)
@@ -220,10 +212,9 @@ extension Arranger {
         if heldDirections.contains(.down) { dy += 1 }
         nudgeAccum.x += dx * rate * dt
         nudgeAccum.y += dy * rate * dt
-        // Dock + magnet to an anchor; the magnet sets activeV/H so the snapping
-        // triangles show while nudging.
+        // Dock + magnet; the magnet sets activeV/H so the snapping triangles show.
         let snap = SchematicSnapping.dockAndSnap(dragged: SchematicLayout.physSize(sel), id: id,
-                                                 free: nudgeAccum, scale: transform(plane)?.scale ?? 1,
+                                                 free: nudgeAccum, scale: drawTransform(plane)?.scale ?? 1,
                                                  snap: true, plane: plane)
         activeV = snap.activeV; activeH = snap.activeH
         plane[id] = CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel))
@@ -262,8 +253,7 @@ extension Arranger {
 
     // MARK: - Keyboard alignment (physical)
 
-    /// Apply one ⌘⇧ alignment step to the selected tile, delegating the plane geometry to
-    /// `SchematicSnapping` and applying the resulting origin + markers here.
+    /// Apply one ⌘⇧ alignment step to the selected tile.
     private func stepAlignment(_ dir: MoveDirection) {
         guard let id = selectedID else { return }
         state.pushUndo()   // snapshot before each alignment step
@@ -272,7 +262,7 @@ extension Arranger {
             if let sel = displays.first(where: { $0.id == id }) {
                 let snap = SchematicSnapping.dockAndSnap(dragged: SchematicLayout.physSize(sel), id: id,
                                                          free: plane[id]?.origin ?? .zero,
-                                                         scale: transform(plane)?.scale ?? 1, snap: true, plane: plane)
+                                                         scale: drawTransform(plane)?.scale ?? 1, snap: true, plane: plane)
                 activeV = snap.activeV; activeH = snap.activeH
                 plane[id] = CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel))
             }
@@ -287,9 +277,8 @@ extension Arranger {
         emitPreview()
     }
 
-    /// The valid ⌘⇧ arrow destinations (grey-ghosted while ⌘⇧ is held) for the selected
-    /// tile: each arrow's move direction and the physical rect it lands on. Reads the same
-    /// `plannedMoves` map that `stepAlignment` applies from.
+    /// The valid ⌘⇧ arrow destinations — the same `plannedMoves` map `stepAlignment`
+    /// applies from, so preview and apply agree.
     func alignGhosts() -> [(dir: MoveDirection, rect: CGRect)] {
         guard let id = selectedID, let size = plane[id]?.size else { return [] }
         return SchematicSnapping.plannedMoves(id, plane: plane, activeV: activeV, activeH: activeH)
