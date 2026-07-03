@@ -36,7 +36,7 @@ final class ArrangerWindows {
         }
         state.onSliderDragChanged = { [weak self] dragging in self?.events?.setSliderDragging(dragging) }
         state.capture = capture
-        capture.onFrame = { [weak self] in self?.canvases.forEach { $0.needsDisplay = true } }
+        capture.onFrame = { [weak self] in self?.canvases.forEach { $0.repaintSchematic() } }
         state.onToggleFeed = { [weak self] on in self?.setFeed(on) }
         state.onCountdownResolved = { [weak self] kind in
             if kind == .feedGuard { self?.cancelFeedWatchdog() }

@@ -1,11 +1,12 @@
 import AppKit
 
-/// The render pass: `draw(_:)` orchestrates the schematic in paint order. The subjects
-/// live in their own files — seams (Arranger+Seams), tiles (Arranger+Tiles), alignment
-/// markers (Arranger+Markers), mirror column (Arranger+Sidebar).
+/// The render pass: `drawSchematic()` orchestrates the schematic in paint order, called
+/// from the SwiftUI Canvas host (see SchematicCanvas.swift). The subjects live in their
+/// own files — seams (Arranger+Seams), tiles (Arranger+Tiles), alignment markers
+/// (Arranger+Markers), mirror column (Arranger+Sidebar).
 extension Arranger {
 
-    override func draw(_ dirtyRect: NSRect) {
+    func drawSchematic() {
         // The backdrop wash. If this screen's own tile is being dragged (from any
         // canvas), brighten it — a real-world "you're dragging me" cue.
         let beingDragged = centerID != nil && state.draggingDisplayID == centerID

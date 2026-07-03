@@ -71,9 +71,26 @@ final class Arranger: NSView {
     /// The banner's top constraint, re-tuned in `layout()` to clear the menu bar.
     var bannerTop: NSLayoutConstraint?
 
+    /// The schematic renderer — a SwiftUI Canvas island (see SchematicCanvas.swift),
+    /// below every effect layer/subview (added first, default z). Click-through; this
+    /// view keeps all input handling.
+    private(set) var schematicHost: SchematicCanvasHost!
+    private var schematicGeneration = 0
+
+    /// Repaint the schematic — the Canvas-era `needsDisplay = true`.
+    func repaintSchematic() {
+        schematicGeneration += 1
+        schematicHost.rootView = SchematicCanvasView(canvas: self, generation: schematicGeneration)
+    }
+
     init(state: ArrangerState, frame: NSRect) {
         self.state = state
         super.init(frame: frame)
+        let host = SchematicCanvasHost(rootView: SchematicCanvasView(canvas: self, generation: 0))
+        host.frame = bounds
+        host.autoresizingMask = [.width, .height]
+        addSubview(host)   // first subview — everything else composites above
+        schematicHost = host
         setupButtonBar()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -252,7 +269,7 @@ final class Arranger: NSView {
         updateSolvePanel()
         layoutLabelCards()
         updateSeamEffects()
-        needsDisplay = true
+        repaintSchematic()
     }
 
     func pointSize(_ d: DisplaySnapshot) -> CGSize { state.pointSize(d) }

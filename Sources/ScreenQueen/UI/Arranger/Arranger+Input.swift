@@ -65,7 +65,7 @@ extension Arranger {
             return
         }
         // Option-mirror drag: don't move the plane; just track the drop target.
-        if optionMirrorDrag { mirrorDragPoint = p; dragMoved = true; needsDisplay = true; return }
+        if optionMirrorDrag { mirrorDragPoint = p; dragMoved = true; repaintSchematic(); return }
         guard let id = draggedID, let dragged = displays.first(where: { $0.id == id }),
               let t = dragTransform ?? transform(plane) else { return }
         // 1:1 cursor tracking: view delta ÷ scale = physical delta (plane y-down → negate y).
@@ -78,7 +78,7 @@ extension Arranger {
         if !dragMoved { state.pushUndo() }   // snapshot before the drag's first move
         plane[id] = CGRect(origin: snap.origin, size: SchematicLayout.physSize(dragged))
         dragMoved = true
-        needsDisplay = true
+        repaintSchematic()
         emitPreview()
     }
 
@@ -88,7 +88,7 @@ extension Arranger {
                 state.draggingDisplayID = nil; state.endDragLock(); state.notify() }
         // Dropped the menu-bar strip: whichever tile it's over becomes main.
         if let p = draggingMenuBar {
-            needsDisplay = true
+            repaintSchematic()
             if let d = display(at: p), !d.isMain { commander?.setMainDisplay(d.id) }
             return
         }
@@ -98,11 +98,11 @@ extension Arranger {
             mirrorDragPoint = nil
             if let target = display(at: convert(event.locationInWindow, from: nil)),
                target.id != slave { commander?.setMirror(slave: slave, master: target.id) }
-            needsDisplay = true
+            repaintSchematic()
             return
         }
         guard draggedID != nil else { return }
-        guard dragMoved else { needsDisplay = true; return } // click, no move: plane unchanged
+        guard dragMoved else { repaintSchematic(); return } // click, no move: plane unchanged
         commitPlane()
     }
 
@@ -218,7 +218,7 @@ extension Arranger {
                                                  snap: true, plane: plane)
         activeV = snap.activeV; activeH = snap.activeH
         plane[id] = CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel))
-        needsDisplay = true
+        repaintSchematic()
         emitPreview()
     }
 

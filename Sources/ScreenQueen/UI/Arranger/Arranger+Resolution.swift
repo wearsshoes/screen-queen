@@ -128,7 +128,7 @@ extension Arranger {
         if replacing { state.pendingModes.removeAll(); pendingSize.removeAll() }
         state.pendingModes[id] = mode.cgMode
         pendingSize[id] = CGSize(width: mode.pointWidth, height: mode.pointHeight)
-        needsDisplay = true
+        repaintSchematic()
         emitPreview()
     }
 

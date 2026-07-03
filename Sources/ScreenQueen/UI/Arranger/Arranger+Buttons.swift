@@ -164,7 +164,7 @@ extension Arranger {
             let target = max(0, min(modes.count - 1, base + stepDelta))
             previewMode(modes[target], on: d.id, replacing: false)
         }
-        needsDisplay = true
+        repaintSchematic()
         emitPreview()
     }
 }
