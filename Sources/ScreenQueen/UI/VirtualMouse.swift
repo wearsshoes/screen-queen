@@ -13,7 +13,7 @@ enum VirtualMouse {
     static let ghostChromeEnabled = true
 
     /// The one ghost tint — hot pink from the seam palette.
-    static var pink: NSColor { ArrangerState.seamPalette[0] }
+    static var pink: NSColor { SeamPalette.colors[0] }
 
     /// The minimap scale (view px per plane inch) at which chrome renders at natural
     /// size. Bar, ghost mouse, and granny viewer all scale by `transform.scale / this`
@@ -46,7 +46,7 @@ final class PlaneMouseMarkerLayer: CALayer {
         super.init()
         let side = Self.side
         bounds = CGRect(x: 0, y: 0, width: side, height: side)
-        let pink = ArrangerState.seamPalette[0]
+        let pink = SeamPalette.colors[0]
 
         let pulse = CAShapeLayer()
         pulse.frame = bounds
@@ -110,7 +110,7 @@ final class GhostCursorLayer: CAShapeLayer {
         self.path = path
         bounds = CGRect(x: 0, y: 0, width: 12.0 * s, height: h)
         anchorPoint = CGPoint(x: 0, y: 1)           // the tip is the hotspot
-        let pink = ArrangerState.seamPalette[0]
+        let pink = SeamPalette.colors[0]
         fillColor = pink.withAlphaComponent(0.35).cgColor
         strokeColor = pink.cgColor
         lineWidth = 2
