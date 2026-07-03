@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Alignment feedback: the eight per-tile anchor notches, the paired arrows for the
-/// active alignment (map and on-glass), and the ⌘⇧ align-destination ghosts.
+/// Alignment feedback on the minimap: the eight per-tile anchor notches, the paired
+/// arrows for the active alignment, and the ⌘⇧ align-destination ghosts. The on-glass
+/// counterpart (the big arrow at this screen's real edges) is Chrome/EdgeMarkers.
 extension Canvas {
 
     /// The eight perimeter anchor positions (corners + edge midpoints).
@@ -47,16 +48,6 @@ extension Canvas {
             drawNotch(clipped, at: pos.point(in: marginTile), dir: pos.inward)
         }
         if let active { drawArrow(ctx, at: active.pos.point(in: marginTile), dir: active.dir) }
-    }
-
-    /// The active alignment marker for this screen, drawn large at its real edges (in
-    /// its own point coords) — the on-glass counterpart of the mini-map notches.
-    func drawScreenMarkers(_ ctx: GraphicsContext, _ markers: [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)]) {
-        guard let me = centerID, let active = markers[me] else { return }
-        let notch = window?.screen?.safeAreaInsets.top ?? 0   // keep clear of the notch on top
-        let area = NSRect(x: bounds.minX + 40, y: bounds.minY + 40 + notch,
-                          width: bounds.width - 80, height: bounds.height - 80 - notch)
-        drawArrow(ctx, at: active.pos.point(in: area), dir: active.dir, scale: 3)
     }
 
     /// Grey ghosts of where each valid ⌘⇧ arrow would move the selected tile, with a
@@ -178,7 +169,7 @@ extension Canvas {
                    style: StrokeStyle(lineWidth: 2, lineCap: .round))
     }
 
-    private func drawArrow(_ ctx: GraphicsContext, at p: CGPoint, dir: CGVector, scale: CGFloat = 1) {
+    func drawArrow(_ ctx: GraphicsContext, at p: CGPoint, dir: CGVector, scale: CGFloat = 1) {
         let inward = unit(dir), out = CGVector(dx: -inward.dx, dy: -inward.dy)
         let len: CGFloat = 7 * scale, half: CGFloat = 4 * scale
         let perp = CGVector(dx: -out.dy, dy: out.dx)
