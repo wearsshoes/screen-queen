@@ -52,6 +52,14 @@ struct DisplayMode: Identifiable, Equatable {
     static func == (a: DisplayMode, b: DisplayMode) -> Bool { a.key == b.key }
 }
 
+extension [DisplayMode] {
+    /// The native (largest pixel area) mode — the reference for aspect filtering
+    /// and the ⌘0 default.
+    var nativeMode: DisplayMode? {
+        self.max { $0.pixelWidth * $0.pixelHeight < $1.pixelWidth * $1.pixelHeight }
+    }
+}
+
 /// Discovers the display modes available for a display.
 ///
 /// Phase 3 ships the public-API provider (`CGDisplayCopyAllDisplayModes` with
@@ -81,8 +89,7 @@ enum ModeCatalog {
     /// The panel's native pixel aspect ratio (width / height), from its largest pixel
     /// mode — the reference for detecting letter-/pillar-boxed modes. nil if unknown.
     static func nativeAspect(for id: CGDirectDisplayID) -> Double? {
-        guard let native = modes(for: id).max(by: { $0.pixelWidth * $0.pixelHeight < $1.pixelWidth * $1.pixelHeight }),
-              native.pixelHeight > 0 else { return nil }
+        guard let native = modes(for: id).nativeMode, native.pixelHeight > 0 else { return nil }
         return Double(native.pixelWidth) / Double(native.pixelHeight)
     }
 

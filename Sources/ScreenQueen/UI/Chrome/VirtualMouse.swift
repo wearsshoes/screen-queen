@@ -3,8 +3,8 @@ import QuartzCore
 /// The ghost of the *active* screen (the one under the cursor), shown on every other
 /// screen. There is only ONE set of chrome per stage — no parallel ghost structure.
 /// Active: normal place, normal look. Inactive: the same controls in the same
-/// map-relative place, each restyled pink *in its own look* (`GhostTintable`) — no flat
-/// overlay. Plus a ghost mouse (`GhostCursorLayer`) mirrored onto this stage via
+/// map-relative place, each restyled pink *in its own look* (the bar via
+/// `BarModel.isGhost`, the panel via `SolvePanelHost.setGhost`) — no flat overlay. Plus a ghost mouse (`GhostCursorLayer`) mirrored onto this stage via
 /// `ghostPoint`, moved on every mouse event. (The tint's SwiftUI currency is
 /// `ChromeMetrics.ghostPink`; the tooltip that trails the ghost lives with its bubble
 /// in TooltipBubble.swift — this file is QuartzCore-only.)
@@ -13,12 +13,6 @@ enum VirtualMouse {
     static let ghostMouseEnabled = true
     /// Feature flag: pink chrome on inactive displays.
     static let ghostChromeEnabled = true
-}
-
-/// A chrome element that wears the ghost tint *in its own look* (pink glass, pink
-/// track, pink outline) rather than hiding under a flat overlay.
-@MainActor protocol GhostTintable: AnyObject {
-    func setGhost(_ on: Bool)
 }
 
 /// The ghost mouse: a dashed, glowing, translucent hot-pink arrow. Obviously a ghost.

@@ -27,8 +27,7 @@ extension Stage {
             let axisReal = bar.isVertical ? bounds.height : bounds.width
             let s = axisPreview > 0 ? axisReal / axisPreview : 1
             let along = (weAreA ? bar.localAlongA : bar.localAlongB) * s
-            // End margin capped so a short crossing region shrinks proportionally.
-            let len = max(1.5, bar.windowPoints * s - min(12, bar.windowPoints * s / 3))
+            let len = trimmedBarLength(bar.windowPoints * s, cap: 12)
             let rect: NSRect
             // `inward` = the side facing the screen center (rounded); outward sits flat.
             let inward: RectEdge

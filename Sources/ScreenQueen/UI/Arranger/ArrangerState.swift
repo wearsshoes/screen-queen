@@ -254,8 +254,8 @@ final class ArrangerState {
         return SchematicLayout.toPoints(rects: plane, displays: sized)
     }
 
-    func currentBars() -> [SeamBar] {
-        SchematicLayout.seamBars(sizedDisplays(), rects: plane, origins: pointOrigins())
+    func currentBars(origins: [CGDirectDisplayID: CGPoint]? = nil) -> [SeamBar] {
+        SchematicLayout.seamBars(sizedDisplays(), rects: plane, origins: origins ?? pointOrigins())
     }
 
     /// The display macOS will put the Dock on for the arrangement currently on the plane.

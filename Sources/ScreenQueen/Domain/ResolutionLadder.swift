@@ -24,8 +24,7 @@ enum ResolutionLadder {
         // stretched/letterboxed resolutions stay behind the "full wardrobe" toggle. The
         // current mode is always kept so the slider/menu land on a real entry.
         if !isBuiltin {
-            guard let native = all.max(by: { $0.pixelWidth * $0.pixelHeight < $1.pixelWidth * $1.pixelHeight }),
-                  native.pixelHeight > 0 else { return all }
+            guard let native = all.nativeMode, native.pixelHeight > 0 else { return all }
             let nativeAspect = Double(native.pixelWidth) / Double(native.pixelHeight)
             func onAspect(_ m: DisplayMode) -> Bool {
                 guard m.pixelHeight > 0 else { return false }
@@ -78,7 +77,7 @@ enum ResolutionLadder {
     /// any kind), used by the ⌘0 / ⌘⇧0 reset.
     static func defaultMode(_ modes: [DisplayMode]) -> DisplayMode? {
         let retina = modes.filter { abs($0.pixelWidth - 2 * $0.pointWidth) <= 1 }
-        return (retina.isEmpty ? modes : retina).max { $0.pixelWidth * $0.pixelHeight < $1.pixelWidth * $1.pixelHeight }
+        return (retina.isEmpty ? modes : retina).nativeMode
     }
 
     /// Effective PPI of `mode` given the panel's physical width in millimetres — the

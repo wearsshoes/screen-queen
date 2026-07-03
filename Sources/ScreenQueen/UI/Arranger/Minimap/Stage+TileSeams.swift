@@ -11,12 +11,8 @@ extension Stage {
     func miniBarEdges(_ bars: [SeamBar], t: Transform,
                       seamColor: [DisplayGraph.SeamKey: NSColor]) -> [SeamEdgeGlow] {
         let thickness: CGFloat = 5, gap: CGFloat = 2
-        // Trim the ends clear of the rounded corners, capped at 1/3 so a short bar's
-        // length stays proportional to the true overlap.
-        func barLen(_ inches: CGFloat) -> CGFloat {
-            let full = inches * t.scale
-            return max(1.5, full - min(8, full / 3))
-        }
+        // Trim the ends clear of the rounded corners.
+        func barLen(_ inches: CGFloat) -> CGFloat { trimmedBarLength(inches * t.scale, cap: 8) }
         var edges: [SeamEdgeGlow] = []
         for bar in bars {
             let color = seamColor[DisplayGraph.SeamKey(bar.aID, bar.bID)] ?? .systemGray

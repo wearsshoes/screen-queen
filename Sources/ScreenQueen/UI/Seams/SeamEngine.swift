@@ -16,6 +16,13 @@ extension Stage {
         let color: NSColor
     }
 
+    /// The shared end-trim rule for seam bars (mini-map and on-glass): clear the ends
+    /// by up to `cap`, capped at a third so a short bar's length stays proportional
+    /// to the true overlap.
+    func trimmedBarLength(_ full: CGFloat, cap: CGFloat) -> CGFloat {
+        max(1.5, full - min(cap, full / 3))
+    }
+
     enum RectEdge { case minX, maxX, minY, maxY }
 
     // MARK: - Effect layers (refresh path — never from draw)

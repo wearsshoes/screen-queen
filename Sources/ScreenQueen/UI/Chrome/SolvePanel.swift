@@ -14,8 +14,8 @@ struct SolvePanelContent {
     /// so the panel shows the truth. Everything comes from state — no Stage involved;
     /// the refresh path feeds this to the host.
     @MainActor init(state: ArrangerState) {
-        let seamColor = state.seamColors(state.currentBars())
         let origins = state.pointOrigins()
+        let seamColor = state.seamColors(state.currentBars(origins: origins))
         let trace = SchematicLayout.solveTrace(rects: state.plane, displays: state.sizedDisplays())
         let ambiguousIDs = Set(trace.pointRects.filter(\.ambiguous).map(\.id))
         for d in state.sizedDisplays() {
@@ -157,9 +157,7 @@ final class SolvePanelHost: NSHostingView<SolvePanelView> {
     }
 
     override func mouseUp(with event: NSEvent) { dragOffset = nil }
-}
 
-extension SolvePanelHost: GhostTintable {
     /// Repaint the panel in pink (or restore) for the inactive-display ghost.
     func setGhost(_ on: Bool) {
         guard ghost != on else { return }
