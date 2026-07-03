@@ -30,6 +30,11 @@ protocol DisplayCommanding: AnyObject {
     func openAirPlaySettings()
     func dismissArranger()
     func resetToBaseline()
+    // The house menu (in the arranger's bar since the status item became a plain toggle).
+    func showSetup()
+    func showDebug()
+    func toggleSeamLights()
+    var seamLightsOn: Bool { get }
 }
 
 /// The executor: applies reconfigurations to the real displays (via `DisplayManager`),

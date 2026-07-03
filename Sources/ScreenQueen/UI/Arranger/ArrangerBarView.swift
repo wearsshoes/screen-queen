@@ -15,6 +15,10 @@ struct BarModel: Equatable {
     var canUndo = false
     var sliderValue = 0.5         // 0…1, detent-snapped upstream
     var sliderEnabled = false
+    // House-menu state (the status item is a plain toggle; the menu lives here).
+    var seamLightsOn = false
+    var wardrobeOn = false
+    var version: String?
 }
 
 /// The bar's outbound wiring, kept out of the model so Equatable stays derivable.
@@ -26,6 +30,11 @@ struct BarActions {
     var scope: () -> Void = {}
     var sliderChanged: (Double) -> Void = { _ in }
     var sliderEnded: () -> Void = {}
+    var showSetup: () -> Void = {}
+    var showDebug: () -> Void = {}
+    var toggleSeamLights: () -> Void = {}
+    var toggleWardrobe: () -> Void = {}
+    var quit: () -> Void = {}
 }
 
 /// The bottom button bar (feed · reset · undo · [resolution slider] · done): Liquid
@@ -72,6 +81,9 @@ struct ArrangerBarView: View {
                 circleButton(.done, symbol: "checkmark", prominent: true,
                              shortcut: .defaultAction,
                              action: actions.done)
+                houseMenu
+                    .frame(width: 56 * k, height: 56 * k)
+                    .glassEffect(.regular.interactive(), in: Circle())
             }
         }
     }
@@ -132,6 +144,8 @@ struct ArrangerBarView: View {
             scopeButton
             plainButton(.done, symbol: "checkmark", shortcut: .defaultAction,
                         action: actions.done)
+            houseMenu
+                .frame(width: 44 * k, height: 44 * k)
         }
         .padding(.vertical, 12 * k)
         .padding(.horizontal, 16 * k)
@@ -158,6 +172,31 @@ struct ArrangerBarView: View {
     }
 
     // MARK: - Shared pieces
+
+    /// The house menu — Backstage Pass, seam lights, wardrobe, debug, version, Quit.
+    /// Lives in the bar because the status item is a plain arranger toggle now.
+    private var houseMenu: some View {
+        Menu {
+            Button(Copy.menuSetup, action: actions.showSetup)
+            Toggle(Copy.menuSeamLights, isOn: Binding(
+                get: { model.seamLightsOn }, set: { _ in actions.toggleSeamLights() }))
+            Toggle(Copy.menuShowExtendedResolutions, isOn: Binding(
+                get: { model.wardrobeOn }, set: { _ in actions.toggleWardrobe() }))
+            Button(Copy.menuDebug, action: actions.showDebug)
+            Divider()
+            if let version = model.version { Text(version) }
+            Button(Copy.menuQuit, action: actions.quit)
+        } label: {
+            Image(systemName: "crown")
+                .font(.system(size: 20 * k, weight: .semibold))
+                .foregroundStyle(iconColor(enabled: true))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Circle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+    }
 
     private var slider: some View {
         BarSlider(value: model.sliderValue, enabled: model.sliderEnabled,

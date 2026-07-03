@@ -39,6 +39,9 @@ extension Arranger {
         m.feedEnabled = state.feedEnabled
         m.scopeAll = state.sliderScope == .all
         m.canUndo = state.canUndo
+        m.seamLightsOn = state.commander?.seamLightsOn ?? false
+        m.wardrobeOn = state.extendedBuiltinModes
+        m.version = Self.versionLine
 
         let selected = selectedID.flatMap { id in displays.first(where: { $0.id == id }) }
         sliderModes = selected.map { sortedModes(for: $0) } ?? []
@@ -73,8 +76,27 @@ extension Arranger {
                 self.state.notify()   // refresh every canvas so the icon/tooltip update everywhere
             },
             sliderChanged: { [weak self] raw in self?.barSliderChanged(raw) },
-            sliderEnded: { [weak self] in self?.barSliderEnded() })
+            sliderEnded: { [weak self] in self?.barSliderEnded() },
+            showSetup: { [weak self] in self?.commander?.showSetup() },
+            showDebug: { [weak self] in self?.commander?.showDebug() },
+            toggleSeamLights: { [weak self] in
+                self?.commander?.toggleSeamLights()
+                self?.state.notify()   // re-render the checkmark on every canvas
+            },
+            toggleWardrobe: { [weak self] in
+                guard let self else { return }
+                self.state.extendedBuiltinModes.toggle()
+                self.state.notify()   // re-derive the slider/menu mode lists everywhere
+            },
+            quit: { NSApp.terminate(nil) })
     }
+
+    /// Version line for the house menu (nil for the bare dev binary — no Info.plist).
+    private static let versionLine: String? = {
+        guard let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+              let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String else { return nil }
+        return "Screen Queen \(v) (\(b))"
+    }()
 
     /// The fun copy per control — the single source (no native `.toolTip`; it would pop
     /// on the hovered screen only, doubling up).

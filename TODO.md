@@ -35,10 +35,11 @@
   - LabelCard: its text supersamples at 2× backing scale because the script
     hairlines go mushy at 1× on non-Retina panels, and SwiftUI text can't
     express that — revisit only with a non-Retina monitor to check against.
-  - Menu-bar item: stays NSStatusItem, NOT MenuBarExtra — corrected verdict.
-    Left-click toggles the arranger and right-click pops the menu; MenuBarExtra
-    has no left/right split (the earlier "fine for this menu" caveat missed
-    that the *click behavior* is the blocker, not the menu content).
+  - Menu-bar item: a plain NSStatusItem toggle (~6 lines) — any click opens the
+    arranger. The old right-click menu moved into the bar as a SwiftUI Menu (the
+    👑 capsule): Stage Pass, seam lights, wardrobe, debug, version, Quit.
+    MenuBarExtra still isn't it — it can't run an action on click, only show
+    content — but with the menu living in the bar there's nothing left to port.
 * Portable to SwiftUI (was AppKit by choice, not necessity):
   - Menu-bar 👑 item + menu → `MenuBarExtra` (first-class now; supports `.window` style for
     rich content). Replaces `NSStatusItem`. Caveat: no programmatic open/close and less

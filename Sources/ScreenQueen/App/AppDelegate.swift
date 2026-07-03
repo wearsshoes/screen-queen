@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Open the Backstage Pass; the arranger overlay would sit above a normal window,
     /// so take a bow first.
-    @objc private func showSetup() {
+    func showSetup() {
         dismissArranger()
         setupWindow.show()
     }
@@ -90,76 +90,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = Copy.menuBarGlyph
-        // Left-click opens the arranger; right-click shows a menu (just Quit).
+        // Any click toggles the arranger; the house menu lives in the arranger's bar.
         statusItem.button?.target = self
-        statusItem.button?.action = #selector(statusItemClicked)
+        statusItem.button?.action = #selector(toggleArranger)
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
-    private lazy var statusMenu: NSMenu = {
-        let menu = NSMenu()
-        // Toggles the arranger; the OS renders the ⌘⌥F1 shortcut greyed at the right.
-        let show = NSMenuItem(title: Copy.menuShowArranger, action: #selector(toggleArranger),
-                              keyEquivalent: "\u{F704}")   // F1 function key
-        show.keyEquivalentModifierMask = [.command, .option]
-        menu.addItem(show)
-        menu.addItem(withTitle: Copy.menuSetup, action: #selector(showSetup), keyEquivalent: "")
-        let lights = NSMenuItem(title: Copy.menuSeamLights, action: #selector(toggleSeamLights(_:)),
-                                keyEquivalent: "")
-        lights.state = seamLights.enabled ? .on : .off
-        menu.addItem(lights)
-        // Reveal off-native-aspect (and the built-in's extended) resolutions everywhere.
-        let wardrobe = NSMenuItem(title: Copy.menuShowExtendedResolutions,
-                                  action: #selector(toggleWardrobe(_:)), keyEquivalent: "")
-        wardrobe.state = arranger.state.extendedBuiltinModes ? .on : .off
-        wardrobeItem = wardrobe
-        menu.addItem(wardrobe)
-        menu.addItem(withTitle: Copy.menuDebug, action: #selector(showDebug), keyEquivalent: "")
-        menu.addItem(.separator())
-        // Version line (disabled): only the bundled app has an Info.plist to read.
-        if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-           let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
-            let item = NSMenuItem(title: "Screen Queen \(v) (\(b))", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        }
-        menu.addItem(withTitle: Copy.menuQuit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        return menu
-    }()
-
     private let debugWindow = DebugWindow()
-    @objc private func showDebug() { debugWindow.show() }
+    func showDebug() { debugWindow.show() }
 
     /// The always-on seam lights (see `SeamLights`), rebuilt only from `refresh()`.
     private let seamLights = SeamLights()
 
-    @objc private func toggleSeamLights(_ sender: NSMenuItem) {
+    var seamLightsOn: Bool { seamLights.enabled }
+
+    func toggleSeamLights() {
         seamLights.enabled.toggle()
-        sender.state = seamLights.enabled ? .on : .off
         if seamLights.enabled { seamLights.refresh(displays: DisplayManager.snapshot()) }
-    }
-
-    /// The "Show the Full Wardrobe" item — kept so its checkmark can be refreshed each
-    /// time the menu opens (the state can also change from within the arranger).
-    private weak var wardrobeItem: NSMenuItem?
-
-    @objc private func toggleWardrobe(_ sender: NSMenuItem) {
-        arranger.state.extendedBuiltinModes.toggle()
-        sender.state = arranger.state.extendedBuiltinModes ? .on : .off
-        arranger.state.notify()   // re-derive the slider/menu mode lists everywhere
-    }
-
-    @objc private func statusItemClicked() {
-        let rightClick = NSApp.currentEvent?.type == .rightMouseUp
-            || NSApp.currentEvent?.modifierFlags.contains(.control) == true
-        if rightClick {
-            wardrobeItem?.state = arranger.state.extendedBuiltinModes ? .on : .off   // may have changed
-            statusItem.menu = statusMenu
-            statusItem.button?.performClick(nil)   // pop the menu
-            statusItem.menu = nil                  // detach so the next left-click hits our action
-        } else {
-            toggleArranger()
-        }
     }
 
     /// Open the arranger, or close it if it's already open.
