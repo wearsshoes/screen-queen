@@ -100,11 +100,6 @@ extension Arranger {
             var pieces: [NSView] = glassy
             pieces.insert(sliderPill, at: 3)   // feed, reset, undo, [slider], done
 
-            // The ghost's twin lookup: circle capsules for the buttons (the visible
-            // click surface), the bare controls for slider/scope (fraction matters).
-            barCapsules = [.feed: glassy[0], .reset: glassy[1], .undo: glassy[2],
-                           .done: glassy[3], .slider: resSlider, .scope: scopeButton]
-
             let stack = NSStackView(views: pieces)
             stack.orientation = .horizontal
             stack.spacing = 22
@@ -116,10 +111,6 @@ extension Arranger {
             container = group
         } else {
             setSoftSliderWidth(preferred: 120)
-            // Pre-26 there are no glass capsules (and no scope toggle): the buttons
-            // themselves are the ghost's twin surfaces.
-            barCapsules = [.feed: feedButton, .reset: resetButton, .undo: undoButton,
-                           .done: doneButton, .slider: resSlider]
             let stack = NSStackView(views: [feedButton, resetButton, undoButton, resSlider, doneButton])
             stack.orientation = .horizontal
             stack.spacing = 12
@@ -151,7 +142,7 @@ extension Arranger {
         // every canvas instead of overflowing an extreme-portrait screen.
         barMaxWidth = container.widthAnchor.constraint(lessThanOrEqualToConstant: 100_000)
         barMaxWidth?.isActive = true
-        barContainer = container   // for the ghost cursor's bar-relative mapping
+        barContainer = container   // transformed + washed pink on an inactive display
     }
 
 
@@ -188,7 +179,6 @@ extension Arranger {
         g.cornerRadius = height / 2
         g.style = .clear
         g.contentView = pad
-        sliderPillView = g   // the ghost lights the whole pill, not the bare track
         return g
     }
 

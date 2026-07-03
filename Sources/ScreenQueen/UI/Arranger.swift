@@ -61,23 +61,13 @@ final class Arranger: NSView {
     /// canvases (see VirtualMouse.swift).
     weak var barContainer: NSView?
 
-    /// The ghost of the active screen (VirtualMouse.swift): a container of pink twins
-    /// of the UI elements (built once, keyed by element), projected as one bundle by
-    /// the container's transform; a dashed arrow for the ghost mouse; and the affine
-    /// (active canvas → this canvas) both ride, recomputed only on active-screen change.
-    var ghostChrome: CALayer?
-    var ghostTwins: [GhostChromeElement: GhostElementLayer] = [:]
+    /// On an inactive display the one set of chrome (VirtualMouse.swift) restyles pink
+    /// and transforms to the active screen's perspective. `ghostArrow` is the ghost
+    /// mouse; `ghostAffine` (active canvas → this canvas) is what both ride, recomputed
+    /// only on active-screen change; `chromeWashes` are the pink overlays per chrome view.
     var ghostArrow: GhostCursorLayer?
     var ghostAffine: CGAffineTransform = .identity
-
-    /// The bar's controls by role, for the ghost's twin lookup (same six controls on
-    /// every canvas). On macOS 26 the circle capsules stand in for their buttons —
-    /// they're the visible click surface the halo should wrap.
-    var barCapsules: [BarControl: NSView] = [:]
-
-    /// The glass pill wrapping the slider + scope toggle (macOS 26 only; nil pre-26),
-    /// so the ghost lights the whole pill rather than the bare slider track.
-    weak var sliderPillView: NSView?
+    var chromeWashes: [ObjectIdentifier: CALayer] = [:]
 
     /// The top-of-screen countdown banner (auto-revert / feed guard) — built on demand
     /// and driven in Arranger+Banner.swift. nil until a countdown first appears.

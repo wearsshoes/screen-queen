@@ -30,7 +30,7 @@ final class ArrangerWindows {
     init() {
         state.changed = { [weak self] in
             self?.canvases.forEach { $0.refresh() }
-            self?.relayoutGhostChrome()   // a layout/panel change moves the twins
+            self?.rerenderChrome()   // a layout/panel change moves the projection
         }
         state.capture = capture
         // A new frame from any display just repaints the tiles (coalesced by AppKit).
@@ -43,16 +43,15 @@ final class ArrangerWindows {
         }
     }
 
-    /// Re-lay the ghost twins from the (possibly moved) chrome and re-project for the
-    /// current active screen. Deferred a runloop turn so button-bar autolayout has
-    /// settled into real frames.
-    private func relayoutGhostChrome() {
+    /// Re-render (restyle + re-project) the chrome from the current, possibly moved,
+    /// layout for the current active screen. Deferred a runloop turn so button-bar
+    /// autolayout has settled into real frames.
+    private func rerenderChrome() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let active = self.activeDisplayID.flatMap { id in self.canvases.first { $0.centerID == id } }
             for canvas in self.canvases {
-                canvas.layoutGhostTwins()
-                canvas.projectGhostChrome(active: canvas === active ? nil : active)
+                canvas.renderChrome(active: canvas === active ? nil : active)
             }
         }
     }
@@ -118,9 +117,8 @@ final class ArrangerWindows {
         let bigCast = NSScreen.screens.count >= Self.bigCastThreshold
         setFeed(!busy && !bigCast)
         installMouseMonitors()
-        canvases.forEach { $0.layoutGhostTwins() }
         activeDisplayID = nil
-        mouseDidMove()   // seed the active screen + project + place the ghost mouse
+        mouseDidMove()   // seed the active screen + render the ghost + place the ghost mouse
     }
 
     /// Make the arranger window on the main display key (falling back to any window).
@@ -184,7 +182,7 @@ final class ArrangerWindows {
         }
         if activeID != activeDisplayID {
             activeDisplayID = activeID
-            for canvas in canvases { canvas.projectGhostChrome(active: canvas === active ? nil : active) }
+            for canvas in canvases { canvas.renderChrome(active: canvas === active ? nil : active) }
         }
         for canvas in canvases {
             canvas.updateGhostArrow(cursorActivePoint: cursorActivePoint, isActive: canvas === active)
@@ -199,7 +197,7 @@ final class ArrangerWindows {
         state.update(with: displays, force: force)
         rebuild()   // screens may have changed
         canvases.forEach { $0.refresh() }
-        relayoutGhostChrome()
+        rerenderChrome()
     }
 
     /// Refresh the unified chrome metrics (see `ArrangerState`): the largest Dock and
