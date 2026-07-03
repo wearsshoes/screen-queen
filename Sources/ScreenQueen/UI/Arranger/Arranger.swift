@@ -174,6 +174,59 @@ final class Arranger: NSView {
         chromeViewRect(naturalSize: Self.panelNaturalSize, centreOffsetInches: state.solvePanelCenterOffsetInches)
     }
 
+    /// The chrome pass: re-render bar/footer at this canvas's own tile scale, in normal
+    /// or ghost dress. `active` is the canvas under the cursor (nil ⇒ this one is it).
+    func renderChrome(active: Arranger?) {
+        guard VirtualMouse.ghostChromeEnabled else { return }
+        let inactive = active != nil && active !== self
+        isGhost = inactive
+        let myT = drawTransform(currentRects())
+        if inactive, let myT, myT.scale > 0,
+           let actT = active!.drawTransform(active!.currentRects()), actT.scale > 0 {
+            // Ratio of the two minimap scales: a cursor beside a tile on the active
+            // screen lands beside the matching tile here.
+            ghostScale = myT.scale / actT.scale
+            ghostActiveCenter = CGPoint(x: active!.bounds.midX, y: active!.bounds.midY)
+        } else {
+            ghostScale = 1
+            ghostActiveCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+        }
+        if let myT, myT.scale > 0 {
+            let k = chromeTileScale(myT)
+            updateBar(scale: k)
+            layoutBar(in: myT)
+            layoutFooter(scale: k)
+        } else {
+            updateBar()   // no transform yet — still reflect the fresh ghost state
+        }
+        solvePanel.setGhost(inactive)
+    }
+
+    /// Map a point from the active canvas's view coords onto this canvas (the ghost
+    /// mapping the mouse and tooltip ride). Identity when active.
+    func ghostPoint(_ p: CGPoint) -> CGPoint {
+        ArrangerGeometry.ghostPoint(p, ghostScale: ghostScale, activeCenter: ghostActiveCenter,
+                                    destCenter: CGPoint(x: bounds.midX, y: bounds.midY))
+    }
+
+    /// Chrome size in proportion to this canvas's minimap tiles.
+    func chromeTileScale(_ t: Transform) -> CGFloat {
+        t.scale / ChromeMetrics.referenceMinimapScale
+    }
+
+    /// The current tile scale; 1 if the transform isn't ready. Inside a render pass
+    /// prefer `chromeTileScale(_:)` with the pass's one transform.
+    var chromeTileScale: CGFloat {
+        guard let t = drawTransform(currentRects()), t.scale > 0 else { return 1 }
+        return chromeTileScale(t)
+    }
+
+    /// Round to the nearest whole *device* pixel — a fractional origin smears content
+    /// across pixel boundaries.
+    func pixelSnap(_ v: CGFloat) -> CGFloat {
+        ArrangerGeometry.pixelSnap(v, backingScale: window?.backingScaleFactor ?? 2)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil { seamEmitters.clear(); seamGlow.clear() }
@@ -325,4 +378,15 @@ final class Arranger: NSView {
     func transform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
         ArrangerGeometry.fit(rects, in: bounds, padding: outerPadding)
     }
+}
+
+/// Chrome sizing constants and shared tints.
+enum ChromeMetrics {
+    /// The minimap scale at which chrome renders at natural size — the one knob for
+    /// its absolute size (`chromeTileScale` = transform scale over this).
+    static let referenceMinimapScale: CGFloat = 40
+
+    /// The ghost tint as SwiftUI currency (the layer world takes its CGColor from
+    /// `SeamPalette.colors[0]` directly).
+    static var ghostPink: Color { Color(nsColor: SeamPalette.colors[0]) }
 }
