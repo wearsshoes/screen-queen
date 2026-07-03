@@ -25,8 +25,14 @@
 * Port progress (July 2026): ✅ countdown banner (first NSHostingView island),
   ✅ Backstage Pass + debug window, ✅ button bar (ArrangerBarView; BarMetrics /
   HoverGlassView / GhostGlassPill / ArrangerSliderCell dissolved — ghost tint and
-  scale are model inputs now). Remaining: Canvas (the big one), label cards /
-  solve panel / tooltip bubble, menu-bar item → MenuBarExtra, input last.
+  scale are model inputs now), ✅ tooltip bubble (click-through TooltipHost),
+  ✅ solve panel (SolvePanelView — first SwiftUI Canvas/GraphicsContext piece,
+  the dry run for the big one; y-down point space meant the old flip vanished).
+  Remaining: Canvas (the big one), menu-bar item → MenuBarExtra (needs the
+  SwiftUI App lifecycle — its own slice), input last. LabelCard stays AppKit
+  *deliberately*: its text supersamples at 2× backing scale because the script
+  hairlines go mushy at 1× on non-Retina panels, and SwiftUI text can't express
+  that — revisit only with a non-Retina monitor to check against.
 * Portable to SwiftUI (was AppKit by choice, not necessity):
   - Menu-bar 👑 item + menu → `MenuBarExtra` (first-class now; supports `.window` style for
     rich content). Replaces `NSStatusItem`. Caveat: no programmatic open/close and less
