@@ -117,5 +117,11 @@
     Accessibility (the key monitors need it), and a tap generally rides the same grant
     (verify on a clean machine). Still: switch when something wants the tap's powers
     (consume semantics, or event *injection* — ghost cursor clicking), not before.
+* OS-version policy (decided): floor stays macOS 14; newer-API paths go in as
+  default-with-fallback (the macOS-26 glass pattern) *when they earn their keep*.
+  Audited July 2026: no macOS-15 API currently beats what's shipped — input's
+  onModifierKeysChanged would mean two divergent input state machines, and
+  appearsActive only matters for stock controls (the bar's are custom-drawn so
+  they never dim). Re-audit when adding new chrome.
 * Refs: Apple "Customizing window styles… in macOS", "Canvas" docs; nilcoalescing
   "Build a macOS menu bar utility in SwiftUI".
