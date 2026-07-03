@@ -91,7 +91,9 @@ final class Arranger {
             // No-op unless a guard was running (its own expiry lands here too).
             state.resolveCountdown(.feedGuard, keep: true)
         }
-        stages.forEach { $0.refresh() }
+        // Through the broadcast, not a bare refresh — the feed button lives on the
+        // bar, and the bar renders on the chrome pass that follows a notify.
+        state.notify()
     }
 
     /// Going live on `bigCastThreshold`+ screens arms an auto-off unless the user says

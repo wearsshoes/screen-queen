@@ -1,7 +1,8 @@
 import SwiftUI
 
-extension NSImage {
-    /// This image as a `CGImage` (full bounds), or nil.
+fileprivate extension NSImage {
+    /// This image as a `CGImage` (full bounds), or nil. Deliberately file-scoped —
+    /// it exists for the wallpaper draw, not as a general bridge.
     var asCGImage: CGImage? {
         var rect = CGRect(origin: .zero, size: size)
         return cgImage(forProposedRect: &rect, context: nil, hints: nil)

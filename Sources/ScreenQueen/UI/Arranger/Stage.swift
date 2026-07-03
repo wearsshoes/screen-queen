@@ -179,10 +179,10 @@ final class Stage: NSView {
 
     /// The chrome pass: re-render bar/footer at this stage's own tile scale, in normal
     /// or ghost dress. `active` is the stage under the cursor (nil ⇒ this one is it).
+    /// The scale/placement half always runs; only the pink dressing consults the flag.
     func renderChrome(active: Stage?) {
-        guard VirtualMouse.ghostChromeEnabled else { return }
         let inactive = active != nil && active !== self
-        isGhost = inactive
+        isGhost = VirtualMouse.ghostChromeEnabled && inactive
         let myT = drawTransform(currentRects())
         if inactive, let myT, myT.scale > 0,
            let actT = active!.drawTransform(active!.currentRects()), actT.scale > 0 {
@@ -202,7 +202,7 @@ final class Stage: NSView {
         } else {
             updateBar()   // no transform yet — still reflect the fresh ghost state
         }
-        solvePanel.setGhost(inactive)
+        solvePanel.setGhost(isGhost)
     }
 
     /// Map a point from the active stage's view coords onto this stage (the ghost
@@ -305,11 +305,6 @@ final class Stage: NSView {
     let outerPadding: CGFloat = 32
     let tileCornerRadius: CGFloat = 8
 
-    /// Width of the right-hand column overlay (0 when it holds nothing).
-    var mirrorColumnWidth: CGFloat {
-        mirroredDisplays.isEmpty && airplaySession == nil ? 0 : 360
-    }
-
     /// Cached native pixel aspect per display (fixed per panel; stale entries harmless).
     var nativeAspectCache: [CGDirectDisplayID: Double?] = [:]
 
@@ -347,8 +342,10 @@ final class Stage: NSView {
 
     /// Called by the state after a mutation: place the overlay subviews and feed the
     /// effect layers (`draw(_:)` never mutates the view tree or layers), then repaint.
+    /// (The bar is NOT rebuilt here — every `changed` broadcast is followed by the
+    /// deferred chrome pass, the one bar path, so each mutation renders it once.)
     func refresh() {
-        updateBar(); syncBanner()
+        syncBanner()
         if let rect = panelViewRect(), solvePanel.frame != rect {
             solvePanel.frame = rect
         }

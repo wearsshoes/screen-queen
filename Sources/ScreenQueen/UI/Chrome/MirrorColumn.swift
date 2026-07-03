@@ -105,6 +105,11 @@ final class MirrorColumnHost: NSHostingView<MirrorColumnView> {}
 
 extension Stage {
 
+    /// Width of the right-hand column overlay (0 when it holds nothing).
+    var mirrorColumnWidth: CGFloat {
+        mirroredDisplays.isEmpty && airplaySession == nil ? 0 : 360
+    }
+
     /// Rebuild + place the column against the right edge (refresh path); hidden when
     /// it holds nothing.
     func layoutMirrorColumn() {
