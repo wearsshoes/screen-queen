@@ -7,6 +7,52 @@ import CoreGraphics
 /// scramble someone's monitors.
 enum HotplugMath {
 
+    /// Which hotplug branch a refresh takes, from the identity sets alone. This is the
+    /// decision `handleProfiles` acts on; keeping it pure means the branch logic — the
+    /// part that picks *what happens to your monitors* — is testable without a display.
+    enum Transition: Equatable {
+        case ignore                                        // empty set (all screens gone)
+        case settled                                       // same set → remember this layout
+        case departure                                     // display(s) left → repin survivors
+        case twinJoined(newcomers: Set<CGDirectDisplayID>) // identical twin → dock, don't reshuffle
+        case setChanged(newcomers: Set<CGDirectDisplayID>) // profile lookup path
+    }
+
+    static func transition(set: Set<String>, baseSet: [String], ids: Set<CGDirectDisplayID>,
+                           lastSet: Set<String>, lastBaseSet: [String],
+                           lastIDs: Set<CGDirectDisplayID>) -> Transition {
+        guard !set.isEmpty else { return .ignore }
+        guard set != lastSet else { return .settled }
+        let newcomers = ids.subtracting(lastIDs)
+        let removed = lastIDs.subtracting(ids)
+        if !removed.isEmpty, newcomers.isEmpty { return .departure }
+        if joinedIdenticalTwin(now: baseSet, before: lastBaseSet) { return .twinJoined(newcomers: newcomers) }
+        return .setChanged(newcomers: newcomers)
+    }
+
+    /// What to do about survivors after a departure: re-apply their prior origins, or
+    /// hand the layout to the user. Solve when any survivor's prior spot is unknown, or
+    /// when the priors no longer form a valid arrangement (e.g. the middle of three left).
+    enum RepinDecision: Equatable {
+        case apply(origins: [CGDirectDisplayID: CGPoint], mainID: CGDirectDisplayID?)
+        case solveInArranger
+    }
+
+    static func repinDecision(survivors: [(id: CGDirectDisplayID, size: CGSize, isMain: Bool)],
+                              priorOrigins: [CGDirectDisplayID: CGPoint]) -> RepinDecision {
+        var rects: [CGRect] = []
+        var origins: [CGDirectDisplayID: CGPoint] = [:]
+        var mainID: CGDirectDisplayID?
+        for d in survivors {
+            guard let o = priorOrigins[d.id] else { return .solveInArranger }
+            origins[d.id] = o
+            rects.append(CGRect(origin: o, size: d.size))
+            if d.isMain { mainID = d.id }
+        }
+        guard arrangementIsValid(rects) else { return .solveInArranger }
+        return .apply(origins: origins, mainID: mainID)
+    }
+
     /// Whether `rects` form a connected, non-overlapping arrangement (each touches
     /// another edge-to-edge, none overlap).
     static func arrangementIsValid(_ rects: [CGRect]) -> Bool {

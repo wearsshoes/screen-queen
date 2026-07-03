@@ -16,71 +16,68 @@ extension AppDelegate {
         let set = Set(displays.map(\.fingerprint))
         let baseSet = displays.map { "\($0.vendor)-\($0.model)-\($0.serial)" }
         let ids = Set(displays.map(\.id))
-        let newcomerIDs = ids.subtracting(lastDisplayIDs)
-        let removed = lastDisplayIDs.subtracting(ids)
         let priorOrigins = lastOrigins
+        let isLaunch = lastDisplayIDs.isEmpty
+        let transition = HotplugMath.transition(set: set, baseSet: baseSet, ids: ids,
+                                                lastSet: lastDisplaySet, lastBaseSet: lastBaseSet,
+                                                lastIDs: lastDisplayIDs)
         defer {
             lastDisplaySet = set; lastBaseSet = baseSet; lastDisplayIDs = ids
             lastOrigins = Dictionary(displays.map { ($0.id, $0.bounds.origin) }, uniquingKeysWith: { a, _ in a })
         }
-        guard !set.isEmpty else { return }
 
-        guard set != lastDisplaySet else {
-            LayoutStore.store(LayoutStore.profile(from: displays))   // settled → remember this layout
+        switch transition {
+        case .ignore:
             return
-        }
 
-        // A display left: macOS may have moved a survivor to a stale single-monitor
-        // layout. Re-pin survivors to their prior positions; if that's impossible
-        // (e.g. the middle of three was removed), open the arranger to solve instead.
-        if !removed.isEmpty, newcomerIDs.isEmpty {
+        case .settled:
+            LayoutStore.store(LayoutStore.profile(from: displays))   // remember this layout
+
+        case .departure:
+            // macOS may have moved a survivor to a stale single-monitor layout.
             repinSurvivors(displays, priorOrigins: priorOrigins)
-            return
-        }
 
-        // A twin of an already-present monitor just joined: adding it re-suffixes the
-        // existing one, but we must NOT reshuffle the existing displays. Leave them put,
-        // dock the newcomer flush to the nearest free edge, and arrange it.
-        if HotplugMath.joinedIdenticalTwin(now: baseSet, before: lastBaseSet) {
+        case .twinJoined(let newcomerIDs):
+            // Adding a twin re-suffixes the existing monitor, but we must NOT reshuffle
+            // the existing displays. Leave them put, dock the newcomer flush to the
+            // nearest free edge, and arrange it.
             dockNewcomer(newcomerIDs, in: displays)
             selectNewcomer(newcomerIDs, in: displays)
-            return
-        }
 
-        let profile = LayoutStore.bestMatch(for: Array(set))
-        if let profile { applyProfile(profile, to: displays) }
+        case .setChanged(let newcomerIDs):
+            let profile = LayoutStore.bestMatch(for: Array(set))
+            if let profile { applyProfile(profile, to: displays) }
 
-        // Any newly-connected display not covered by the applied profile is
-        // "unrecognized" — surface the arranger and select it.
-        let recognized = profile.map { Set($0.keys) } ?? []
-        let unrecognized = displays.filter { newcomerIDs.contains($0.id) && !recognized.contains($0.fingerprint) }
-        selectNewcomer(Set(unrecognized.map(\.id)), in: displays)
+            // Any newly-connected display not covered by the applied profile is
+            // "unrecognized" — surface the arranger and select it.
+            let recognized = profile.map { Set($0.keys) } ?? []
+            let unrecognized = displays.filter { newcomerIDs.contains($0.id) && !recognized.contains($0.fingerprint) }
+            selectNewcomer(Set(unrecognized.map(\.id)), in: displays)
 
-        // A brand-new girl gets measured on arrival: if she's external, never
-        // calibrated, and this is a genuine hotplug (not launch populating the
-        // set), bring the tape out immediately, over the arranger.
-        if !lastDisplayIDs.isEmpty,
-           let newbie = unrecognized.first(where: { !$0.isBuiltin && !$0.physicalSizeIsCalibrated }) {
-            calibrateVisual(newbie.id)
+            // A brand-new girl gets measured on arrival: if she's external, never
+            // calibrated, and this is a genuine hotplug (not launch populating the
+            // set), bring the tape out immediately, over the arranger.
+            if !isLaunch,
+               let newbie = unrecognized.first(where: { !$0.isBuiltin && !$0.physicalSizeIsCalibrated }) {
+                calibrateVisual(newbie.id)
+            }
         }
     }
 
     /// Re-apply the survivors' prior origins so the remaining monitor(s) don't get
-    /// moved by macOS's stale layout. If those origins no longer form a valid
-    /// arrangement (a gap — e.g. the middle of three was removed), open the arranger to
-    /// solve to a next-best layout instead.
+    /// moved by macOS's stale layout; when that's impossible (unknown prior, or a gap —
+    /// e.g. the middle of three was removed), open the arranger to solve instead. The
+    /// decision is pure (`HotplugMath.repinDecision`, tested); this applies it.
     private func repinSurvivors(_ displays: [DisplaySnapshot], priorOrigins: [CGDirectDisplayID: CGPoint]) {
-        var rects: [CGRect] = []
-        var origins: [CGDirectDisplayID: CGPoint] = [:]
-        var mainID: CGDirectDisplayID?
-        for d in displays {
-            guard let o = priorOrigins[d.id] else { showWindow(); return }   // unknown prior → let user solve
-            origins[d.id] = o
-            rects.append(CGRect(origin: o, size: d.bounds.size))
-            if d.isMain { mainID = d.id }
+        let decision = HotplugMath.repinDecision(
+            survivors: displays.map { ($0.id, $0.bounds.size, $0.isMain) },
+            priorOrigins: priorOrigins)
+        switch decision {
+        case .solveInArranger:
+            showWindow()
+        case .apply(let origins, let mainID):
+            preservingCursor { DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true) }
         }
-        guard HotplugMath.arrangementIsValid(rects) else { showWindow(); return }   // gap/overlap → solve in arranger
-        preservingCursor { DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true) }
     }
 
     /// Dock a newly-joined display flush to the nearest free edge of the existing

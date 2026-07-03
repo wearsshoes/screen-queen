@@ -77,4 +77,96 @@ final class HotplugMathTests: XCTestCase {
         XCTAssertFalse(placed.insetBy(dx: 1, dy: 1).intersects(a), "no overlap with a")
         XCTAssertFalse(placed.insetBy(dx: 1, dy: 1).intersects(right), "no overlap with right")
     }
+
+    // MARK: - transition (which hotplug branch fires)
+
+    private func trans(set: Set<String>, base: [String], ids: Set<CGDirectDisplayID>,
+                       lastSet: Set<String>, lastBase: [String],
+                       lastIDs: Set<CGDirectDisplayID>) -> HotplugMath.Transition {
+        HotplugMath.transition(set: set, baseSet: base, ids: ids,
+                               lastSet: lastSet, lastBaseSet: lastBase, lastIDs: lastIDs)
+    }
+
+    func testTransitionIgnoresEmptySet() {
+        XCTAssertEqual(trans(set: [], base: [], ids: [],
+                             lastSet: ["fp1"], lastBase: ["b1"], lastIDs: [1]), .ignore,
+                       "all screens gone (clamshell mid-switch) must not touch profiles")
+    }
+
+    func testTransitionSettledWhenSetUnchanged() {
+        XCTAssertEqual(trans(set: ["fp1", "fp2"], base: ["b1", "b2"], ids: [1, 2],
+                             lastSet: ["fp1", "fp2"], lastBase: ["b1", "b2"], lastIDs: [1, 2]),
+                       .settled)
+        // Same fingerprints but the session IDs changed (a reconfig renumbered them):
+        // still settled — identity is the fingerprint set, not the IDs.
+        XCTAssertEqual(trans(set: ["fp1", "fp2"], base: ["b1", "b2"], ids: [3, 4],
+                             lastSet: ["fp1", "fp2"], lastBase: ["b1", "b2"], lastIDs: [1, 2]),
+                       .settled)
+    }
+
+    func testTransitionDeparture() {
+        XCTAssertEqual(trans(set: ["fp1"], base: ["b1"], ids: [1],
+                             lastSet: ["fp1", "fp2"], lastBase: ["b1", "b2"], lastIDs: [1, 2]),
+                       .departure)
+    }
+
+    func testTransitionSwapIsSetChangedNotDeparture() {
+        // One left AND one arrived: not a pure departure — the profile path decides.
+        XCTAssertEqual(trans(set: ["fp1", "fp3"], base: ["b1", "b3"], ids: [1, 3],
+                             lastSet: ["fp1", "fp2"], lastBase: ["b1", "b2"], lastIDs: [1, 2]),
+                       .setChanged(newcomers: [3]))
+    }
+
+    func testTransitionTwinJoined() {
+        XCTAssertEqual(trans(set: ["fp1a", "fp1b"], base: ["b1", "b1"], ids: [1, 2],
+                             lastSet: ["fp1"], lastBase: ["b1"], lastIDs: [1]),
+                       .twinJoined(newcomers: [2]))
+        // A *different* monitor joining is the plain profile path.
+        XCTAssertEqual(trans(set: ["fp1", "fp2"], base: ["b1", "b2"], ids: [1, 2],
+                             lastSet: ["fp1"], lastBase: ["b1"], lastIDs: [1]),
+                       .setChanged(newcomers: [2]))
+    }
+
+    func testTransitionLaunchPopulatesAsSetChanged() {
+        // First refresh after launch: everything is a newcomer; the profile path runs
+        // (the calibrate-on-arrival gate is the caller's isLaunch check, not ours).
+        XCTAssertEqual(trans(set: ["fp1", "fp2"], base: ["b1", "b2"], ids: [1, 2],
+                             lastSet: [], lastBase: [], lastIDs: []),
+                       .setChanged(newcomers: [1, 2]))
+    }
+
+    // MARK: - repinDecision (departure aftermath)
+
+    func testRepinAppliesKnownValidPriors() {
+        let decision = HotplugMath.repinDecision(
+            survivors: [(1, CGSize(width: 1920, height: 1080), true),
+                        (2, CGSize(width: 1440, height: 900), false)],
+            priorOrigins: [1: .zero, 2: CGPoint(x: 1920, y: 0)])
+        XCTAssertEqual(decision, .apply(origins: [1: .zero, 2: CGPoint(x: 1920, y: 0)], mainID: 1))
+    }
+
+    func testRepinSolvesOnUnknownPrior() {
+        let decision = HotplugMath.repinDecision(
+            survivors: [(1, CGSize(width: 1920, height: 1080), true)],
+            priorOrigins: [:])
+        XCTAssertEqual(decision, .solveInArranger,
+                       "a survivor with no recorded spot must go to the user, not a guess")
+    }
+
+    func testRepinSolvesWhenPriorsLeaveAGap() {
+        // The middle of three left: the outer two's priors no longer touch.
+        let decision = HotplugMath.repinDecision(
+            survivors: [(1, CGSize(width: 1920, height: 1080), true),
+                        (3, CGSize(width: 1920, height: 1080), false)],
+            priorOrigins: [1: .zero, 3: CGPoint(x: 3840, y: 0)])
+        XCTAssertEqual(decision, .solveInArranger)
+    }
+
+    func testRepinSoloSurvivorApplies() {
+        let decision = HotplugMath.repinDecision(
+            survivors: [(1, CGSize(width: 1920, height: 1080), true)],
+            priorOrigins: [1: CGPoint(x: -1920, y: 0)])
+        XCTAssertEqual(decision, .apply(origins: [1: CGPoint(x: -1920, y: 0)], mainID: 1),
+                       "a solo survivor keeps its prior spot (macOS would yank it to 0,0)")
+    }
 }
