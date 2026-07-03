@@ -217,7 +217,7 @@ final class Arranger {
         let tip = active.flatMap { $0.hoveredTooltip() }
         for stage in stages {
             stage.updateGhostArrow(cursorActivePoint: cursorActivePoint, isActive: stage === active)
-            stage.updatePlaneMarker(cursor: cursor, hostID: activeID)
+            stage.minimap.updatePlaneMarker(cursor: cursor, hostID: activeID)
             stage.updateTooltip(text: tip, cursorActivePoint: cursorActivePoint)
         }
     }

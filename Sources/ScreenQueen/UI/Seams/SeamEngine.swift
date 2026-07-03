@@ -36,7 +36,7 @@ extension Stage {
         let seamColor = state.seamColors(bars)
         seamEmitters.begin()
         seamGlow.begin()
-        for e in miniBarEdges(bars, t: t, seamColor: seamColor) {
+        for e in minimap.miniBarEdges(bars, t: t, seamColor: seamColor) {
             let eid = barID(e.rect, e.inward)
             seamEmitters.add(edgeOf: e.rect, direction: particleDirection(e.inward), color: e.color.cgColor,
                              id: "mini-\(eid)", sizeScale: screenDensityScale)

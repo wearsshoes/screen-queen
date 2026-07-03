@@ -12,11 +12,11 @@ fileprivate extension NSImage {
 /// One tile: fill, wallpaper/live feed, letterbox hatching, menu-bar strip, Dock
 /// indicator, the selected halo, and the info-card feed. Native GraphicsContext,
 /// one y-down space throughout.
-extension Stage {
+extension Minimap {
 
     func drawTile(_ ctx: GraphicsContext, for display: DisplaySnapshot, in rect: NSRect) {
         // Tiles stay neutral — color lives on the seams; selection gets the accent wash.
-        let selected = display.id == selectedID
+        let selected = display.id == state.selectedID
         let color = Color(nsColor: selected
             ? NSColor.systemPink.blended(withFraction: 0.75, of: .white) ?? .white
             : NSColor(white: 0.72, alpha: 0.85))
@@ -27,7 +27,7 @@ extension Stage {
         drawWallpaper(ctx, for: display, in: inset, selected: selected)
         drawBoxing(ctx, for: display, in: inset)
         // The main display carries a menu-bar strip (drag it to another tile to move main).
-        if display.isMain, draggingMenuBar == nil { drawMenuBar(ctx, in: menuBarRect(inTile: inset)) }
+        if display.isMain, stage.draggingMenuBar == nil { drawMenuBar(ctx, in: menuBarRect(inTile: inset)) }
     }
 
     /// A pink glow halo behind the selected tile, drawn *before* it so only the blur
@@ -43,16 +43,6 @@ extension Stage {
                                    radius: blur, x: 0, y: 0))
             glow.fill(path, with: .color(.black))
         }
-    }
-
-    /// Depth a bottom Dock strip occupies within a tile (mirrors `drawDockIndicator`'s
-    /// geometry), so other chrome can clear it.
-    func dockStripDepth(in tile: NSRect) -> CGFloat {
-        let inset = tile.insetBy(dx: 1.5, dy: 1.5)
-        let icon = min(max(inset.height * 0.10, 7), 15)
-        let tray = icon * 0.34
-        let margin = icon * 0.5
-        return margin + icon + tray * 2 + 4   // + a little breathing room
     }
 
     /// The macOS Dock in miniature (3 squircles · divider · Trash) hugging the predicted
@@ -135,8 +125,8 @@ extension Stage {
         let w = iw * scale, h = ih * scale
         // Pixel-snap the destination: a sub-pixel origin softens the whole image, and the
         // cover-crop already bleeds past the tile so a ≤1px nudge is free.
-        let dst = NSRect(x: pixelSnap(rect.midX - w / 2), y: pixelSnap(rect.midY - h / 2),
-                         width: pixelSnap(w), height: pixelSnap(h))
+        let dst = NSRect(x: stage.pixelSnap(rect.midX - w / 2), y: stage.pixelSnap(rect.midY - h / 2),
+                         width: stage.pixelSnap(w), height: stage.pixelSnap(h))
         var c = ctx
         c.opacity = alpha
         c.draw(Image(decorative: image, scale: 1), in: dst)
@@ -222,17 +212,17 @@ extension Stage {
     /// the plane this pass. Subview work, so it lives on the refresh path — `draw(_:)`
     /// must not mutate the view tree (a Canvas port can't).
     func layoutLabelCards() {
-        let rects = currentRects()
-        guard let t = drawTransform(rects) else {
+        let rects = state.plane
+        guard let t = stage.drawTransform(rects) else {
             labelCards.values.forEach { $0.isHidden = true }
             return
         }
         var placed = Set<CGDirectDisplayID>()
-        for d in displays {
+        for d in state.displays {
             guard let r = rects[d.id] else { continue }
             placed.insert(d.id)
             layoutLabelCard(for: d, in: t.viewRect(r).insetBy(dx: 1.5, dy: 1.5),
-                            selected: d.id == selectedID, viewScale: t.scale)
+                            selected: d.id == state.selectedID, viewScale: t.scale)
         }
         for (id, card) in labelCards where !placed.contains(id) { card.isHidden = true }
     }
@@ -276,8 +266,8 @@ extension Stage {
         let boxW = min(size.width, rect.width - 4)
         // Pixel-snap the card's frame — the text snap inside it is only meaningful if
         // the card's own origin sits on the grid.
-        card.frame = NSRect(x: pixelSnap(rect.midX - boxW / 2), y: pixelSnap(rect.midY - size.height / 2),
-                            width: pixelSnap(boxW), height: pixelSnap(size.height))
+        card.frame = NSRect(x: stage.pixelSnap(rect.midX - boxW / 2), y: stage.pixelSnap(rect.midY - size.height / 2),
+                            width: stage.pixelSnap(boxW), height: stage.pixelSnap(size.height))
         card.isHidden = false
     }
 
@@ -285,7 +275,7 @@ extension Stage {
     private func ensureLabelCard(for id: CGDirectDisplayID) -> LabelCardHost {
         if let c = labelCards[id] { return c }
         let c = LabelCardHost(rootView: LabelCardView(content: LabelCardContent()))
-        addSubview(c)
+        stage.addSubview(c)
         labelCards[id] = c
         return c
     }

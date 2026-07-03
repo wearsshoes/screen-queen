@@ -54,7 +54,7 @@ final class PlaneMouseMarkerLayer: CALayer {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-extension Stage {
+extension Minimap {
 
     /// Move the beacon to the cursor's location on this stage's schematic. Shows on
     /// every stage; hidden if the host display has no tile.
@@ -74,11 +74,11 @@ extension Stage {
     /// Cursor → fraction of the host display's bounds → its plane rect → this stage's
     /// transform. A mirrored display maps through its master; no plane rect ⇒ nil.
     private func beaconViewPoint(cursor: CGPoint, hostID: CGDirectDisplayID?) -> CGPoint? {
-        guard let hostID, let t = drawTransform(currentRects()) else { return nil }
-        let planeID = plane[hostID] != nil
+        guard let hostID, let t = stage.drawTransform(state.plane) else { return nil }
+        let planeID = state.plane[hostID] != nil
             ? hostID
-            : displays.first(where: { $0.id == hostID })?.mirrorMaster ?? hostID
-        guard let planeRect = plane[planeID],
+            : state.displays.first(where: { $0.id == hostID })?.mirrorMaster ?? hostID
+        guard let planeRect = state.plane[planeID],
               let pp = ArrangerGeometry.planePoint(cursor: cursor,
                                                    displayBounds: CGDisplayBounds(hostID),
                                                    planeRect: planeRect) else { return nil }
@@ -87,10 +87,10 @@ extension Stage {
 
     private func ensurePlaneMarker() -> PlaneMouseMarkerLayer {
         if let m = planeMarkerLayer { return m }
-        wantsLayer = true
+        stage.wantsLayer = true
         let m = PlaneMouseMarkerLayer()
         m.zPosition = 4          // above particles (1), glow (2), panel (3); below arrow (6)
-        layer?.addSublayer(m)
+        stage.layer?.addSublayer(m)
         planeMarkerLayer = m
         return m
     }

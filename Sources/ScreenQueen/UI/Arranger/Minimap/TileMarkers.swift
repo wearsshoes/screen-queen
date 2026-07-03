@@ -3,7 +3,7 @@ import SwiftUI
 /// Alignment feedback on the minimap: the eight per-tile anchor notches, the paired
 /// arrows for the active alignment, and the ⌘⇧ align-destination ghosts. The on-glass
 /// counterpart (the big arrow at this screen's real edges) is Chrome/Glass/EdgeMarkers.
-extension Stage {
+extension Minimap {
 
     /// The eight perimeter anchor positions (corners + edge midpoints).
     enum AnchorPos: CaseIterable {
@@ -55,9 +55,9 @@ extension Stage {
     /// center, or the center of its overlap with the current tile, or (if that overlap
     /// is too small) just outside the current tile in the move direction.
     func drawAlignGhosts(_ ctx: GraphicsContext, t: Transform) {
-        guard let selID = selectedID, let cur = plane[selID] else { return }
+        guard let selID = state.selectedID, let cur = state.plane[selID] else { return }
         let curView = t.viewRect(cur)
-        for (dir, rect) in alignGhosts() {
+        for (dir, rect) in stage.alignGhosts() {
             let g = t.viewRect(rect)
             let box = Path(roundedRect: g.insetBy(dx: 1.5, dy: 1.5), cornerRadius: tileCornerRadius)
             ctx.fill(box, with: .color(Color(white: 0.5).opacity(0.35)))
@@ -114,14 +114,14 @@ extension Stage {
     /// Markers for the active alignment, read from the stored anchor pair; the
     /// facing side comes from the rendered rects.
     func activeMarkers(_ rects: [CGDirectDisplayID: CGRect]) -> [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)] {
-        guard let selID = selectedID, let sR = rects[selID] else { return [:] }
-        if let a = activeV, let oR = rects[a.otherID] {
+        guard let selID = state.selectedID, let sR = rects[selID] else { return [:] }
+        if let a = state.activeV, let oR = rects[a.otherID] {
             let selLeft = sR.midX < oR.midX
             let sp = vPos(facingRight: selLeft, level: a.selfA), op = vPos(facingRight: !selLeft, level: a.otherA)
             return [selID: (sp, dirV(sp, corner: a.selfA != .center, partner: a.otherA)),
                     a.otherID: (op, dirV(op, corner: a.otherA != .center, partner: a.selfA))]
         }
-        if let a = activeH, let oR = rects[a.otherID] {
+        if let a = state.activeH, let oR = rects[a.otherID] {
             let selAbove = sR.midY < oR.midY
             let sp = hPos(facingBelow: selAbove, level: a.selfA), op = hPos(facingBelow: !selAbove, level: a.otherA)
             return [selID: (sp, dirH(sp, corner: a.selfA != .center, partner: a.otherA)),

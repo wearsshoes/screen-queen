@@ -35,7 +35,7 @@ extension Stage {
     private func mainMenuBarViewRect() -> NSRect? {
         guard let main = displays.first(where: { $0.isMain }), let r = plane[main.id],
               let t = dragTransform ?? transform(plane) else { return nil }
-        return menuBarRect(inTile: t.viewRect(r).insetBy(dx: 1.5, dy: 1.5))
+        return minimap.menuBarRect(inTile: t.viewRect(r).insetBy(dx: 1.5, dy: 1.5))
     }
 
     /// Gesture began (the SwiftUI DragGesture's first change — a plain click included).

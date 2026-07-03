@@ -56,12 +56,10 @@ final class Stage: NSView {
     var ghostActiveCenter: CGPoint = .zero
     /// True while this stage shows the pink ghost chrome (cursor is on another screen).
     var isGhost = false
-    /// The beacon: a pulsing pink map-pin at the cursor's location on this stage's tiles.
-    var planeMarkerLayer: PlaneMouseMarkerLayer?
 
-    /// The frosted info card per display (see `LabelCard`) — a real backdrop-blur subview,
-    /// repositioned to the tile each frame; created on demand, hidden when untouched.
-    var labelCards: [CGDirectDisplayID: LabelCardHost] = [:]
+    /// This stage's minimap — the tiles/seams/markers/cards/beacon subjects and
+    /// their storage (see Minimap.swift).
+    private(set) lazy var minimap = Minimap(stage: self)
 
     /// The right-hand mirror/AirPlay column (see `MirrorColumn`); created on demand.
     var mirrorColumn: MirrorColumnHost?
@@ -296,13 +294,6 @@ final class Stage: NSView {
     var centerID: CGDirectDisplayID?
 
     let outerPadding: CGFloat = 32
-    let tileCornerRadius: CGFloat = 8
-
-    /// Cached native pixel aspect per display (fixed per panel; stale entries harmless).
-    var nativeAspectCache: [CGDirectDisplayID: Double?] = [:]
-
-    /// Cached desktop wallpaper per display, keyed by (id, image URL) so changes reload.
-    var wallpaperCache: [CGDirectDisplayID: (url: URL, image: NSImage)?] = [:]
 
     override var acceptsFirstResponder: Bool { true }
     // Handle clicks even when this window isn't key (no activate-first click).
@@ -327,7 +318,7 @@ final class Stage: NSView {
     override func layout() {
         super.layout()
         bannerTop?.constant = state.uniformMenuBarInset + 12
-        layoutLabelCards()   // overlays track a bounds change (draw never places them)
+        minimap.layoutLabelCards()   // overlays track a bounds change (draw never places them)
         layoutMirrorColumn()
         updateSeamEffects()
         onLayout?()          // re-render chrome now that bounds/frames are settled
@@ -343,7 +334,7 @@ final class Stage: NSView {
             solvePanel.frame = rect
         }
         solvePanel.isHidden = state.planeDisplays.count < 2   // nothing to say about a solo girl
-        layoutLabelCards()
+        minimap.layoutLabelCards()
         layoutMirrorColumn()
         updateSeamEffects()
         repaintSchematic()

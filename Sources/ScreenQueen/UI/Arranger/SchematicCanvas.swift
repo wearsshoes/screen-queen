@@ -71,40 +71,40 @@ extension Stage {
         }
         let bars = state.currentBars()
         let seamColor = state.seamColors(bars)   // color per seam; both its bars share it
-        if state.showAlignGhosts { drawAlignGhosts(ctx, t: t) }   // under the tiles
+        if state.showAlignGhosts { minimap.drawAlignGhosts(ctx, t: t) }   // under the tiles
         // Selection halo before the tiles, so it reads under the lifted tile.
-        if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(ctx, t.viewRect(r)) }
-        for d in displays where rects[d.id] != nil { drawTile(ctx, for: d, in: t.viewRect(rects[d.id]!)) }
+        if let sel = selectedID, let r = rects[sel] { minimap.drawSelectedShadow(ctx, t.viewRect(r)) }
+        for d in displays where rects[d.id] != nil { minimap.drawTile(ctx, for: d, in: t.viewRect(rects[d.id]!)) }
         // Predicted Dock strip. With the live feed on the tiles already show the real
         // Dock, so only surface it when informative (Dock would move / mid menu-bar drag).
         if let dockID = state.predictedDockDisplay(), let r = rects[dockID] {
             let dockWouldMove = dockID != state.currentDockDisplay()
             let showDock = !state.feedEnabled || dockWouldMove || draggingMenuBar != nil
             if showDock {
-                drawDockIndicator(ctx, in: t.viewRect(r), edge: DockPredictor.edge())
+                minimap.drawDockIndicator(ctx, in: t.viewRect(r), edge: DockPredictor.edge())
             }
         }
         // Seam glows, painted from the same edge sets `updateSeamEffects` feeds to the
         // emitter/glow layers (on the refresh path — draw registers nothing).
-        for e in miniBarEdges(bars, t: t, seamColor: seamColor) { drawBehindGlow(ctx, e) }
-        let markers = activeMarkers(rects)
-        for d in displays where rects[d.id] != nil { drawAnchors(ctx, for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
+        for e in minimap.miniBarEdges(bars, t: t, seamColor: seamColor) { drawBehindGlow(ctx, e) }
+        let markers = minimap.activeMarkers(rects)
+        for d in displays where rects[d.id] != nil { minimap.drawAnchors(ctx, for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
         for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(ctx, e) }
         drawScreenMarkers(ctx, markers)           // alignment notches/arrows at this screen's real edges
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
             if let over = display(at: p), !over.isMain, let r = rects[over.id] {
                 let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
-                ctx.fill(Path(roundedRect: vr, cornerRadius: tileCornerRadius),
+                ctx.fill(Path(roundedRect: vr, cornerRadius: minimap.tileCornerRadius),
                          with: .color(.white.opacity(0.25)))
             }
-            drawMenuBar(ctx, in: NSRect(x: p.x - 40, y: p.y - 8, width: 80, height: 16))
+            minimap.drawMenuBar(ctx, in: NSRect(x: p.x - 40, y: p.y - 8, width: 80, height: 16))
         }
         // Option-mirror drag: highlight the tile the dragged display would mirror onto.
         if let p = mirrorDragPoint, let over = display(at: p), over.id != draggedID, let r = rects[over.id] {
             let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
             let pink = Color.pink
-            let path = Path(roundedRect: vr, cornerRadius: tileCornerRadius)
+            let path = Path(roundedRect: vr, cornerRadius: minimap.tileCornerRadius)
             ctx.fill(path, with: .color(pink.opacity(0.35)))
             ctx.stroke(path, with: .color(pink), lineWidth: 2)
             ctx.draw(Text(Copy.mirrorDropHint).font(.system(size: 12, weight: .bold))
