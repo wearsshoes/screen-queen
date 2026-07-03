@@ -1,12 +1,60 @@
 import SwiftUI
 
-/// The machinery both seam depictions share — the tile-space bars (Stage+TileSeams)
-/// and the on-glass edge bars (Chrome/Glass/EdgeSeams): one seam's two depictions share
-/// color, glow rendering, and emitter registration.
+/// The machinery every seam depiction shares — the tile-space bars (Minimap/TileSeams),
+/// the on-glass edge bars (Chrome/Glass/EdgeSeams), and the always-on lights
+/// (SeamLights): one seam wears one color everywhere, and the two arranger depictions
+/// share glow rendering and emitter registration.
 ///
 /// The edge set is computed once (`miniBarEdges`/`edgeBarEdges`, pure); the draw pass
 /// paints the behind-glows from it, and `updateSeamEffects()` (refresh path) feeds the
 /// same edges to the emitter/glow layers — the draw pass registers nothing.
+
+/// The stage-free half of the engine: seam detection over a *committed* point layout,
+/// for consumers reading the real desk rather than the arranger's plane.
+enum SeamEngine {
+    /// Every seam in a committed layout: pairwise shared edges among the plane
+    /// displays (mirrored slaves have no seams of their own).
+    static func committedSeams(_ displays: [DisplaySnapshot])
+        -> [(a: DisplaySnapshot, b: DisplaySnapshot, seam: SchematicLayout.Seam)] {
+        let plane = displays.filter { !$0.isMirrored }
+        var seams: [(a: DisplaySnapshot, b: DisplaySnapshot, seam: SchematicLayout.Seam)] = []
+        for i in 0..<plane.count {
+            for j in (i + 1)..<plane.count {
+                guard let s = SchematicLayout.seam(plane[i].bounds, plane[j].bounds) else { continue }
+                seams.append((plane[i], plane[j], s))
+            }
+        }
+        return seams
+    }
+}
+
+/// The app's one seam→color assignment, shared by every consumer so a seam wears the
+/// same color everywhere. Feeds the last assignment back into the edge-coloring
+/// (`DisplayGraph`, the pure index math), so a surviving seam keeps its color across
+/// rebuilds; the colors themselves come from the house palette (`SeamPalette`).
+@MainActor
+final class SeamColorBook {
+    static let shared = SeamColorBook()
+
+    private var last: [DisplayGraph.SeamKey: Int] = [:]
+
+    /// The color for each seam (unordered display pair), stable across calls.
+    func colors(for pairs: [(CGDirectDisplayID, CGDirectDisplayID)]) -> [DisplayGraph.SeamKey: NSColor] {
+        let indices = DisplayGraph.seamColorIndices(pairs, previous: last)
+        last = indices   // only surviving seams (the result drops vanished ones)
+        return indices.mapValues { SeamPalette.colors[$0 % SeamPalette.colors.count] }
+    }
+}
+
+extension ArrangerState {
+    /// Colors keyed by seam (unordered display pair) — via the shared `SeamColorBook` so
+    /// the arranger and the always-on seam lights agree. Lives here (not in the
+    /// framework-free state file) because NSColor is AppKit vocabulary.
+    func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] {
+        SeamColorBook.shared.colors(for: bars.map { ($0.aID, $0.bID) })
+    }
+}
+
 extension Stage {
 
     /// One seam edge: where a bar hugs a seam, which way it rounds/drifts, its color.

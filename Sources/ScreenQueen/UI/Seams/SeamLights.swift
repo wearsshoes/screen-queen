@@ -64,16 +64,9 @@ final class SeamLights {
 
     /// One 2px strip per seam *side* (each wholly on its own display, echoing how the
     /// arranger draws a bar on each side of the seam), positioned from the live point
-    /// layout. Mirrored slaves have no seams of their own and are skipped.
+    /// layout via the shared engine (same detection, same color book as the arranger).
     private func computeStrips(displays: [DisplaySnapshot]) -> [Strip] {
-        let plane = displays.filter { !$0.isMirrored }
-        var seams: [(a: DisplaySnapshot, b: DisplaySnapshot, s: SchematicLayout.Seam)] = []
-        for i in 0..<plane.count {
-            for j in (i + 1)..<plane.count {
-                guard let s = SchematicLayout.seam(plane[i].bounds, plane[j].bounds) else { continue }
-                seams.append((plane[i], plane[j], s))
-            }
-        }
+        let seams = SeamEngine.committedSeams(displays)
         let colors = SeamColorBook.shared.colors(for: seams.map { ($0.a.id, $0.b.id) })
 
         let thickness: CGFloat = 2
