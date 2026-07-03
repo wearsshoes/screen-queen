@@ -20,10 +20,12 @@ extension Arranger {
         return menuBarRect(inTile: t.viewRect(r).insetBy(dx: 1.5, dy: 1.5))
     }
 
-    override func mouseDown(with event: NSEvent) {
+    /// Gesture began (the SwiftUI DragGesture's first change — a plain click included).
+    /// `p` is in this view's y-up coordinates.
+    func mouseBegan(at p: CGPoint) {
+        mouseGestureActive = true
         window?.makeKeyAndOrderFront(nil)   // focus this screen's arranger
         window?.makeFirstResponder(self)
-        let p = convert(event.locationInWindow, from: nil)
         // Mirror-column buttons, hit-tested against the same pure layout the draw uses.
         if let hit = mirrorColumnHit(at: p) {
             switch hit {
@@ -43,7 +45,7 @@ extension Arranger {
         draggedID = d.id
         selectedID = d.id
         // Option-drag mirrors: dropping onto another tile mirrors this display onto it.
-        optionMirrorDrag = event.modifierFlags.contains(.option) && planeDisplays.count > 1
+        optionMirrorDrag = NSEvent.modifierFlags.contains(.option) && planeDisplays.count > 1
         state.draggingDisplayID = d.id   // brighten the grabbed display's screen from click
         state.beginDragLock()            // freeze unmoved displays' point positions for the drag
         dragStartMouse = p
@@ -54,8 +56,7 @@ extension Arranger {
         emitPreview()
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
+    func mouseMoved(to p: CGPoint) {
         if draggingMenuBar != nil {
             draggingMenuBar = p
             // Would-be main follows the strip, so the Dock prediction updates live.
@@ -82,22 +83,24 @@ extension Arranger {
         emitPreview()
     }
 
-    override func mouseUp(with event: NSEvent) {
-        defer { draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil
+    func mouseEnded(at p: CGPoint) {
+        defer { mouseGestureActive = false
+                draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil
                 optionMirrorDrag = false; mirrorDragPoint = nil; state.pendingMainID = nil
                 state.draggingDisplayID = nil; state.endDragLock(); state.notify() }
         // Dropped the menu-bar strip: whichever tile it's over becomes main.
-        if let p = draggingMenuBar {
+        if let strip = draggingMenuBar {
             repaintSchematic()
-            if let d = display(at: p), !d.isMain { commander?.setMainDisplay(d.id) }
+            if let d = display(at: strip), !d.isMain { commander?.setMainDisplay(d.id) }
             return
         }
         // Option-mirror drop: if released over a *different* plane tile, mirror the
         // dragged display (slave) onto that tile (master).
         if optionMirrorDrag, let slave = draggedID {
             mirrorDragPoint = nil
-            if let target = display(at: convert(event.locationInWindow, from: nil)),
-               target.id != slave { commander?.setMirror(slave: slave, master: target.id) }
+            if let target = display(at: p), target.id != slave {
+                commander?.setMirror(slave: slave, master: target.id)
+            }
             repaintSchematic()
             return
         }

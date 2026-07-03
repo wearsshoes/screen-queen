@@ -259,6 +259,10 @@ final class Arranger: NSView {
     // Handle clicks even when this window isn't key (no activate-first click).
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// True while the schematic host's DragGesture is live (its onChanged distinguishes
+    /// began from moved with this).
+    var mouseGestureActive = false
+
     /// Called by the state after a mutation: place the overlay subviews and feed the
     /// effect layers (`draw(_:)` never mutates the view tree or layers), then repaint.
     func refresh() {
