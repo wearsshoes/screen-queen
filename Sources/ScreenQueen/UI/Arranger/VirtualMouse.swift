@@ -73,17 +73,8 @@ extension Arranger {
                                     destCenter: CGPoint(x: bounds.midX, y: bounds.midY))
     }
 
-    /// Size the ghost mouse to the chrome pass's tile scale — called from `renderChrome`,
-    /// which runs whenever the scale can actually change.
-    func sizeGhostArrow(scale k: CGFloat) {
-        guard let arrow = ghostArrow else { return }
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        arrow.setAffineTransform(CGAffineTransform(scaleX: k, y: k))
-        CATransaction.commit()
-    }
-
-    /// Move the ghost mouse — position only, the per-event path. Its *size* is applied
-    /// in `renderChrome`, which runs whenever the scale can actually change.
+    /// Move the ghost mouse — position only, the per-event path. Like a real cursor
+    /// (and its own tooltip), the arrow never changes size.
     func updateGhostArrow(cursorActivePoint: CGPoint?, isActive: Bool) {
         guard VirtualMouse.ghostMouseEnabled else { return }
         let arrow = ensureGhostArrow()
@@ -99,8 +90,6 @@ extension Arranger {
         wantsLayer = true
         let a = GhostCursorLayer()
         a.zPosition = 6
-        let s = chromeTileScale
-        a.setAffineTransform(CGAffineTransform(scaleX: s, y: s))
         layer?.addSublayer(a)
         ghostArrow = a
         return a

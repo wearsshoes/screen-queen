@@ -35,13 +35,12 @@ extension Arranger {
         // One transform per pass: the bar re-renders at the pass's scale + ghost state
         // (SwiftUI rebuild — tint and sizing are part of the model), then is frame-placed
         // through the same `chromeViewRect` as the granny viewer; the footer tracks the
-        // settled bar; the ghost mouse's size rides the same scale.
+        // settled bar. (The ghost mouse stays cursor-sized — cursors don't zoom.)
         if let myT, myT.scale > 0 {
             let k = chromeTileScale(myT)
             updateBar(scale: k)
             layoutBar(in: myT)
             layoutFooter(scale: k)
-            sizeGhostArrow(scale: k)
         } else {
             updateBar()   // no transform yet — still reflect the fresh ghost state
         }
