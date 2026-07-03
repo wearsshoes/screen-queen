@@ -14,7 +14,7 @@ import SwiftUI
 /// target's PPI. Purely an affordance — the readout and Save/Cancel live in the
 /// floating panel.
 ///
-/// `Tape` is the model + CoreGraphics draw pass (y-up, run under the Canvas shim);
+/// `Tape` is the model + CoreGraphics draw pass (y-up, run under the Stage shim);
 /// `TapeHost` is the hosting view that owns input (hit-carving so two overlapping
 /// tapes share a window, drag classification, cursor rects, arrow keys).
 @MainActor
@@ -268,7 +268,7 @@ final class Tape {
         commit(start: start, end: end)
     }
 
-    // MARK: Draw (y-up CoreGraphics, run under the Canvas shim)
+    // MARK: Draw (y-up CoreGraphics, run under the Stage shim)
 
     func draw() {
         // (The soft scrim lives on the window — two sibling tapes shouldn't each
@@ -562,14 +562,14 @@ final class Tape {
     }
 }
 
-/// The tape's Canvas: runs the y-up CoreGraphics pass under the same shim as the
+/// The tape's Stage: runs the y-up CoreGraphics pass under the same shim as the
 /// schematic (flip once, wrap in an NSGraphicsContext).
 struct TapeCanvasView: View {
     weak var tape: Tape?
     var generation: Int
 
     var body: some View {
-        SwiftUI.Canvas { ctx, size in
+        Canvas { ctx, size in
             _ = generation
             guard let tape else { return }
             ctx.withCGContext { cg in

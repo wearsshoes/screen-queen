@@ -19,9 +19,9 @@ struct ModifierKeys {
 
 /// Interaction: mouse dragging and keyboard nudge/align/selection. All mutate the shared
 /// `state` and broadcast a redraw. (Resolution/mode handling lives in
-/// Canvas+Resolution; the context menu in Canvas+Menu.) Framework-free: events
+/// Stage+Resolution; the context menu in Stage+Menu.) Framework-free: events
 /// arrive pre-decoded (KeyInput/ModifierKeys, gesture points, the option flag).
-extension Canvas {
+extension Stage {
 
     // MARK: - Mouse / dragging
 
@@ -49,7 +49,7 @@ extension Canvas {
         if mainMenuBarViewRect()?.contains(p) == true {
             draggingMenuBar = p
             state.pendingMainID = displays.first { $0.isMain }?.id
-            state.notify()   // repaint every canvas so the Dock indicator shows everywhere
+            state.notify()   // repaint every stage so the Dock indicator shows everywhere
             return
         }
         guard let d = display(at: p), plane[d.id] != nil else { return }
@@ -121,7 +121,7 @@ extension Canvas {
     }
 
     // MARK: - Keyboard (entered via EventPlumbing's monitors, not the responder chain;
-    // Arranger routes events to the key window's canvas)
+    // Arranger routes events to the key window's stage)
 
     /// Returns true to consume; false lets dispatch continue (the bar's
     /// .keyboardShortcut equivalents, text fields elsewhere).

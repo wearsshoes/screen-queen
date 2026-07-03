@@ -1,14 +1,14 @@
 import AppKit
 
 /// One full-screen borderless arranger window per display, all sharing a single
-/// `ArrangerState`. Each window's canvas centers on its own screen's tile; a mutation
+/// `ArrangerState`. Each window's stage centers on its own screen's tile; a mutation
 /// on any of them broadcasts through the state so all repaint.
 @MainActor
 final class Arranger {
 
     let state = ArrangerState()
     private var windows: [CGDirectDisplayID: NSWindow] = [:]
-    private var canvases: [Canvas] = []
+    private var stages: [Stage] = []
 
     var isVisible: Bool { !windows.isEmpty }
 
@@ -20,29 +20,29 @@ final class Arranger {
         didSet {
             events?.onMouseSample = { [weak self] in self?.mouseDidMove() }
             // Keyboard rides monitors, not the responder chain: route to the key
-            // window's canvas — the same window AppKit would have dispatched to.
+            // window's stage — the same window AppKit would have dispatched to.
             // NSEvent is decoded HERE; the handlers speak KeyInput/ModifierKeys.
             events?.onArrangerKeyDown = { [weak self] e in
-                self?.keyCanvas()?.handleKeyDown(Self.keyInput(e)) ?? false
+                self?.keyStage()?.handleKeyDown(Self.keyInput(e)) ?? false
             }
             events?.onArrangerKeyUp = { [weak self] e in
-                self?.keyCanvas()?.handleKeyUp(Self.keyInput(e)) ?? false
+                self?.keyStage()?.handleKeyUp(Self.keyInput(e)) ?? false
             }
             events?.onArrangerFlagsChanged = { [weak self] e in
                 let f = e.modifierFlags
-                self?.keyCanvas()?.handleFlagsChanged(
+                self?.keyStage()?.handleFlagsChanged(
                     ModifierKeys(cmd: f.contains(.command), shift: f.contains(.shift)))
             }
         }
     }
 
-    /// The canvas that owns keyboard input right now: the key window's, and only when
+    /// The stage that owns keyboard input right now: the key window's, and only when
     /// the key window is one of ours — calibration panels and the Backstage Pass keep
     /// their own keys even while the arranger is up behind them.
-    private func keyCanvas() -> Canvas? {
+    private func keyStage() -> Stage? {
         guard isVisible, let key = NSApp.keyWindow,
               windows.values.contains(key) else { return nil }
-        return canvases.first { $0.window === key }
+        return stages.first { $0.window === key }
     }
     /// The display the cursor is on. The chrome is re-rendered only when this changes;
     /// the ghost mouse moves every event.
@@ -56,26 +56,26 @@ final class Arranger {
 
     init() {
         state.changed = { [weak self] in
-            self?.canvases.forEach { $0.refresh() }
+            self?.stages.forEach { $0.refresh() }
             self?.rerenderChrome()
         }
         state.onSliderDragChanged = { [weak self] dragging in self?.events?.setSliderDragging(dragging) }
         state.capture = capture
-        capture.onFrame = { [weak self] in self?.canvases.forEach { $0.repaintSchematic() } }
+        capture.onFrame = { [weak self] in self?.stages.forEach { $0.repaintSchematic() } }
         state.onToggleFeed = { [weak self] on in self?.setFeed(on) }
         state.onCountdownResolved = { [weak self] kind in
             if kind == .feedGuard { self?.cancelFeedWatchdog() }
         }
     }
 
-    /// Re-render every canvas's chrome, deferred a runloop turn so button-bar autolayout
+    /// Re-render every stage's chrome, deferred a runloop turn so button-bar autolayout
     /// has settled into real frames.
     private func rerenderChrome() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let active = self.activeDisplayID.flatMap { id in self.canvases.first { $0.centerID == id } }
-            for canvas in self.canvases {
-                canvas.renderChrome(active: canvas === active ? nil : active)
+            let active = self.activeDisplayID.flatMap { id in self.stages.first { $0.centerID == id } }
+            for stage in self.stages {
+                stage.renderChrome(active: stage === active ? nil : active)
             }
         }
     }
@@ -91,7 +91,7 @@ final class Arranger {
             // No-op unless a guard was running (its own expiry lands here too).
             state.resolveCountdown(.feedGuard, keep: true)
         }
-        canvases.forEach { $0.refresh() }
+        stages.forEach { $0.refresh() }
     }
 
     /// Going live on `bigCastThreshold`+ screens arms an auto-off unless the user says
@@ -123,7 +123,7 @@ final class Arranger {
     func show(displays: [DisplaySnapshot]) {
         state.update(with: displays)
         rebuild()
-        canvases.forEach { $0.refresh() }
+        stages.forEach { $0.refresh() }
         NSApp.activate(ignoringOtherApps: true)
         // Activating alone doesn't make a borderless overlay key; make the main
         // display's window key so shortcuts work immediately on hotkey-open.
@@ -160,7 +160,7 @@ final class Arranger {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// Key the canvas on `screen` (focus-follows-cursor). No-op when not visible or a
+    /// Key the stage on `screen` (focus-follows-cursor). No-op when not visible or a
     /// window on that screen is already key (don't-steal semantics).
     func focusWindow(on screen: NSScreen) {
         guard isVisible else { return }
@@ -177,7 +177,7 @@ final class Arranger {
         activeDisplayID = nil
         windows.values.forEach { $0.orderOut(nil) }
         windows.removeAll()
-        canvases.removeAll()
+        stages.removeAll()
     }
 
     // MARK: - Ghost mouse feed (see VirtualMouse.swift)
@@ -197,13 +197,13 @@ final class Arranger {
         let cursor = CGEvent(source: nil)?.location ?? .zero
         let activeID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
             ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
-        let active = activeID.flatMap { id in canvases.first { $0.centerID == id } }
-        // The cursor in the active canvas's view coords, derived from the same CGEvent
+        let active = activeID.flatMap { id in stages.first { $0.centerID == id } }
+        // The cursor in the active stage's view coords, derived from the same CGEvent
         // sample as `cursor` so the ghost and beacon can't disagree about where it is.
         var cursorActivePoint: CGPoint?
         if let activeID, let window = windows[activeID] {
             let up = cocoaGlobal(fromCG: cursor)
-            // The canvas is flipped (y-down from the window top).
+            // The stage is flipped (y-down from the window top).
             cursorActivePoint = CGPoint(x: up.x - window.frame.minX, y: window.frame.maxY - up.y)
         }
         if activeID != activeDisplayID {
@@ -215,14 +215,14 @@ final class Arranger {
                 state.activeV = nil; state.activeH = nil   // drop stale alignment anchors
                 state.notify()
             }
-            for canvas in canvases { canvas.renderChrome(active: canvas === active ? nil : active) }
+            for stage in stages { stage.renderChrome(active: stage === active ? nil : active) }
         }
-        // The hovered control's tooltip trails the (ghost) cursor on every canvas.
+        // The hovered control's tooltip trails the (ghost) cursor on every stage.
         let tip = active.flatMap { $0.hoveredTooltip() }
-        for canvas in canvases {
-            canvas.updateGhostArrow(cursorActivePoint: cursorActivePoint, isActive: canvas === active)
-            canvas.updatePlaneMarker(cursor: cursor, hostID: activeID)
-            canvas.updateTooltip(text: tip, cursorActivePoint: cursorActivePoint)
+        for stage in stages {
+            stage.updateGhostArrow(cursorActivePoint: cursorActivePoint, isActive: stage === active)
+            stage.updatePlaneMarker(cursor: cursor, hostID: activeID)
+            stage.updateTooltip(text: tip, cursorActivePoint: cursorActivePoint)
         }
     }
 
@@ -232,7 +232,7 @@ final class Arranger {
         guard isVisible else { return }
         state.update(with: displays, force: force)
         rebuild()   // screens may have changed
-        canvases.forEach { $0.refresh() }
+        stages.forEach { $0.refresh() }
         rerenderChrome()
     }
 
@@ -262,7 +262,7 @@ final class Arranger {
             // reconfig — recreate any window whose screen frame changed.
             if let existing = windows[id], existing.frame != screen.frame {
                 existing.orderOut(nil)
-                canvases.removeAll { $0.centerID == id }
+                stages.removeAll { $0.centerID == id }
                 windows[id] = nil
             }
             let window = windows[id] ?? makeWindow(centerID: id, frame: screen.frame)
@@ -272,7 +272,7 @@ final class Arranger {
         for (id, window) in windows where !live.contains(id) {
             window.orderOut(nil)
             windows[id] = nil
-            canvases.removeAll { $0.centerID == id }
+            stages.removeAll { $0.centerID == id }
         }
     }
 
@@ -289,12 +289,12 @@ final class Arranger {
         window.isReleasedWhenClosed = false
 
         // Backdrop: native Liquid Glass on macOS 26, behind-window blur below. The
-        // canvas (with its own dim wash) sits on top.
+        // stage (with its own dim wash) sits on top.
         let fullFrame = CGRect(origin: .zero, size: frame.size)
-        let canvas = Canvas(state: state, frame: fullFrame)
-        canvas.centerID = centerID
-        canvas.autoresizingMask = [.width, .height]
-        canvas.onLayout = { [weak self] in self?.rerenderChrome() }
+        let stage = Stage(state: state, frame: fullFrame)
+        stage.centerID = centerID
+        stage.autoresizingMask = [.width, .height]
+        stage.onLayout = { [weak self] in self?.rerenderChrome() }
 
         if #available(macOS 26.0, *) {
             // `NSGlassEffectView` draws a light rim at its edges, which reads as a white
@@ -308,7 +308,7 @@ final class Arranger {
             glass.cornerRadius = 0
             glass.autoresizingMask = [.width, .height]
             host.addSubview(glass)
-            host.addSubview(canvas)            // canvas on top, at the true full frame
+            host.addSubview(stage)            // stage on top, at the true full frame
             window.contentView = host
         } else {
             let blur = NSVisualEffectView(frame: fullFrame)
@@ -316,11 +316,11 @@ final class Arranger {
             blur.blendingMode = .behindWindow
             blur.state = .active
             blur.autoresizingMask = [.width, .height]
-            blur.addSubview(canvas)
+            blur.addSubview(stage)
             window.contentView = blur
         }
-        window.makeFirstResponder(canvas)
-        canvases.append(canvas)
+        window.makeFirstResponder(stage)
+        stages.append(stage)
         return window
     }
 

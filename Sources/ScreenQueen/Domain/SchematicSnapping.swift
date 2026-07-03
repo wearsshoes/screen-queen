@@ -4,8 +4,8 @@ import CoreGraphics
 /// (physical-inch rects, y-down, domain-native) and the active anchor markers, compute
 /// where a dragged or nudged tile should land — and which markers result.
 ///
-/// Transform-free and canvas-free: it takes plane rects in and returns plane origins out,
-/// with the active-marker side effect turned into a return value. The canvas is the only
+/// Transform-free and stage-free: it takes plane rects in and returns plane origins out,
+/// with the active-marker side effect turned into a return value. The stage is the only
 /// place that reads/writes state; here it's all inputs and outputs, so the logic is
 /// testable in isolation.
 enum SchematicSnapping {

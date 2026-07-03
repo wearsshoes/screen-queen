@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The arranger drives (and consumes) the ghost-mouse feed through the shared
         // plumbing; focus follows the cursor across screens (calibration panels first,
-        // arranger canvases otherwise).
+        // arranger stages otherwise).
         arranger.events = events
         events.isCalibrationActive = { [weak self] in self?.calibrationController.isActive ?? false }
         events.focusCalibration = { [weak self] screen in self?.calibrationController.focusPanel(on: screen) }

@@ -2,14 +2,14 @@ import SwiftUI
 
 /// The render pass: `drawSchematic(in:size:)` orchestrates the schematic in paint order,
 /// called from the SwiftUI Canvas host (see SchematicCanvas.swift). The subjects live in
-/// their own files — seams (Canvas+Seams), tiles (Canvas+Tiles), alignment markers
-/// (Canvas+Markers), mirror column (Canvas+Sidebar). Fully native GraphicsContext —
-/// plane, view, and Canvas all share one y-down orientation.
-extension Canvas {
+/// their own files — seams (Stage+Seams), tiles (Stage+Tiles), alignment markers
+/// (Stage+Markers), mirror column (Stage+Sidebar). Fully native GraphicsContext —
+/// plane, view, and Stage all share one y-down orientation.
+extension Stage {
 
     func drawSchematic(in ctx: GraphicsContext, size: CGSize) {
         // The backdrop wash. If this screen's own tile is being dragged (from any
-        // canvas), brighten it — a real-world "you're dragging me" cue.
+        // stage), brighten it — a real-world "you're dragging me" cue.
         let beingDragged = centerID != nil && state.draggingDisplayID == centerID
         let wash: Color = beingDragged
             ? Color(nsColor: NSColor.systemPink.blended(withFraction: 0.2, of: .black) ?? .systemPink).opacity(0.75)

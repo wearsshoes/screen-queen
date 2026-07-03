@@ -1,7 +1,7 @@
 import QuartzCore
 
 /// The beacon: a pulsing map-pin at the cursor's location on the *schematic*, shown on
-/// every canvas — where you are on the map, from any screen. A map marker, not a
+/// every stage — where you are on the map, from any screen. A map marker, not a
 /// pointer: distinct from the ghost mouse (VirtualMouse.swift), which mirrors the
 /// cursor itself.
 enum Beacon {
@@ -58,10 +58,10 @@ final class PlaneMouseMarkerLayer: CALayer {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-extension Canvas {
+extension Stage {
 
-    /// Move the beacon to the cursor's location on this canvas's schematic. Shows on
-    /// every canvas; hidden if the host display has no tile.
+    /// Move the beacon to the cursor's location on this stage's schematic. Shows on
+    /// every stage; hidden if the host display has no tile.
     func updatePlaneMarker(cursor: CGPoint, hostID: CGDirectDisplayID?) {
         guard Beacon.enabled else { return }
         let marker = ensurePlaneMarker()
@@ -75,7 +75,7 @@ extension Canvas {
         CATransaction.commit()
     }
 
-    /// Cursor → fraction of the host display's bounds → its plane rect → this canvas's
+    /// Cursor → fraction of the host display's bounds → its plane rect → this stage's
     /// transform. A mirrored display maps through its master; no plane rect ⇒ nil.
     private func beaconViewPoint(cursor: CGPoint, hostID: CGDirectDisplayID?) -> CGPoint? {
         guard let hostID, let t = drawTransform(currentRects()) else { return nil }

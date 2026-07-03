@@ -29,7 +29,7 @@
   Also gone since: the footer NSTextField, NSFont/NSString in the sidebar
   (resolve().measure), Chime (AudioToolbox) for beeps, the NSColor→Color
   push, the y-up view space (everything is y-down now — Transform is a pure
-  scale+translate, the Canvas view is flipped, all yDown/flip gates
+  scale+translate, the Stage view is flipped, all yDown/flip gates
   deleted), the DragFont bridge (ScriptFont registers via CoreText,
   `Font.script` wears it), and label-card NSString measurement (the card is
   a flex container; the canvas centers its fittingSize on the tile). NSFont
@@ -38,16 +38,16 @@
   fallible chain); NSColor remains where load-bearing: blended() (Color.mix
   is macOS 15+) and the CALayer palette pipeline.
 * AppKit-import census (July 2026, after the framework diet + name swap —
-  the per-screen view is **Canvas**, the coordinator is **Arranger**, was
+  the per-screen view is **Stage**, the coordinator is **Arranger**, was
   ArrangerWindows): 13 files, all load-bearing — shells (main, AppDelegate ×2,
   Arranger, KeyableBorderlessWindow, CalibrationController, SeamLights' strip
   windows), events (EventPlumbing), bridges (DisplayManager, NSScreen+DisplayID,
-  SeamPalette — the one NSColor home), and the Canvas NSView + its NSMenu.
+  SeamPalette — the one NSColor home), and the Stage NSView + its NSMenu.
   UI/Chrome/ files are the overlay cast (view + canvas plumbing per feature,
-  or QuartzCore-only layer critters); ArrangerState / Canvas+Resolution /
-  Canvas+Input / +Hotplug are framework-free.
+  or QuartzCore-only layer critters); ArrangerState / Stage+Resolution /
+  Stage+Input / +Hotplug are framework-free.
 * Conventions the port established:
-  - One y-down space end to end: plane (`CGDisplayBounds`) = view (Canvas is
+  - One y-down space end to end: plane (`CGDisplayBounds`) = view (Stage is
     a flipped NSView) = SwiftUI Canvas/gesture space. No flip gates anywhere;
     `Transform` is a pure scale+translate.
   - Repaints go through `repaintSchematic()` (a rootView generation bump) —

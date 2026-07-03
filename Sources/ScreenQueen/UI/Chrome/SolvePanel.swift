@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// What the "what she sees" panel shows: the live reconstructed *point* arrangement —
-/// the actual solve `seamBars` uses — plus the ghost flag (inactive canvases repaint
+/// the actual solve `seamBars` uses — plus the ghost flag (inactive stages repaint
 /// in pink).
 struct SolvePanelContent {
     var rects: [(id: CGDirectDisplayID, rect: CGRect, ambiguous: Bool)] = []
@@ -20,7 +20,7 @@ struct SolvePanelView: View {
     private static let titleBarHeight: CGFloat = 16
 
     var body: some View {
-        SwiftUI.Canvas { ctx, size in
+        Canvas { ctx, size in
             let bounds = CGRect(origin: .zero, size: size)
             let ink: Color = content.ghost ? ChromeMetrics.ghostPink : .white
             let plateColor: Color = content.ghost
@@ -93,8 +93,8 @@ struct SolvePanelView: View {
 final class SolvePanelHost: NSHostingView<SolvePanelView> {
 
     /// Dragging reports the desired origin here instead of moving the panel itself —
-    /// the canvas stores it as a centre-relative inch offset in shared state, and every
-    /// canvas repositions on the resulting notify.
+    /// the stage stores it as a centre-relative inch offset in shared state, and every
+    /// stage repositions on the resulting notify.
     var onMoved: ((CGPoint) -> Void)?
 
     private var content = SolvePanelContent()

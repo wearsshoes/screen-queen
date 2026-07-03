@@ -45,11 +45,11 @@ struct CountdownBannerView: View {
     }
 }
 
-// MARK: - The canvas's banner hosting
+// MARK: - The stage's banner hosting
 
-extension Canvas {
+extension Stage {
 
-    /// Reflect `state.countdowns` in this canvas's banner. Built lazily on the first
+    /// Reflect `state.countdowns` in this stage's banner. Built lazily on the first
     /// countdown (most sessions never see one); called from `refresh()`.
     func syncBanner() {
         if banner == nil {

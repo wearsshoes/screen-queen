@@ -2,7 +2,7 @@ import SwiftUI
 
 /// What the frosted info card shows: name / resolution / ppi lines with their fonts
 /// and colors, plus the selection wash. The card sizes itself (a flex container —
-/// the canvas centers its fitting size on the tile and caps the width; long lines
+/// the stage centers its fitting size on the tile and caps the width; long lines
 /// truncate).
 struct LabelCardContent {
     struct Line {

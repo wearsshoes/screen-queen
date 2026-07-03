@@ -11,7 +11,7 @@ final class VirtualMouseTests: XCTestCase {
     // MARK: - Transform.planePoint ↔ viewPoint (the plane hop the projection rides)
 
     func testTransformPlanePointInvertsViewPoint() {
-        let t = Arranger.Transform(scale: 12.5, offset: CGPoint(x: 137, y: 42),
+        let t = Stage.Transform(scale: 12.5, offset: CGPoint(x: 137, y: 42),
                                    unionOrigin: CGPoint(x: -3.5, y: 7.25))
         for p in [CGPoint(x: 0, y: 0), CGPoint(x: 10.5, y: -4.2),
                   CGPoint(x: -3.5, y: 7.25), CGPoint(x: 61.7, y: 33.3)] {
@@ -27,14 +27,14 @@ final class VirtualMouseTests: XCTestCase {
         }
     }
 
-    // MARK: - Cross-canvas projection (the mapping every ghost image rides)
+    // MARK: - Cross-stage projection (the mapping every ghost image rides)
 
     func testHostToDestProjectionIsContinuousAndInvertible() {
-        // Two canvases over the same plane at different scales/offsets — the shape of
+        // Two stages over the same plane at different scales/offsets — the shape of
         // two differently-sized screens showing the same schematic.
-        let hostT = Arranger.Transform(scale: 20, offset: CGPoint(x: 400, y: 300),
+        let hostT = Stage.Transform(scale: 20, offset: CGPoint(x: 400, y: 300),
                                        unionOrigin: CGPoint(x: -2, y: 1))
-        let destT = Arranger.Transform(scale: 12, offset: CGPoint(x: 250, y: 180),
+        let destT = Stage.Transform(scale: 12, offset: CGPoint(x: 250, y: 180),
                                        unionOrigin: CGPoint(x: -2, y: 1))
         func project(_ p: CGPoint) -> CGPoint { destT.viewPoint(hostT.planePoint(p)) }
         // Invertible: host → dest → host is exact.
@@ -45,7 +45,7 @@ final class VirtualMouseTests: XCTestCase {
         }
         // Affine (scale + translate): distances scale uniformly by destScale/hostScale,
         // which is what makes a projected chrome rect stay a rect — a source control's
-        // box projects to a box on every other canvas.
+        // box projects to a box on every other stage.
         let a = project(CGPoint(x: 100, y: 100)), b = project(CGPoint(x: 200, y: 100))
         let c = project(CGPoint(x: 1000, y: 900)), d = project(CGPoint(x: 1100, y: 900))
         XCTAssertEqual(b.x - a.x, d.x - c.x, accuracy: 1e-9)
@@ -55,9 +55,9 @@ final class VirtualMouseTests: XCTestCase {
     // MARK: - Bar width cap (the never-out-of-bounds rule)
 
     func testBarWidthCap() {
-        XCTAssertEqual(Arranger.barWidthCap(minScreenWidth: 1920), 1856)
-        XCTAssertEqual(Arranger.barWidthCap(minScreenWidth: 1080), 1016, "rotated 1080p never compresses the bar")
-        XCTAssertEqual(Arranger.barWidthCap(minScreenWidth: 300), 320, "floored below the brawl line")
+        XCTAssertEqual(Stage.barWidthCap(minScreenWidth: 1920), 1856)
+        XCTAssertEqual(Stage.barWidthCap(minScreenWidth: 1080), 1016, "rotated 1080p never compresses the bar")
+        XCTAssertEqual(Stage.barWidthCap(minScreenWidth: 300), 320, "floored below the brawl line")
     }
 
     // MARK: - RevertPolicy (when the auto-revert countdown arms)

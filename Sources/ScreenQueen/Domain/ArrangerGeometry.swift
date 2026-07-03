@@ -2,7 +2,7 @@ import CoreGraphics
 
 /// The arranger's pure view geometry: the plane↔view transform, the fit that chooses
 /// it, and the chrome/ghost/pixel mappings that ride it. Framework-free (CoreGraphics
-/// types only) so any rendering layer — the AppKit canvas today, a SwiftUI Canvas
+/// types only) so any rendering layer — the AppKit stage today, a SwiftUI Canvas
 /// tomorrow — shares one set of coordinates, verified by one set of tests.
 enum ArrangerGeometry {
 
@@ -14,7 +14,7 @@ enum ArrangerGeometry {
         let unionOrigin: CGPoint
 
         // The physical plane is y-down (top-left origin, from `CGDisplayBounds`), and so
-        // is the view (the Canvas NSView is flipped, like SwiftUI's Canvas and gesture
+        // is the view (the Stage NSView is flipped, like SwiftUI's Stage and gesture
         // space) — one shared orientation, no flip anywhere.
         func viewRect(_ r: CGRect) -> CGRect {
             CGRect(x: offset.x + (r.minX - unionOrigin.x) * scale,
@@ -43,7 +43,7 @@ enum ArrangerGeometry {
         guard union.width > 0, union.height > 0 else { return nil }
 
         // Center the whole arrangement at the view midpoint — the same layout on every
-        // screen, rather than pivoting each canvas around its own tile.
+        // screen, rather than pivoting each stage around its own tile.
         let focus = CGPoint(x: union.midX, y: union.midY)
 
         let availW = bounds.width - padding * 2, availH = bounds.height - padding * 2
@@ -78,10 +78,10 @@ enum ArrangerGeometry {
                       width: size.width, height: size.height)
     }
 
-    // MARK: - Ghost mapping (active canvas's view coords → another canvas's)
+    // MARK: - Ghost mapping (active stage's view coords → another stage's)
 
-    /// Map a point's offset from the active canvas's centre onto the destination
-    /// canvas, scaled by the ratio of the two minimap scales. Identity when
+    /// Map a point's offset from the active stage's centre onto the destination
+    /// stage, scaled by the ratio of the two minimap scales. Identity when
     /// `ghostScale == 1` and the centres coincide.
     static func ghostPoint(_ p: CGPoint, ghostScale: CGFloat,
                            activeCenter: CGPoint, destCenter: CGPoint) -> CGPoint {

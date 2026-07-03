@@ -6,7 +6,7 @@ import CoreImage
 /// Screen Queen's own arranger overlay* — so each tile can show what's really on that
 /// screen. One `SCStream` per display; the latest frame is cached as a `CGImage`
 /// keyed by display id, and `onFrame` fires (on the main actor) when any updates so
-/// the canvas can repaint.
+/// the stage can repaint.
 ///
 /// Screen capture requires the Screen Recording permission; the first stream start
 /// triggers the system prompt. Until granted, streams simply produce no frames.
@@ -17,7 +17,7 @@ final class ScreenCaptureManager: NSObject {
     private(set) var frames: [CGDirectDisplayID: CGImage] = [:]
 
     /// Called (main actor) after any display's frame updates, coalesced by the caller's
-    /// redraw. Kept lightweight — just marks the canvas dirty.
+    /// redraw. Kept lightweight — just marks the stage dirty.
     var onFrame: (() -> Void)?
 
     private var streams: [CGDirectDisplayID: SCStream] = [:]

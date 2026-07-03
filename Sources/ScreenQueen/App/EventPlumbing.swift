@@ -44,10 +44,10 @@ final class EventPlumbing {
         }
     }
 
-    // MARK: - Canvas keyboard (monitors, not the responder chain)
+    // MARK: - Stage keyboard (monitors, not the responder chain)
 
     /// The arranger's keyboard, entered through local monitors while it's up — no
-    /// first-responder dependence, and one place decides routing (the key canvas).
+    /// first-responder dependence, and one place decides routing (the key stage).
     /// Handlers return true to consume the event; false lets normal dispatch continue
     /// (so the bar's .keyboardShortcut equivalents still fire).
     var onArrangerKeyDown: ((NSEvent) -> Bool)?

@@ -1,10 +1,10 @@
 import QuartzCore
 
 /// The ghost of the *active* screen (the one under the cursor), shown on every other
-/// screen. There is only ONE set of chrome per canvas — no parallel ghost structure.
+/// screen. There is only ONE set of chrome per stage — no parallel ghost structure.
 /// Active: normal place, normal look. Inactive: the same controls in the same
 /// map-relative place, each restyled pink *in its own look* (`GhostTintable`) — no flat
-/// overlay. Plus a ghost mouse (`GhostCursorLayer`) mirrored onto this canvas via
+/// overlay. Plus a ghost mouse (`GhostCursorLayer`) mirrored onto this stage via
 /// `ghostPoint`, moved on every mouse event. (The tint's SwiftUI currency is
 /// `ChromeMetrics.ghostPink`; the tooltip that trails the ghost lives with its bubble
 /// in TooltipBubble.swift — this file is QuartzCore-only.)
@@ -28,7 +28,7 @@ final class GhostCursorLayer: CAShapeLayer {
     override init() {
         super.init()
         // Art is authored y-down (tip at the origin); the layer rides the flipped
-        // canvas, so it draws as-is.
+        // stage, so it draws as-is.
         let art: [CGPoint] = [
             CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 16.5), CGPoint(x: 3.9, y: 12.8),
             CGPoint(x: 6.3, y: 18.4), CGPoint(x: 9.0, y: 17.2), CGPoint(x: 6.6, y: 11.6),
@@ -59,9 +59,9 @@ final class GhostCursorLayer: CAShapeLayer {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-// MARK: - The ghost mouse (the `ghostPoint` projection lives in Canvas+Chrome)
+// MARK: - The ghost mouse (the `ghostPoint` projection lives in Stage+Chrome)
 
-extension Canvas {
+extension Stage {
 
     /// Move the ghost mouse — position only, the per-event path. Like a real cursor
     /// (and its own tooltip), the arrow never changes size.

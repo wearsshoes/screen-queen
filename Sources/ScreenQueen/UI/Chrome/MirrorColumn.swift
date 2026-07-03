@@ -101,9 +101,9 @@ struct MirrorColumnView: View {
 
 final class MirrorColumnHost: NSHostingView<MirrorColumnView> {}
 
-// MARK: - Canvas plumbing
+// MARK: - Stage plumbing
 
-extension Canvas {
+extension Stage {
 
     /// Rebuild + place the column against the right edge (refresh path); hidden when
     /// it holds nothing.

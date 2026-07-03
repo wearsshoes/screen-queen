@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The fun tooltip: a white speech-bubble with a hot-pink outline and Comic Sans text,
-/// shown on *every* canvas at once via the ghost mapping (a native `NSView.toolTip`
+/// shown on *every* stage at once via the ghost mapping (a native `NSView.toolTip`
 /// would only show on the truly hovered screen). Click-through.
 struct TooltipBubbleView: View {
     var text: String
@@ -26,26 +26,26 @@ struct TooltipBubbleView: View {
     }
 }
 
-/// The bubble's hosting view: decoration only, so clicks fall through to the canvas.
+/// The bubble's hosting view: decoration only, so clicks fall through to the stage.
 final class TooltipHost: NSHostingView<TooltipBubbleView> {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-// MARK: - Canvas plumbing (rides the `ghostPoint` mapping — see Canvas+Chrome)
+// MARK: - Stage plumbing (rides the `ghostPoint` mapping — see Stage+Chrome)
 
-extension Canvas {
+extension Stage {
 
     /// The tooltip text for the hovered bar control (`hoveredBarControl`, reported by
-    /// the bar island's `.onHover`), or nil. Read on the active canvas — the one under
+    /// the bar island's `.onHover`), or nil. Read on the active stage — the one under
     /// the real cursor, so the only one whose hover fires — to decide what every
-    /// canvas shows.
+    /// stage shows.
     func hoveredTooltip() -> String? {
         guard let control = hoveredBarControl, barControlEnabled(control) else { return nil }
         return tooltipText(for: control)
     }
 
-    /// Show/hide this canvas's tooltip bubble at the ghost-mapped cursor (below-and-right,
-    /// clamped on-canvas). Both nil ⇒ hide. The rootView is only swapped on a text change;
+    /// Show/hide this stage's tooltip bubble at the ghost-mapped cursor (below-and-right,
+    /// clamped on-stage). Both nil ⇒ hide. The rootView is only swapped on a text change;
     /// the per-event work is a frame move.
     func updateTooltip(text: String?, cursorActivePoint: CGPoint?) {
         guard let text, let p = cursorActivePoint else { tooltipBubble?.isHidden = true; return }

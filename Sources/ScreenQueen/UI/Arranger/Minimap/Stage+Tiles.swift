@@ -11,7 +11,7 @@ extension NSImage {
 /// One tile: fill, wallpaper/live feed, letterbox hatching, menu-bar strip, Dock
 /// indicator, the selected halo, and the info-card feed. Native GraphicsContext,
 /// one y-down space throughout.
-extension Canvas {
+extension Stage {
 
     func drawTile(_ ctx: GraphicsContext, for display: DisplaySnapshot, in rect: NSRect) {
         // Tiles stay neutral — color lives on the seams; selection gets the accent wash.
@@ -270,7 +270,7 @@ extension Canvas {
         let detail = effPPI.map { diag + String(format: "%.0f ppi", $0) } ?? (diag + Copy.calibratePrompt)
         lines.append(.init(text: detail, font: f(13), color: Color(nsColor: secondary)))
 
-        // The card sizes itself; the canvas just centers the fitting size on the tile,
+        // The card sizes itself; the stage just centers the fitting size on the tile,
         // capping the width (long lines truncate) and hiding it when the tile is too
         // short to hold it.
         let card = ensureLabelCard(for: display.id)

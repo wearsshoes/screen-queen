@@ -1,9 +1,9 @@
 import CoreGraphics
 import Foundation
 
-/// The editing state shared by every per-screen `Canvas`: the physical plane plus
-/// selection/preview state and app callbacks. A mutation on any canvas writes here and
-/// calls `changed()` so all canvases redraw from the same source of truth.
+/// The editing state shared by every per-screen `Stage`: the physical plane plus
+/// selection/preview state and app callbacks. A mutation on any stage writes here and
+/// calls `changed()` so all stages redraw from the same source of truth.
 @MainActor
 final class ArrangerState {
 
@@ -15,7 +15,7 @@ final class ArrangerState {
     /// timer while held (the modal tracking loop starves the mouse monitors).
     var onSliderDragChanged: ((Bool) -> Void)?
 
-    /// Called after any mutation so every canvas redraws.
+    /// Called after any mutation so every stage redraws.
     var changed: (() -> Void)?
 
     var displays: [DisplaySnapshot] = []
@@ -84,7 +84,7 @@ final class ArrangerState {
         didSet { UserDefaults.standard.set(extendedBuiltinModes, forKey: Self.extendedModesKey) }
     }
 
-    /// True while ⌘⇧ is held: every canvas ghosts the possible alignment destinations.
+    /// True while ⌘⇧ is held: every stage ghosts the possible alignment destinations.
     var showAlignGhosts = false
 
     /// A pending revert for the last main/resolution change (nil ⇒ none). Applied by
@@ -94,7 +94,7 @@ final class ArrangerState {
     // MARK: - Chrome anchor space (unified across screens)
 
     /// Unified chrome metrics: the largest Dock / menu-bar claim anywhere and the
-    /// smallest screen extents, identical on every canvas so chrome placed within them
+    /// smallest screen extents, identical on every stage so chrome placed within them
     /// is in-bounds everywhere. Recomputed by Arranger on every rebuild.
     var uniformDockInset: CGFloat = 0
     var uniformMenuBarInset: CGFloat = 0
@@ -102,7 +102,7 @@ final class ArrangerState {
 
     /// The granny panel's centre as an offset from the screen centre, in **plane
     /// inches** — its own state (moving a tile never moves it), scaling with the
-    /// minimap. A drag on any canvas moves it on all of them.
+    /// minimap. A drag on any stage moves it on all of them.
     var solvePanelCenterOffsetInches = CGPoint(x: -5, y: 4)   // lower-left of centre (+y down)
 
     // MARK: - Countdowns (the top-of-screen banner)

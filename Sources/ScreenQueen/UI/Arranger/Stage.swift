@@ -11,23 +11,23 @@ import SwiftUI
 ///
 /// Keys: ⌘+arrows/WASD change selection; arrows/WASD nudge; ⌘⇧+arrows/WASD step
 /// alignment; ⌘ +/−/0 change resolution.
-final class Canvas: NSView {
+final class Stage: NSView {
 
     /// One coordinate system everywhere: the plane is y-down (`CGDisplayBounds`), the
     /// SwiftUI Canvas and gestures are y-down, so the view is too — no flip gates.
     override var isFlipped: Bool { true }
 
-    /// Shared editing state — one instance across every per-screen canvas.
+    /// Shared editing state — one instance across every per-screen stage.
     let state: ArrangerState
 
     /// The bottom button bar — a SwiftUI island (see ButtonBarView), hosted per
-    /// canvas and rebuilt from state in `updateBar`.
+    /// stage and rebuilt from state in `updateBar`.
     var barHost: NSHostingView<ButtonBarView>?
     /// The chromeTileScale the bar last rendered at (set by renderChrome's pass).
     var barScale: CGFloat = 1
     /// The bar control under the real cursor, reported by the bar island's `.onHover`
-    /// (SwiftUI owns the hit-testing) — the active canvas's value drives every
-    /// canvas's ghost tooltip.
+    /// (SwiftUI owns the hit-testing) — the active stage's value drives every
+    /// stage's ghost tooltip.
     var hoveredBarControl: BarControl?
 
     /// The selected display's sorted modes, cached while the slider drives them.
@@ -48,15 +48,15 @@ final class Canvas: NSView {
     /// The instruction line under the bar (see `FooterView`), scaled/positioned with it.
     var footerHost: FooterHost?
 
-    /// Ghost-mapping state for `ghostPoint` (the ghost mouse + tooltip): this canvas's
-    /// minimap scale ÷ the active canvas's, and the active canvas's centre. Recomputed
+    /// Ghost-mapping state for `ghostPoint` (the ghost mouse + tooltip): this stage's
+    /// minimap scale ÷ the active stage's, and the active stage's centre. Recomputed
     /// in `renderChrome` on active-screen change.
     var ghostArrow: GhostCursorLayer?
     var ghostScale: CGFloat = 1
     var ghostActiveCenter: CGPoint = .zero
-    /// True while this canvas shows the pink ghost chrome (cursor is on another screen).
+    /// True while this stage shows the pink ghost chrome (cursor is on another screen).
     var isGhost = false
-    /// The beacon: a pulsing pink map-pin at the cursor's location on this canvas's tiles.
+    /// The beacon: a pulsing pink map-pin at the cursor's location on this stage's tiles.
     var planeMarkerLayer: PlaneMouseMarkerLayer?
 
     /// The frosted info card per display (see `LabelCard`) — a real backdrop-blur subview,
@@ -70,11 +70,11 @@ final class Canvas: NSView {
     /// with the settled size.
     var onLayout: (() -> Void)?
 
-    /// The fun tooltip bubble — shown on *every* canvas at the mirrored cursor position.
+    /// The fun tooltip bubble — shown on *every* stage at the mirrored cursor position.
     var tooltipBubble: TooltipHost?
 
     /// The top-of-screen countdown banner — built on demand in CountdownBanner.swift.
-    /// The first SwiftUI island: an NSHostingView subview on the canvas.
+    /// The first SwiftUI island: an NSHostingView subview on the stage.
     var banner: NSHostingView<CountdownBannerView>?
     /// The banner's top constraint, re-tuned in `layout()` to clear the menu bar.
     var bannerTop: NSLayoutConstraint?
@@ -88,13 +88,13 @@ final class Canvas: NSView {
     /// Repaint the schematic — the Canvas-era `needsDisplay = true`.
     func repaintSchematic() {
         schematicGeneration += 1
-        schematicHost.rootView = SchematicCanvasView(canvas: self, generation: schematicGeneration)
+        schematicHost.rootView = SchematicCanvasView(stage: self, generation: schematicGeneration)
     }
 
     init(state: ArrangerState, frame: NSRect) {
         self.state = state
         super.init(frame: frame)
-        let host = SchematicCanvasHost(rootView: SchematicCanvasView(canvas: self, generation: 0))
+        let host = SchematicCanvasHost(rootView: SchematicCanvasView(stage: self, generation: 0))
         host.frame = bounds
         host.autoresizingMask = [.width, .height]
         addSubview(host)   // first subview — everything else composites above
@@ -154,7 +154,7 @@ final class Canvas: NSView {
     /// Place a *map-relative* chrome element: size = `naturalSize × chromeTileScale`
     /// (rides the tiles), centre = `bounds.mid + offset × transform.scale`. The offset is
     /// in **plane inches** (the schematic's physical unit, shown shrunk on the map) — NOT
-    /// real on-glass inches. Same map-relative spot on every canvas.
+    /// real on-glass inches. Same map-relative spot on every stage.
     /// Places the granny viewer, the button bar, and the footer.
     func chromeViewRect(naturalSize: CGSize, centreOffsetInches off: CGPoint) -> CGRect? {
         guard let t = drawTransform(currentRects()), t.scale > 0 else { return nil }
@@ -177,9 +177,9 @@ final class Canvas: NSView {
         chromeViewRect(naturalSize: Self.panelNaturalSize, centreOffsetInches: state.solvePanelCenterOffsetInches)
     }
 
-    /// The chrome pass: re-render bar/footer at this canvas's own tile scale, in normal
-    /// or ghost dress. `active` is the canvas under the cursor (nil ⇒ this one is it).
-    func renderChrome(active: Canvas?) {
+    /// The chrome pass: re-render bar/footer at this stage's own tile scale, in normal
+    /// or ghost dress. `active` is the stage under the cursor (nil ⇒ this one is it).
+    func renderChrome(active: Stage?) {
         guard VirtualMouse.ghostChromeEnabled else { return }
         let inactive = active != nil && active !== self
         isGhost = inactive
@@ -205,14 +205,14 @@ final class Canvas: NSView {
         solvePanel.setGhost(inactive)
     }
 
-    /// Map a point from the active canvas's view coords onto this canvas (the ghost
+    /// Map a point from the active stage's view coords onto this stage (the ghost
     /// mapping the mouse and tooltip ride). Identity when active.
     func ghostPoint(_ p: CGPoint) -> CGPoint {
         ArrangerGeometry.ghostPoint(p, ghostScale: ghostScale, activeCenter: ghostActiveCenter,
                                     destCenter: CGPoint(x: bounds.midX, y: bounds.midY))
     }
 
-    /// Chrome size in proportion to this canvas's minimap tiles.
+    /// Chrome size in proportion to this stage's minimap tiles.
     func chromeTileScale(_ t: Transform) -> CGFloat {
         t.scale / ChromeMetrics.referenceMinimapScale
     }
@@ -250,14 +250,14 @@ final class Canvas: NSView {
 
     var airplaySession: AirPlaySession? { state.airplaySession }
 
-    // Mouse drag state (local to the canvas handling the gesture).
+    // Mouse drag state (local to the stage handling the gesture).
     var draggedID: CGDirectDisplayID?
     var dragStartMouse: CGPoint = .zero
     var dragStartPhys: CGPoint = .zero    // dragged tile's physical origin at grab
     var dragTransform: Transform?         // frozen during a drag (stable cursor mapping)
     var dragMoved = false
 
-    /// This canvas's transform, frozen while a tile drag is live on ANY canvas
+    /// This stage's transform, frozen while a tile drag is live on ANY stage
     /// (`state.draggingDisplayID`), so no screen's map recenters mid-drag.
     var sharedDragTransform: Transform?
 
@@ -299,7 +299,7 @@ final class Canvas: NSView {
 
     var showAlignGhosts: Bool { get { state.showAlignGhosts } set { state.showAlignGhosts = newValue } }
 
-    /// The display this canvas's window sits on. nil ⇒ center the main display.
+    /// The display this stage's window sits on. nil ⇒ center the main display.
     var centerID: CGDirectDisplayID?
 
     let outerPadding: CGFloat = 32
@@ -325,7 +325,7 @@ final class Canvas: NSView {
     var mouseGestureActive = false
 
     /// Shift state fed by handleFlagsChanged — the nudge timer's fast-rate flag
-    /// (kept here so Canvas+Input never reads NSEvent).
+    /// (kept here so Stage+Input never reads NSEvent).
     var shiftHeld = false
 
     /// Commit any dangling keyboard manipulation when focus moves away.
@@ -368,16 +368,16 @@ final class Canvas: NSView {
     var mirroredDisplays: [DisplaySnapshot] { state.mirroredDisplays }
     var planeDisplays: [DisplaySnapshot] { state.planeDisplays }
 
-    /// Commit the plane, then broadcast so every canvas redraws.
+    /// Commit the plane, then broadcast so every stage redraws.
     func commitPlane() { state.commit() }
 
-    /// Broadcast a plane change so every per-screen canvas redraws.
+    /// Broadcast a plane change so every per-screen stage redraws.
     func emitPreview() { state.notify() }
 
     // MARK: - View transform (fit the physical plane into the window)
 
     /// The plane↔view transform and the fit that chooses it live in `ArrangerGeometry`
-    /// (framework-free, tested); this canvas supplies its own bounds/padding.
+    /// (framework-free, tested); this stage supplies its own bounds/padding.
     typealias Transform = ArrangerGeometry.Transform
 
     func transform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {

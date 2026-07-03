@@ -1,13 +1,13 @@
 import QuartzCore
 
 /// The tight, bright seam glow that sits *in front of* the sparkles. The sparkle emitters
-/// render on their own layer above the canvas's drawn content, so a glow painted in
+/// render on their own layer above the stage's drawn content, so a glow painted in
 /// `draw(_:)` can only ever sit *behind* them — this manager owns a layer above the
 /// emitters and paints one gradient sublayer per seam edge, hugging the seam and fading a
 /// short way toward the display center (the brighter core; the wide soft bleed behind the
-/// sparkles is drawn in the canvas).
+/// sparkles is drawn in the stage).
 ///
-/// Mirrors `SeamEmitters`' begin/add/commit lifecycle: the canvas recomputes bar geometry
+/// Mirrors `SeamEmitters`' begin/add/commit lifecycle: the stage recomputes bar geometry
 /// every `draw(_:)` and hands us the current edges, and we create/reposition/retire one
 /// gradient layer per edge.
 @MainActor

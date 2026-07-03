@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// The machinery both seam depictions share — the tile-space bars (Canvas+TileSeams)
+/// The machinery both seam depictions share — the tile-space bars (Stage+TileSeams)
 /// and the on-glass edge bars (Chrome/EdgeSeams): one seam's two depictions share
 /// color, glow rendering, and emitter registration.
 ///
 /// The edge set is computed once (`miniBarEdges`/`edgeBarEdges`, pure); the draw pass
 /// paints the behind-glows from it, and `updateSeamEffects()` (refresh path) feeds the
 /// same edges to the emitter/glow layers — the draw pass registers nothing.
-extension Canvas {
+extension Stage {
 
     /// One seam edge: where a bar hugs a seam, which way it rounds/drifts, its color.
     struct SeamEdgeGlow {
@@ -111,7 +111,7 @@ extension Canvas {
         case .maxY: start = CGPoint(x: ext.midX, y: ext.minY); end = CGPoint(x: ext.midX, y: ext.maxY)
         }
         // Own layer, so the destination-out end feathers below erase only the glow,
-        // not the canvas painted beneath it.
+        // not the stage painted beneath it.
         ctx.drawLayer { layer in
             layer.clip(to: clipShape)
             layer.fill(Path(ext), with: .linearGradient(

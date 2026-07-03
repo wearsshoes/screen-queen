@@ -5,11 +5,11 @@ enum BarControl: Hashable, CaseIterable {
     case feed, reset, undo, slider, scope, done
 }
 
-/// Everything the bar renders from. Plain values: the canvas rebuilds the rootView on
+/// Everything the bar renders from. Plain values: the stage rebuilds the rootView on
 /// every refresh/renderChrome pass, so the bar is a pure function of this.
 struct BarModel: Equatable {
     var scale: CGFloat = 1        // chromeTileScale — every length/font multiplies by it
-    var isGhost = false           // pink chrome on inactive canvases
+    var isGhost = false           // pink chrome on inactive stages
     var feedEnabled = true
     var scopeAll = false
     var canUndo = false
@@ -228,7 +228,7 @@ struct ButtonBarView: View {
 /// The resolution slider, drawn by hand: the stock control dims in non-key windows and
 /// only one arranger overlay is key at a time — the same reason the old ArrangerSliderCell
 /// existed. Left = larger UI, right = more space (matching macOS). Reports the raw 0…1
-/// position; detent snapping/preview lives on the canvas.
+/// position; detent snapping/preview lives on the stage.
 private struct BarSlider: View {
     var value: Double
     var enabled: Bool
@@ -282,7 +282,7 @@ struct FooterView: View {
     }
 }
 
-/// Decoration only — clicks fall through to the canvas.
+/// Decoration only — clicks fall through to the stage.
 final class FooterHost: NSHostingView<FooterView> {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
@@ -303,12 +303,12 @@ private extension View {
     }
 }
 
-// MARK: - Canvas plumbing (model building, actions, placement, slider preview/commit)
+// MARK: - Stage plumbing (model building, actions, placement, slider preview/commit)
 
-/// The bottom button bar's canvas-side wiring: the NSHostingView island, model
+/// The bottom button bar's stage-side wiring: the NSHostingView island, model
 /// building, slider preview/commit, and frame placement. The bar's look lives in
 /// ButtonBarView (SwiftUI); everything here is state plumbing.
-extension Canvas {
+extension Stage {
 
     func setupButtonBar() {
         let host = NSHostingView(rootView: makeBarView())
@@ -354,8 +354,8 @@ extension Canvas {
         m.sliderEnabled = sliderModes.count > 1
         if m.sliderEnabled, let d = selected {
             let n = sliderModes.count
-            // Pending (mid-drag, any canvas) wins; else the committed mode. One rule for
-            // every canvas — the ghosts mirror a live drag for free.
+            // Pending (mid-drag, any stage) wins; else the committed mode. One rule for
+            // every stage — the ghosts mirror a live drag for free.
             if let pending = state.pendingMode(for: d.id),
                let idx = sliderModes.firstIndex(where: { ModeCatalog.sameMode(pending, $0.cgMode) }) {
                 m.sliderValue = Double(idx) / Double(n - 1)
@@ -379,7 +379,7 @@ extension Canvas {
             scope: { [weak self] in
                 guard let self else { return }
                 self.state.sliderScope = self.state.sliderScope == .one ? .all : .one
-                self.state.notify()   // refresh every canvas so the icon/tooltip update everywhere
+                self.state.notify()   // refresh every stage so the icon/tooltip update everywhere
             },
             sliderChanged: { [weak self] raw in self?.barSliderChanged(raw) },
             sliderEnded: { [weak self] in self?.barSliderEnded() },
@@ -387,7 +387,7 @@ extension Canvas {
             showDebug: { [weak self] in self?.commander?.showDebug() },
             toggleSeamLights: { [weak self] in
                 self?.commander?.toggleSeamLights()
-                self?.state.notify()   // re-render the checkmark on every canvas
+                self?.state.notify()   // re-render the checkmark on every stage
             },
             toggleWardrobe: { [weak self] in
                 guard let self else { return }
@@ -428,7 +428,7 @@ extension Canvas {
     /// Place the bar through `chromeViewRect` — the same positioning code as the granny
     /// viewer. Width capped so the bar never overflows a narrow screen: the clamped
     /// hosting frame makes SwiftUI propose the capped width and the slider compresses,
-    /// identically on every canvas.
+    /// identically on every stage.
     func layoutBar(in t: Transform) {
         guard let host = barHost else { return }
         var size = host.fittingSize
@@ -443,7 +443,7 @@ extension Canvas {
     /// like the granny viewer — drifts/rescales with the minimap). +y is down.
     private var barCentreOffsetInches: CGPoint { CGPoint(x: 0, y: 10) }
 
-    /// Position the footer under this canvas's own bar, font scaled with it (text laid
+    /// Position the footer under this stage's own bar, font scaled with it (text laid
     /// out at the target point size — crisp, not a layer-scaled bitmap). Called from
     /// renderChrome right after `layoutBar`, so the bar frame is settled.
     func layoutFooter(scale s: CGFloat) {
