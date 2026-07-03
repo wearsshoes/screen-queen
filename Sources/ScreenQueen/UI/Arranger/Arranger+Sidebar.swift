@@ -82,15 +82,15 @@ extension Arranger {
     }
 
     /// One compact card per mirrored display, plus the AirPlay card. Native
-    /// GraphicsContext drawing; measurement stays NSString (pure math) so the top-down
-    /// stacking matches the AppKit-era layout exactly.
+    /// GraphicsContext drawing *and* measurement (`resolve().measure`) — no NSFont,
+    /// no NSString.
     func drawMirrorColumn(_ ctx: GraphicsContext) {
         guard let layout = mirrorColumnLayout() else { return }
         func header(_ s: String, at oUp: CGPoint) {
-            let h = (s as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]).height
-            ctx.draw(Text(s).font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color(nsColor: .secondaryLabelColor)),
-                     at: CGPoint(x: oUp.x, y: bounds.height - oUp.y - h), anchor: .topLeading)
+            let text = ctx.resolve(Text(s).font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary))
+            let h = text.measure(in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity)).height
+            ctx.draw(text, at: CGPoint(x: oUp.x, y: bounds.height - oUp.y - h), anchor: .topLeading)
         }
         if let o = layout.mirroredHeaderOrigin { header(Copy.mirroredHeader, at: o) }
         for (d, card) in layout.cards { drawMirrorCard(ctx, d, in: card) }
@@ -107,35 +107,36 @@ extension Arranger {
 
         let inner = card.insetBy(dx: 18, dy: 16)
         var ty = inner.maxY
-        func line(_ s: String, _ font: NSFont, _ color: NSColor, glow: NSColor? = nil) {
-            let h = (s as NSString).size(withAttributes: [.font: font]).height
+        func line(_ s: String, _ font: Font, _ color: Color, glow: Color? = nil) {
+            let text = ctx.resolve(Text(s).font(font).foregroundStyle(color))
+            let h = text.measure(in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity)).height
             ty -= h
             var c = ctx
             if let glow {
-                c.addFilter(.shadow(color: Color(nsColor: glow), radius: 6, x: 0, y: 0))
+                c.addFilter(.shadow(color: glow, radius: 6, x: 0, y: 0))
             }
-            c.draw(Text(s).font(Font(font)).foregroundStyle(Color(nsColor: color)),
-                   at: CGPoint(x: inner.minX, y: bounds.height - ty - h), anchor: .topLeading)
+            c.draw(text, at: CGPoint(x: inner.minX, y: bounds.height - ty - h), anchor: .topLeading)
             ty -= 5
         }
-        let nameGlow = NSColor.systemPink.blended(withFraction: 0.55, of: .white) ?? .white
-        line(d.nickname, DragFont.script(size: 30), .systemPink, glow: nameGlow)
-        line(d.name, .systemFont(ofSize: 10), NSColor.white.withAlphaComponent(0.5))
+        // The glow blend (pink toward white) stays NSColor-sourced: Color.mix is macOS 15+.
+        let nameGlow = Color(nsColor: NSColor.systemPink.blended(withFraction: 0.55, of: .white) ?? .white)
+        line(d.nickname, Font(DragFont.script(size: 30)), .pink, glow: nameGlow)
+        line(d.name, .system(size: 10), .white.opacity(0.5))
         let sz = pointSize(d)
         let pixelW = Int(d.pixelSize.width)
         let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
-        line("\(Int(sz.width))×\(Int(sz.height))\(hidpi)", .systemFont(ofSize: 15), .white)
+        line("\(Int(sz.width))×\(Int(sz.height))\(hidpi)", .system(size: 15), .white)
         let effPPI = d.diagonalInches > 0 && sz.width > 0
             ? Double(sz.width) / (Double(d.physicalSizeMM.width) / 25.4) : nil
         let diag = d.diagonalInches > 0 ? String(format: "%.0f″ · ", d.diagonalInches) : ""
-        let dim = NSColor.white.withAlphaComponent(0.7)
+        let dim = Color.white.opacity(0.7)
         if let effPPI {
-            line(diag + String(format: "%.0f ppi", effPPI), .systemFont(ofSize: 15), dim)
+            line(diag + String(format: "%.0f ppi", effPPI), .system(size: 15), dim)
         } else if !diag.isEmpty {
-            line(String(diag.dropLast(3)), .systemFont(ofSize: 15), dim)
+            line(String(diag.dropLast(3)), .system(size: 15), dim)
         }
         let masterName = displays.first { $0.id == d.mirrorMaster }?.name ?? Copy.unknownDisplayName
-        line(Copy.mirrorsLine(masterName), .systemFont(ofSize: 15), dim)
+        line(Copy.mirrorsLine(masterName), .system(size: 15), dim)
 
         // Un-mirror button (top-right ✕), at the same rect the hit test answers for.
         let bx = yDown(Self.unmirrorButtonRect(inCard: card))
@@ -153,31 +154,28 @@ extension Arranger {
 
         let inner = card.insetBy(dx: 18, dy: 16)
         var ty = inner.maxY
-        func line(_ s: String, _ font: NSFont, _ color: NSColor) {
-            let bounding = (s as NSString).boundingRect(
-                with: CGSize(width: inner.width, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font])
-            ty -= bounding.height
-            ctx.draw(Text(s).font(Font(font)).foregroundStyle(Color(nsColor: color)),
-                     in: CGRect(x: inner.minX, y: bounds.height - ty - bounding.height,
-                                width: inner.width, height: bounding.height + 2))
+        func line(_ s: String, _ font: Font, _ color: Color) {
+            let text = ctx.resolve(Text(s).font(font).foregroundStyle(color))
+            let h = text.measure(in: CGSize(width: inner.width, height: CGFloat.infinity)).height
+            ty -= h
+            ctx.draw(text, in: CGRect(x: inner.minX, y: bounds.height - ty - h,
+                                      width: inner.width, height: h + 2))
             ty -= 5
         }
 
         // Device name, with the AirPlay glyph inline before it — Text concatenation
         // baseline-aligns the symbol against the name for free.
-        let nameFont = NSFont.boldSystemFont(ofSize: 20)
         let name = session.receiverName ?? Copy.unknownAirPlayReceiver
-        let h = (name as NSString).size(withAttributes: [.font: nameFont]).height
+        let nameText = ctx.resolve((
+            Text("\(Image(systemName: "airplayvideo")) ").font(.system(size: 18, weight: .semibold))
+            + Text(name).font(.system(size: 20, weight: .bold))
+        ).foregroundStyle(Color(nsColor: .labelColor)))
+        let h = nameText.measure(in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity)).height
         ty -= h
-        let nameText = Text("\(Image(systemName: "airplayvideo")) ").font(.system(size: 18, weight: .semibold))
-            + Text(name).font(Font(nameFont))
-        ctx.draw(nameText.foregroundStyle(Color(nsColor: .labelColor)),
-                 at: CGPoint(x: inner.minX, y: bounds.height - ty - h), anchor: .topLeading)
+        ctx.draw(nameText, at: CGPoint(x: inner.minX, y: bounds.height - ty - h), anchor: .topLeading)
         ty -= 5
-        line(Copy.airplayBody, .systemFont(ofSize: 15), .labelColor)
-        line(Copy.airplayFinePrint,
-             .systemFont(ofSize: 13), .secondaryLabelColor)
+        line(Copy.airplayBody, .system(size: 15), Color(nsColor: .labelColor))
+        line(Copy.airplayFinePrint, .system(size: 13), .secondary)
 
         // Hands off to Control Center's Screen Mirroring menu (Display Settings doesn't
         // know about AirPlay sessions). Pinned to the card's bottom-left — the same rect
