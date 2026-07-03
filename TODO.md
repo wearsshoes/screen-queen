@@ -27,10 +27,16 @@
   schematic's shim; TapeHost keeps hit-carving/cursor rects/key routing —
   the tape art can go native GraphicsContext subject-by-subject if wanted).
   Also gone since: the footer NSTextField, NSFont/NSString in the sidebar
-  (resolve().measure), Chime (AudioToolbox) for beeps, and the NSColor→Color
-  push. NSFont remains for off-Canvas text measurement (label-card sizing) +
-  DragFont's fallible lookup; NSColor remains where load-bearing: blended()
-  (Color.mix is macOS 15+) and the CALayer palette pipeline.
+  (resolve().measure), Chime (AudioToolbox) for beeps, the NSColor→Color
+  push, the y-up view space (everything is y-down now — Transform is a pure
+  scale+translate, the Arranger view is flipped, all yDown/flip gates
+  deleted), the DragFont bridge (ScriptFont registers via CoreText,
+  `Font.script` wears it), and label-card NSString measurement (the card is
+  a flex container; the canvas centers its fittingSize on the tile). NSFont
+  remains only in the tape art (dies with the tape shim) and TooltipBubble's
+  try-Comic-Sans-then-Chalkboard lookup (Font.custom can't express a
+  fallible chain); NSColor remains where load-bearing: blended() (Color.mix
+  is macOS 15+) and the CALayer palette pipeline.
 * AppKit-import census (July 2026, after the framework diet): 16 files, all
   load-bearing — shells (main, AppDelegate ×2, ArrangerWindows,
   KeyableBorderlessWindow, CalibrationController, SeamLights' strip windows),

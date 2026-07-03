@@ -251,10 +251,7 @@ extension Arranger {
         let previewGain: CGFloat = 5.25
         let previewScale = effPPI.map { viewScale / CGFloat($0) * previewGain } ?? (rect.height / 100)
         let fontScale = max(0.525, previewScale)
-        func f(_ size: CGFloat, bold: Bool = false, italic: Bool = false) -> NSFont {
-            let base = bold ? NSFont.boldSystemFont(ofSize: size * fontScale) : .systemFont(ofSize: size * fontScale)
-            return italic ? NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask) : base
-        }
+        func f(_ size: CGFloat) -> Font { .system(size: size * fontScale) }
 
         // Light-on-dark text; selected tiles lift it toward the accent.
         let accent = NSColor.systemPink
@@ -264,40 +261,31 @@ extension Arranger {
 
         // Drag name (hot-pink script), government name (fine print — work names go in
         // baby letters), resolution, diagonal·ppi.
-        var lines: [(String, NSFont, NSColor)] = []
-        lines.append((display.nickname, DragFont.script(size: (26 * fontScale).rounded()), .systemPink))
-        lines.append((display.name, f(10), tertiary))
+        var lines: [LabelCardContent.Line] = []
+        lines.append(.init(text: display.nickname, font: .script(size: (26 * fontScale).rounded()), color: .pink))
+        lines.append(.init(text: display.name, font: f(10), color: Color(nsColor: tertiary)))
         let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
-        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13), primary))
+        lines.append(.init(text: "\(Int(sz.width))×\(Int(sz.height))" + hidpi, font: f(13), color: Color(nsColor: primary)))
         let diag = display.diagonalInches > 0 ? String(format: "%.0f″ · ", display.diagonalInches) : ""
-        if let effPPI {
-            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), secondary))
-        } else {
-            lines.append((diag + Copy.calibratePrompt, f(13), secondary))
-        }
+        let detail = effPPI.map { diag + String(format: "%.0f ppi", $0) } ?? (diag + Copy.calibratePrompt)
+        lines.append(.init(text: detail, font: f(13), color: Color(nsColor: secondary)))
 
-        // Only the lines that fit the tile width; the card sizes to the widest.
-        let gap: CGFloat = 3
-        let visible = lines.filter { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).width <= rect.width - 8 }
-        let sizes = visible.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]) }
-        guard let widest = sizes.map(\.width).max() else {
-            labelCards[display.id]?.isHidden = true
+        // The card sizes itself; the canvas just centers the fitting size on the tile,
+        // capping the width (long lines truncate) and hiding it when the tile is too
+        // short to hold it.
+        let card = ensureLabelCard(for: display.id)
+        card.update(LabelCardContent(lines: lines, selected: selected))
+        let size = card.fittingSize
+        guard size.height <= rect.height - 4 else {
+            card.isHidden = true
             return
         }
-        let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(max(0, visible.count - 1))
-        let padX: CGFloat = 11, padY: CGFloat = 6
-        let boxW = min(widest + padX * 2, rect.width - 4)
+        let boxW = min(size.width, rect.width - 4)
         // Pixel-snap the card's frame — the text snap inside it is only meaningful if
         // the card's own origin sits on the grid.
-        let box = NSRect(x: pixelSnap(rect.midX - boxW / 2), y: pixelSnap(rect.midY - total / 2 - padY),
-                         width: pixelSnap(boxW), height: pixelSnap(total + padY * 2))
-
-        let card = ensureLabelCard(for: display.id)
-        card.frame = box
+        card.frame = NSRect(x: pixelSnap(rect.midX - boxW / 2), y: pixelSnap(rect.midY - size.height / 2),
+                            width: pixelSnap(boxW), height: pixelSnap(size.height))
         card.isHidden = false
-        card.update(LabelCardContent(
-            lines: visible.map { LabelCardContent.Line(text: $0.0, font: $0.1, color: $0.2) },
-            selected: selected, gap: gap))
     }
 
     /// The frosted info card for `id`, created on demand and added above the drawn tiles.

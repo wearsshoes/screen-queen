@@ -72,7 +72,7 @@ struct SetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(Copy.setupTitle)
-                .font(Font(DragFont.script(size: 34)))
+                .font(.script(size: 34))
                 .foregroundStyle(.pink)
             Text(Copy.setupIntro)
                 .font(.system(size: 12))

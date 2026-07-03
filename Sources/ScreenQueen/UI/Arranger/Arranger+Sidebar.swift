@@ -114,7 +114,7 @@ extension Arranger {
         }
         // The glow blend (pink toward white) stays NSColor-sourced: Color.mix is macOS 15+.
         let nameGlow = Color(nsColor: NSColor.systemPink.blended(withFraction: 0.55, of: .white) ?? .white)
-        line(d.nickname, Font(DragFont.script(size: 30)), .pink, glow: nameGlow)
+        line(d.nickname, .script(size: 30), .pink, glow: nameGlow)
         line(d.name, .system(size: 10), .white.opacity(0.5))
         let sz = pointSize(d)
         let pixelW = Int(d.pixelSize.width)

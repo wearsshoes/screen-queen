@@ -1,13 +1,14 @@
 import SwiftUI
 
 /// What the frosted info card shows: name / resolution / ppi lines with their fonts
-/// and colors (NSFont so the canvas's NSString measurement and the card agree on
-/// metrics), plus the selection wash.
+/// and colors, plus the selection wash. The card sizes itself (a flex container —
+/// the canvas centers its fitting size on the tile and caps the width; long lines
+/// truncate).
 struct LabelCardContent {
     struct Line {
         let text: String
-        let font: NSFont
-        let color: NSColor
+        let font: Font
+        let color: Color
     }
     var lines: [Line] = []
     var selected = false
@@ -26,12 +27,12 @@ struct LabelCardView: View {
         VStack(spacing: content.gap) {
             ForEach(Array(content.lines.enumerated()), id: \.offset) { _, line in
                 Text(line.text)
-                    .font(Font(line.font))
-                    .foregroundStyle(Color(nsColor: line.color))
+                    .font(line.font)
+                    .foregroundStyle(line.color)
                     .lineLimit(1)
-                    .fixedSize()
             }
         }
+        .padding(EdgeInsets(top: 6, leading: 11, bottom: 6, trailing: 11))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(wash)
         .background(.regularMaterial)

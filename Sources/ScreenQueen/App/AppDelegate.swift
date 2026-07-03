@@ -40,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // don't make anyone wait the system's ~1.5s for a punchline). App-scoped, in ms;
         // `register` supplies a default without persisting anything. 666 on purpose.
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 666])
-        DragFont.register()   // the marquee typeface — not doing this in San Francisco
+        ScriptFont.register()   // the marquee typeface — not doing this in San Francisco
         PrefsMigration.migrateIfNeeded()   // carry over profiles/calibration from the old bundle id
         setupMenuBar()
         setupArranger()

@@ -1,10 +1,8 @@
-import AppKit
+import CoreText
+import SwiftUI
 
-enum DragFont {
-    private static let family = "Great Vibes"
-    /// The PostScript name read straight from the registered font file, kept as a backup
-    /// lookup key in case the human-readable family name ever fails to resolve.
-    private static var registeredPostScriptName: String?
+enum ScriptFont {
+    static let family = "Great Vibes"
 
     /// The SPM resource bundle, located *without* `Bundle.module` — whose generated
     /// accessor for executables checks only the .app root (where a signed bundle can't
@@ -31,16 +29,10 @@ enum DragFont {
         // file lives at Fonts/GreatVibes-Regular.ttf, not the bundle root.
         guard let url = resources?.url(forResource: "GreatVibes-Regular", withExtension: "ttf", subdirectory: "Fonts") else { return }
         CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-        if let provider = CGDataProvider(url: url as CFURL), let cgFont = CGFont(provider) {
-            registeredPostScriptName = cgFont.postScriptName as String?
-        }
     }
+}
 
-    /// The script face at `size`. Falls back to a system italic if the family somehow
-    /// didn't register (e.g. running before `register()`).
-    static func script(size: CGFloat) -> NSFont {
-        if let font = NSFont(name: family, size: size) { return font }
-        if let ps = registeredPostScriptName, let font = NSFont(name: ps, size: size) { return font }
-        return NSFontManager.shared.convert(.systemFont(ofSize: size), toHaveTrait: .italicFontMask)
-    }
+extension Font {
+    /// The script face at `size`.
+    static func script(size: CGFloat) -> Font { .custom(ScriptFont.family, size: size) }
 }
