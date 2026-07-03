@@ -1,4 +1,4 @@
-import AppKit
+import SwiftUI
 
 /// Alignment feedback: the eight per-tile anchor notches, the paired arrows for the
 /// active alignment (map and on-glass), and the ⌘⇧ align-destination ghosts.
@@ -35,46 +35,44 @@ extension Arranger {
     }
 
     /// Eight notch markers per tile; the two aligned anchors become arrows pointing
-    /// at each other.
-    func drawAnchors(for display: DisplaySnapshot, in rect: NSRect, active: (pos: AnchorPos, dir: CGVector)?) {
+    /// at each other. Native GraphicsContext: geometry stays y-up, `yDown` flips at
+    /// the draw boundary (direction vectors flip dy).
+    func drawAnchors(_ ctx: GraphicsContext, for display: DisplaySnapshot, in rect: NSRect,
+                     active: (pos: AnchorPos, dir: CGVector)?) {
         let tile = rect.insetBy(dx: 1.5, dy: 1.5), r = tileCornerRadius
         // Markers sit inside the reference bars / menu strip (corners move diagonally).
         let marginTile = tile.insetBy(dx: 24, dy: 24)
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(roundedRect: tile, xRadius: r, yRadius: r).setClip()
+        var clipped = ctx
+        clipped.clip(to: Path(roundedRect: yDown(tile), cornerRadius: r))
         for pos in AnchorPos.allCases where active?.pos != pos {
-            drawNotch(at: pos.point(in: marginTile), dir: pos.inward)
+            drawNotch(clipped, at: pos.point(in: marginTile), dir: pos.inward)
         }
-        NSGraphicsContext.restoreGraphicsState()
-        if let active { drawArrow(at: active.pos.point(in: marginTile), dir: active.dir) }
+        if let active { drawArrow(ctx, at: active.pos.point(in: marginTile), dir: active.dir) }
     }
 
     /// The active alignment marker for this screen, drawn large at its real edges (in
     /// its own point coords) — the on-glass counterpart of the mini-map notches.
-    func drawScreenMarkers(_ markers: [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)]) {
+    func drawScreenMarkers(_ ctx: GraphicsContext, _ markers: [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)]) {
         guard let me = centerID, let active = markers[me] else { return }
         let notch = window?.screen?.safeAreaInsets.top ?? 0   // keep clear of the notch on top
         // The notch is at the top, so reserve its clearance by shrinking the height.
         let area = NSRect(x: bounds.minX + 40, y: bounds.minY + 40,
                           width: bounds.width - 80, height: bounds.height - 80 - notch)
-        drawArrow(at: active.pos.point(in: area), dir: active.dir, scale: 3)
+        drawArrow(ctx, at: active.pos.point(in: area), dir: active.dir, scale: 3)
     }
 
     /// Grey ghosts of where each valid ⌘⇧ arrow would move the selected tile, with a
     /// direction arrow. Drawn under the real tiles. The arrow sits at the ghost's
     /// center, or the center of its overlap with the current tile, or (if that overlap
     /// is too small) just outside the current tile in the move direction.
-    func drawAlignGhosts(t: Transform) {
+    func drawAlignGhosts(_ ctx: GraphicsContext, t: Transform) {
         guard let selID = selectedID, let cur = plane[selID] else { return }
         let curView = t.viewRect(cur)
         for (dir, rect) in alignGhosts() {
             let g = t.viewRect(rect)
-            let box = g.insetBy(dx: 1.5, dy: 1.5)
-            NSColor.gray.withAlphaComponent(0.35).setFill()
-            let path = NSBezierPath(roundedRect: box, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
-            path.fill()
-            NSColor.white.withAlphaComponent(0.5).setStroke()   // lighter outline
-            path.lineWidth = 1; path.stroke()
+            let box = Path(roundedRect: yDown(g.insetBy(dx: 1.5, dy: 1.5)), cornerRadius: tileCornerRadius)
+            ctx.fill(box, with: .color(Color(nsColor: .gray).opacity(0.35)))
+            ctx.stroke(box, with: .color(.white.opacity(0.5)), lineWidth: 1)   // lighter outline
 
             // The overlap is covered by the current tile (drawn on top), so aim the
             // arrow at the ghost's *exposed* strip (ghost minus the current tile),
@@ -102,25 +100,31 @@ extension Arranger {
             case .up:    travel = CGVector(dx: 0, dy: 1)
             case .down:  travel = CGVector(dx: 0, dy: -1)
             }
-            drawDirectionArrow(centeredAt: at, pointing: travel, length: 34)
+            drawDirectionArrow(ctx, centeredAt: at, pointing: travel, length: 34)
         }
     }
 
+    /// A y-up view point in the Canvas's y-down space.
+    private func yDownPoint(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x, y: bounds.height - p.y) }
+    /// A y-up direction in the Canvas's y-down space.
+    private func yDownDir(_ v: CGVector) -> CGVector { CGVector(dx: v.dx, dy: -v.dy) }
+
     /// A clean "→"-style arrow (line shaft + open chevron head) pointing along `dir`,
-    /// centered at `p`.
-    private func drawDirectionArrow(centeredAt p: CGPoint, pointing dir: CGVector, length: CGFloat) {
-        let n = unit(dir)
+    /// centered at `p` (both y-up).
+    private func drawDirectionArrow(_ ctx: GraphicsContext, centeredAt pUp: CGPoint,
+                                    pointing dirUp: CGVector, length: CGFloat) {
+        let p = yDownPoint(pUp), n = unit(yDownDir(dirUp))
         let tail = CGPoint(x: p.x - n.dx * length / 2, y: p.y - n.dy * length / 2)
         let tip  = CGPoint(x: p.x + n.dx * length / 2, y: p.y + n.dy * length / 2)
         let perp = CGVector(dx: -n.dy, dy: n.dx)
         let head: CGFloat = 9
-        let path = NSBezierPath()
-        path.move(to: tail); path.line(to: tip)                                  // shaft
+        var path = Path()
+        path.move(to: tail); path.addLine(to: tip)                               // shaft
         path.move(to: CGPoint(x: tip.x - n.dx * head + perp.dx * head, y: tip.y - n.dy * head + perp.dy * head))
-        path.line(to: tip)                                                       // chevron
-        path.line(to: CGPoint(x: tip.x - n.dx * head - perp.dx * head, y: tip.y - n.dy * head - perp.dy * head))
-        path.lineWidth = 3; path.lineCapStyle = .round; path.lineJoinStyle = .round
-        NSColor.white.setStroke(); path.stroke()
+        path.addLine(to: tip)                                                    // chevron
+        path.addLine(to: CGPoint(x: tip.x - n.dx * head - perp.dx * head, y: tip.y - n.dy * head - perp.dy * head))
+        ctx.stroke(path, with: .color(.white),
+                   style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
     }
 
     /// Markers for the active alignment, read from the stored anchor pair; the
@@ -173,23 +177,25 @@ extension Arranger {
         return CGVector(dx: partner == .left ? -1 : 1, dy: pos.inward.dy)
     }
 
-    private func drawNotch(at p: CGPoint, dir: CGVector) {
-        let n = unit(dir), len: CGFloat = 4
-        let path = NSBezierPath()
-        path.move(to: p); path.line(to: CGPoint(x: p.x + n.dx * len, y: p.y + n.dy * len))
-        path.lineWidth = 2; path.lineCapStyle = .round
-        NSColor.white.withAlphaComponent(0.9).setStroke(); path.stroke()
+    private func drawNotch(_ ctx: GraphicsContext, at pUp: CGPoint, dir dirUp: CGVector) {
+        let p = yDownPoint(pUp), n = unit(yDownDir(dirUp)), len: CGFloat = 4
+        var path = Path()
+        path.move(to: p); path.addLine(to: CGPoint(x: p.x + n.dx * len, y: p.y + n.dy * len))
+        ctx.stroke(path, with: .color(.white.opacity(0.9)),
+                   style: StrokeStyle(lineWidth: 2, lineCap: .round))
     }
 
-    private func drawArrow(at p: CGPoint, dir: CGVector, scale: CGFloat = 1) {
-        let inward = unit(dir), out = CGVector(dx: -inward.dx, dy: -inward.dy)
+    private func drawArrow(_ ctx: GraphicsContext, at pUp: CGPoint, dir dirUp: CGVector, scale: CGFloat = 1) {
+        let p = yDownPoint(pUp)
+        let inward = unit(yDownDir(dirUp)), out = CGVector(dx: -inward.dx, dy: -inward.dy)
         let len: CGFloat = 7 * scale, half: CGFloat = 4 * scale
         let perp = CGVector(dx: -out.dy, dy: out.dx)
         let apex = CGPoint(x: p.x + out.dx * len, y: p.y + out.dy * len)
         let b1 = CGPoint(x: p.x + perp.dx * half, y: p.y + perp.dy * half)
         let b2 = CGPoint(x: p.x - perp.dx * half, y: p.y - perp.dy * half)
-        let tri = NSBezierPath(); tri.move(to: apex); tri.line(to: b1); tri.line(to: b2); tri.close()
-        NSColor.white.setFill(); tri.fill()
+        var tri = Path()
+        tri.move(to: apex); tri.addLine(to: b1); tri.addLine(to: b2); tri.closeSubpath()
+        ctx.fill(tri, with: .color(.white))
     }
 
     private func unit(_ v: CGVector) -> CGVector {

@@ -46,8 +46,8 @@ extension Arranger {
         }
         let bars = currentBars()
         let seamColor = seamColors(bars)   // color per seam; both its bars share it
+        if showAlignGhosts { drawAlignGhosts(ctx, t: t) }   // under the tiles
         legacyDraw(ctx) {
-            if showAlignGhosts { drawAlignGhosts(t: t) }   // under the tiles
             // Selection halo before the tiles, so it reads under the lifted tile.
             if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
             for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!)) }
@@ -63,11 +63,15 @@ extension Arranger {
             // Seam glows, painted from the same edge sets `updateSeamEffects` feeds to the
             // emitter/glow layers (on the refresh path — draw registers nothing).
             for e in miniBarEdges(bars, t: t, seamColor: seamColor) { drawBehindGlow(e) }
-            let markers = activeMarkers(rects)
-            for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
+        }
+        let markers = activeMarkers(rects)
+        for d in displays where rects[d.id] != nil { drawAnchors(ctx, for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
+        legacyDraw(ctx) {
             for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(e) }
-            drawScreenMarkers(markers)                // alignment notches/arrows at this screen's real edges
-            drawMirrorColumn()                        // mirrored displays live in the right column
+        }
+        drawScreenMarkers(ctx, markers)           // alignment notches/arrows at this screen's real edges
+        legacyDraw(ctx) {
+            drawMirrorColumn()                    // mirrored displays live in the right column
         }
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
