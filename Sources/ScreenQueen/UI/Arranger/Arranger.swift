@@ -191,8 +191,7 @@ final class Arranger {
     private func mouseDidMove() {
         guard isVisible else { return }
         let cursor = CGEvent(source: nil)?.location ?? .zero
-        let activeID = GlobalMap.hostDisplayID(cursor: cursor, planeFirst: model.planeDisplays,
-                                               all: model.displays)
+        let activeID = model.hostDisplayID(cursor: cursor)
         let active = activeID.flatMap { id in stages.first { $0.centerID == id } }
         // The cursor in the active stage's view coords, derived from the same CGEvent
         // sample as `cursor` so the ghost and beacon can't disagree about where it is.

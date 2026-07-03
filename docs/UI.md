@@ -60,10 +60,12 @@ centre) without being *of* the minimap:
 
 ## Global map — the real desk
 
-Home: `UI/GlobalMap.swift` — the one CG↔Cocoa flip, the displayID↔NSScreen table,
-cursor→host-display, and the uniform Dock/menu-bar insets (landed in the Ensemble
-refactor, Phase 1). The calibration edge/placement math lives in
-`CalibrationMath.sessionPlan`.
+Home: `Services/GlobalMap.swift` — the one CG↔Cocoa flip, the displayID↔NSScreen
+table, and the uniform Dock/menu-bar insets. A stateless live-system adapter, so it
+lives with the services (moved from UI/ in the sixth wave). Cursor→host-display is
+`ArrangerModel.hostDisplayID(cursor:)` now — the plane-beats-mirrored-slave policy is
+model logic (it deliberately keeps the *live* `CGDisplayBounds` test; see its doc).
+The calibration edge/placement math lives in `CalibrationMath.sessionPlan`.
 
 **Glass-anchored chrome** — sorted into `Chrome/Glass/` (this screen's own points
 / PPI; the map can zoom all it wants, these don't move):

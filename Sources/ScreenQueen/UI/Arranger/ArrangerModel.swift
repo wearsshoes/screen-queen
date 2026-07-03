@@ -210,6 +210,16 @@ final class ArrangerModel {
     /// Mirrored slaves — they leave the plane and live in the mirror column.
     var mirroredDisplays: [DisplaySnapshot] { displays.filter(\.isMirrored) }
 
+    /// The display hosting a CG-global cursor point. Plane displays win over
+    /// mirrored slaves when bounds overlap (a slave shares its master's pixels
+    /// but has its own `CGDisplayBounds`). Deliberately tests against the *live*
+    /// bounds, not the snapshots' — a cursor sample taken mid-reconfigure must be
+    /// judged against the same live geometry it was sampled from.
+    func hostDisplayID(cursor: CGPoint) -> CGDirectDisplayID? {
+        (planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
+            ?? displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
+    }
+
     func update(with displays: [DisplaySnapshot], force: Bool = false) {
         self.displays = displays
         self.airplaySession = AirPlayMonitor.currentSession()

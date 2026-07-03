@@ -34,14 +34,6 @@ enum GlobalMap {
         return result
     }
 
-    /// The display hosting a CG-global cursor point. Plane displays win over
-    /// mirrored slaves when bounds overlap (a slave shares its master's pixels
-    /// but has its own `CGDisplayBounds`).
-    static func hostDisplayID(cursor: CGPoint, planeFirst plane: [DisplaySnapshot],
-                              all: [DisplaySnapshot]) -> CGDirectDisplayID? {
-        (plane.first { CGDisplayBounds($0.id).contains(cursor) }
-            ?? all.first { CGDisplayBounds($0.id).contains(cursor) })?.id
-    }
 
     /// The desk-wide chrome facts: the largest Dock / menu-bar claim anywhere and
     /// the smallest screen extents. Chrome placed within these is in-bounds on
