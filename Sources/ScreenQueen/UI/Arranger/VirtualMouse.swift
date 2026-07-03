@@ -73,6 +73,15 @@ extension Arranger {
                                     destCenter: CGPoint(x: bounds.midX, y: bounds.midY))
     }
 
+    /// Size the ghost mouse to the chrome pass's tile scale — called from `renderChrome`,
+    /// which runs whenever the scale can actually change.
+    func sizeGhostArrow(scale k: CGFloat) {
+        guard let arrow = ghostArrow else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        arrow.setAffineTransform(CGAffineTransform(scaleX: k, y: k))
+        CATransaction.commit()
+    }
+
     /// Move the ghost mouse — position only, the per-event path. Its *size* is applied
     /// in `renderChrome`, which runs whenever the scale can actually change.
     func updateGhostArrow(cursorActivePoint: CGPoint?, isActive: Bool) {

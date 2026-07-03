@@ -1,4 +1,3 @@
-import QuartzCore
 import SwiftUI
 
 /// Chrome sizing constants.
@@ -42,11 +41,7 @@ extension Arranger {
             updateBar(scale: k)
             layoutBar(in: myT)
             layoutFooter(scale: k)
-            if let arrow = ghostArrow {
-                CATransaction.begin(); CATransaction.setDisableActions(true)
-                arrow.setAffineTransform(CGAffineTransform(scaleX: k, y: k))
-                CATransaction.commit()
-            }
+            sizeGhostArrow(scale: k)
         } else {
             updateBar()   // no transform yet — still reflect the fresh ghost state
         }
