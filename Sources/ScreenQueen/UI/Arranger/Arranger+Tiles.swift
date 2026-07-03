@@ -1,5 +1,13 @@
 import AppKit
 
+extension NSImage {
+    /// This image as a `CGImage` (full bounds), or nil.
+    var asCGImage: CGImage? {
+        var rect = CGRect(origin: .zero, size: size)
+        return cgImage(forProposedRect: &rect, context: nil, hints: nil)
+    }
+}
+
 /// One tile: fill, wallpaper/live feed, letterbox hatching, menu-bar strip, Dock
 /// indicator, the selected halo, and the info-card feed.
 extension Arranger {

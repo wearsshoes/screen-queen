@@ -87,12 +87,13 @@ extension Arranger {
             ghostScale = 1
             ghostActiveCenter = CGPoint(x: bounds.midX, y: bounds.midY)
         }
-        // One transform per pass: the bar is laid out at final size (vector-crisp) and
-        // frame-placed through the same `chromeViewRect` as the granny viewer; the
-        // footer tracks the settled bar; the ghost mouse's size rides the same scale.
+        // One transform per pass: the bar re-renders at the pass's scale + ghost state
+        // (SwiftUI rebuild — tint and sizing are part of the model), then is frame-placed
+        // through the same `chromeViewRect` as the granny viewer; the footer tracks the
+        // settled bar; the ghost mouse's size rides the same scale.
         if let myT, myT.scale > 0 {
             let k = chromeTileScale(myT)
-            restyleBar(scale: k)
+            updateBar(scale: k)
             layoutBar(in: myT)
             layoutFooter(scale: k)
             if let arrow = ghostArrow {
@@ -100,11 +101,9 @@ extension Arranger {
                 arrow.setAffineTransform(CGAffineTransform(scaleX: k, y: k))
                 CATransaction.commit()
             }
+        } else {
+            updateBar()   // no transform yet — still reflect the fresh ghost state
         }
-        for t in ghostGlassViews { t.setGhost(inactive) }
-        for t in ghostTintTargets { t.setGhost(inactive) }
-        // `syncButtons` runs before this and may have read a stale `isGhost`; re-apply.
-        applyStateIconGhostTint()
         solvePanel.setGhost(inactive)
     }
 
@@ -137,7 +136,7 @@ extension Arranger {
     /// Position the footer under this canvas's own bar, font scaled with it (native text
     /// at the target point size — crisp, not a layer-scaled bitmap).
     private func layoutFooter(scale s: CGFloat) {
-        guard let bar = barContainer else { return }
+        guard let bar = barHost else { return }
         footerLabel.font = .systemFont(ofSize: (11 * s).rounded())   // whole-point hints crispest
         footerLabel.sizeToFit()
         footerLabel.wantsLayer = true
@@ -172,27 +171,16 @@ extension Arranger {
     }
 
     /// The tooltip text for the bar control at `activePoint` (active canvas's coords),
-    /// or nil. Called on the active canvas to decide what every canvas shows.
+    /// or nil. Called on the active canvas to decide what every canvas shows. Hit rects
+    /// come from the SwiftUI side (`barControlFrames`, bar-local top-left space).
     func hoveredTooltip(at activePoint: CGPoint) -> String? {
-        for control in tooltipControls where control.isEnabled {
-            let f = control.convert(control.bounds, to: self)
-            if f.contains(activePoint), let tip = tooltipText(for: control) { return tip }
+        guard let host = barHost else { return nil }
+        var p = host.convert(activePoint, from: self)
+        if !host.isFlipped { p.y = host.bounds.height - p.y }
+        for (control, frame) in barControlFrames where frame.contains(p) {
+            if barControlEnabled(control) { return tooltipText(for: control) }
         }
         return nil
-    }
-
-    /// The fun copy per control — the single source (native `.toolTip` is cleared; it
-    /// would pop on the hovered screen only, doubling up).
-    private func tooltipText(for control: NSControl) -> String? {
-        switch control {
-        case feedButton:  return state.feedEnabled ? Copy.feedOnTooltip : Copy.feedOffTooltip
-        case resetButton: return Copy.resetTooltip
-        case undoButton:  return Copy.undoTooltip
-        case resSlider:   return Copy.sliderTooltip
-        case scopeButton: return state.sliderScope == .all ? Copy.scopeAllTooltip : Copy.scopeOneTooltip
-        case doneButton:  return Copy.doneTooltip
-        default:          return nil
-        }
     }
 
     /// Show/hide this canvas's tooltip bubble at the ghost-mapped cursor. Both nil ⇒ hide.

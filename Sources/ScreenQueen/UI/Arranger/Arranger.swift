@@ -15,17 +15,15 @@ final class Arranger: NSView {
 
     /// Shared editing state — one instance across every per-screen canvas.
     let state: ArrangerState
-    // The bottom button bar's views + state — built and driven in Arranger+Buttons.
-    let feedButton = NSButton(title: "", target: nil, action: nil)
-    let resetButton = NSButton(title: "Reset", target: nil, action: nil)
-    let undoButton = NSButton(title: "Undo", target: nil, action: nil)
-    let doneButton = NSButton(title: "Done", target: nil, action: nil)
-    let resSlider = NSSlider()
-    /// The feed button's rendered symbol name, so `syncButtons` only rebuilds on a flip.
-    var feedButtonSymbol: String?
-    /// One/All scope toggle for the slider.
-    let scopeButton = NSButton(title: "", target: nil, action: nil)
-    let buttonBar = NSVisualEffectView()
+
+    /// The bottom button bar — a SwiftUI island (see ArrangerBarView), hosted per
+    /// canvas and rebuilt from state in `updateBar`.
+    var barHost: NSHostingView<ArrangerBarView>?
+    /// The chromeTileScale the bar last rendered at (set by renderChrome's pass).
+    var barScale: CGFloat = 1
+    /// Each bar control's frame in the bar's own top-left space, reported by the
+    /// SwiftUI side — the ghost tooltip's hit-test targets.
+    var barControlFrames: [BarControl: CGRect] = [:]
 
     /// The selected display's sorted modes, cached while the slider drives them.
     var sliderModes: [DisplayMode] = []
@@ -36,32 +34,12 @@ final class Arranger: NSView {
     /// Clearance above the screen bottom before the Dock inset is added.
     let baseBottomMargin: CGFloat = 40
 
-    /// Width cap on the bar container — identical on every canvas, so the bar compresses
-    /// rather than running out of bounds on an extreme-portrait screen.
-    var barMaxWidth: NSLayoutConstraint?
-
     /// The cap rule: narrowest screen minus breathing room, floored so pathological
     /// screens degrade to a slightly-overflowing bar instead of a constraint brawl.
     static func barWidthCap(minScreenWidth: CGFloat) -> CGFloat {
         max(320, minScreenWidth - 64)
     }
 
-    /// The button bar's outermost container (glass group on macOS 26, HUD box otherwise).
-    weak var barContainer: NSView?
-
-    /// The bar is *laid out* at `chromeTileScale` (not layer-scaled) so everything renders
-    /// vector-crisp at its final size. `restyleBar(scale:)` mutates these captured
-    /// constraints/views.
-    struct BarMetrics {
-        /// (constraint, base constant) pairs — length-like dimensions scaled together.
-        var lengths: [(NSLayoutConstraint, CGFloat)] = []
-        var spacings: [(NSStackView, CGFloat)] = []
-        var corners: [(NSView, CGFloat)] = []
-        /// The A / a end glyphs (label, base font size).
-        var glyphs: [(NSTextField, CGFloat)] = []
-        var currentScale: CGFloat = 1
-    }
-    var barMetrics = BarMetrics()
     /// The instruction line under the bar (see `Copy.footer`), scaled/positioned with it.
     let footerLabel = NSTextField(labelWithString: "")
 
@@ -86,15 +64,6 @@ final class Arranger: NSView {
 
     /// The fun tooltip bubble — shown on *every* canvas at the mirrored cursor position.
     var tooltipBubble: TooltipBubble?
-
-    /// The bar controls that carry a fun tooltip, in hit-test order.
-    var tooltipControls: [NSControl] { [feedButton, resetButton, undoButton, resSlider, scopeButton, doneButton] }
-
-    /// Chrome that wears the ghost tint in its own styling (see `GhostTintable`).
-    /// Populated in `setupButtonBar`; empty on the pre-26 HUD path.
-    var ghostGlassViews: [GhostTintable] = []
-    /// Non-glass tintables: slider track, scope button, A/a glyphs.
-    var ghostTintTargets: [GhostTintable] = []
 
     /// The top-of-screen countdown banner — built on demand in Arranger+Banner.swift.
     /// The first SwiftUI island: an NSHostingView subview on the canvas.
@@ -275,7 +244,7 @@ final class Arranger: NSView {
     /// Called by the state after a mutation: place the overlay subviews and feed the
     /// effect layers (`draw(_:)` never mutates the view tree or layers), then repaint.
     func refresh() {
-        syncButtons(); syncBanner()
+        updateBar(); syncBanner()
         if let rect = panelViewRect(), solvePanel.frame != rect {
             solvePanel.frame = rect
         }
