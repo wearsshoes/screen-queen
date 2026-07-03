@@ -4,15 +4,8 @@ import SwiftUI
 /// called from the SwiftUI Canvas host (see SchematicCanvas.swift). The subjects live in
 /// their own files — seams (Arranger+Seams), tiles (Arranger+Tiles), alignment markers
 /// (Arranger+Markers), mirror column (Arranger+Sidebar). Fully native GraphicsContext —
-/// geometry is computed y-up (the Transform/hit-test space) and flipped at each
-/// subject's draw boundary.
+/// plane, view, and Canvas all share one y-down orientation.
 extension Arranger {
-
-    /// A y-up view rect in the Canvas's y-down space (native subjects use this at their
-    /// boundary; geometry sources like `Transform.viewRect` stay y-up).
-    func yDown(_ r: CGRect) -> CGRect {
-        CGRect(x: r.minX, y: bounds.height - r.maxY, width: r.width, height: r.height)
-    }
 
     func drawSchematic(in ctx: GraphicsContext, size: CGSize) {
         // The backdrop wash. If this screen's own tile is being dragged (from any
@@ -56,7 +49,7 @@ extension Arranger {
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
             if let over = display(at: p), !over.isMain, let r = rects[over.id] {
-                let vr = yDown(t.viewRect(r).insetBy(dx: 1.5, dy: 1.5))
+                let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
                 ctx.fill(Path(roundedRect: vr, cornerRadius: tileCornerRadius),
                          with: .color(.white.opacity(0.25)))
             }
@@ -64,7 +57,7 @@ extension Arranger {
         }
         // Option-mirror drag: highlight the tile the dragged display would mirror onto.
         if let p = mirrorDragPoint, let over = display(at: p), over.id != draggedID, let r = rects[over.id] {
-            let vr = yDown(t.viewRect(r).insetBy(dx: 1.5, dy: 1.5))
+            let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
             let pink = Color.pink
             let path = Path(roundedRect: vr, cornerRadius: tileCornerRadius)
             ctx.fill(path, with: .color(pink.opacity(0.35)))

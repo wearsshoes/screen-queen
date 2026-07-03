@@ -103,7 +103,7 @@ final class ArrangerState {
     /// The granny panel's centre as an offset from the screen centre, in **plane
     /// inches** — its own state (moving a tile never moves it), scaling with the
     /// minimap. A drag on any canvas moves it on all of them.
-    var solvePanelCenterOffsetInches = CGPoint(x: -5, y: -4)   // lower-left of centre
+    var solvePanelCenterOffsetInches = CGPoint(x: -5, y: 4)   // lower-left of centre (+y down)
 
     // MARK: - Countdowns (the top-of-screen banner)
 

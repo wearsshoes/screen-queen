@@ -12,7 +12,7 @@ final class VirtualMouseTests: XCTestCase {
 
     func testTransformPlanePointInvertsViewPoint() {
         let t = Arranger.Transform(scale: 12.5, offset: CGPoint(x: 137, y: 42),
-                                   unionOrigin: CGPoint(x: -3.5, y: 7.25), viewHeight: 900)
+                                   unionOrigin: CGPoint(x: -3.5, y: 7.25))
         for p in [CGPoint(x: 0, y: 0), CGPoint(x: 10.5, y: -4.2),
                   CGPoint(x: -3.5, y: 7.25), CGPoint(x: 61.7, y: 33.3)] {
             let round = t.planePoint(t.viewPoint(p))
@@ -33,9 +33,9 @@ final class VirtualMouseTests: XCTestCase {
         // Two canvases over the same plane at different scales/offsets — the shape of
         // two differently-sized screens showing the same schematic.
         let hostT = Arranger.Transform(scale: 20, offset: CGPoint(x: 400, y: 300),
-                                       unionOrigin: CGPoint(x: -2, y: 1), viewHeight: 1864)
+                                       unionOrigin: CGPoint(x: -2, y: 1))
         let destT = Arranger.Transform(scale: 12, offset: CGPoint(x: 250, y: 180),
-                                       unionOrigin: CGPoint(x: -2, y: 1), viewHeight: 1080)
+                                       unionOrigin: CGPoint(x: -2, y: 1))
         func project(_ p: CGPoint) -> CGPoint { destT.viewPoint(hostT.planePoint(p)) }
         // Invertible: host → dest → host is exact.
         for p in [CGPoint(x: 0, y: 0), CGPoint(x: 1440, y: 96), CGPoint(x: 2879, y: 1863)] {

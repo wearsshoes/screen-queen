@@ -48,8 +48,8 @@ extension Arranger {
                 let cA = t.viewPoint(CGPoint(x: bar.physAlongA, y: bar.physLine))
                 let cB = t.viewPoint(CGPoint(x: bar.physAlongB, y: bar.physLine))
                 // a = top display: its bar sits above the seam and rounds toward its center.
-                edges.append(SeamEdgeGlow(rect: NSRect(x: cA.x - lenA / 2, y: cA.y + gap, width: lenA, height: thickness), inward: .maxY, color: color))
-                edges.append(SeamEdgeGlow(rect: NSRect(x: cB.x - lenB / 2, y: cB.y - gap - thickness, width: lenB, height: thickness), inward: .minY, color: color))
+                edges.append(SeamEdgeGlow(rect: NSRect(x: cA.x - lenA / 2, y: cA.y - gap - thickness, width: lenA, height: thickness), inward: .minY, color: color))
+                edges.append(SeamEdgeGlow(rect: NSRect(x: cB.x - lenB / 2, y: cB.y + gap, width: lenB, height: thickness), inward: .maxY, color: color))
             }
         }
         return edges
@@ -83,14 +83,13 @@ extension Arranger {
             let inward: RectEdge
             if bar.isVertical {
                 let x = weAreA ? bounds.width - thickness : 0    // a = left display
-                // `along` is y-down from the screen top; flip through the one point-space gate.
-                let yCenter = pointYToView(along)
-                rect = NSRect(x: x, y: yCenter - len / 2, width: thickness, height: len)
+                // `along` is y-down from the screen top, same as the view.
+                rect = NSRect(x: x, y: along - len / 2, width: thickness, height: len)
                 inward = weAreA ? .minX : .maxX
             } else {
-                let y = weAreA ? 0 : bounds.height - thickness   // a = above the seam
+                let y = weAreA ? bounds.height - thickness : 0   // a = above the seam
                 rect = NSRect(x: along - len / 2, y: y, width: len, height: thickness)
-                inward = weAreA ? .maxY : .minY
+                inward = weAreA ? .minY : .maxY
             }
             edges.append(SeamEdgeGlow(rect: rect, inward: inward, color: facing))
         }
@@ -142,8 +141,10 @@ extension Arranger {
         }
     }
 
-    /// The direction particles drift: toward the display center = the `inward` edge. View is
-    /// y-up, so the `minY` edge faces the screen *bottom* (drift down) and `maxY` the top.
+    /// The direction particles drift: toward the display center = the `inward` edge.
+    /// `Direction` is in the emitter's layer space, which rides the flipped view — a
+    /// `minY` edge and layer `.down` both mean "+y toward the seam", so the mapping is
+    /// flip-invariant.
     private func particleDirection(_ inward: RectEdge) -> SeamEmitters.Direction {
         switch inward {
         case .minX: return .left
@@ -177,10 +178,7 @@ extension Arranger {
         case .minY: ext = NSRect(x: rect.minX, y: rect.maxY - reach, width: rect.width, height: reach)
         case .maxY: ext = NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: reach)
         }
-        // Geometry above is y-up; flip the path and gradient points at the draw boundary.
-        let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height)
-        func fp(_ p: CGPoint) -> CGPoint { p.applying(flip) }
-        let clipShape = Path(dPath(ext, roundedOn: inward).cgPath).applying(flip)
+        let clipShape = Path(dPath(ext, roundedOn: inward).cgPath)
 
         // Gradient from the seam edge → the extended inward edge: opaque → clear.
         let (start, end): (CGPoint, CGPoint)
@@ -194,9 +192,9 @@ extension Arranger {
         // not the canvas painted beneath it.
         ctx.drawLayer { layer in
             layer.clip(to: clipShape)
-            layer.fill(Path(yDown(ext)), with: .linearGradient(
+            layer.fill(Path(ext), with: .linearGradient(
                 Gradient(colors: [Color(nsColor: color).opacity(0.7), Color(nsColor: color).opacity(0)]),
-                startPoint: fp(start), endPoint: fp(end)))
+                startPoint: start, endPoint: end))
 
             let vertical = inward == .minX || inward == .maxX
             let alongLen = vertical ? ext.height : ext.width
@@ -205,7 +203,7 @@ extension Arranger {
             layer.blendMode = .destinationOut
             let fade = Gradient(colors: [.black, .black.opacity(0)])
             func feather(_ strip: NSRect, from a: CGPoint, to b: CGPoint) {
-                layer.fill(Path(yDown(strip)), with: .linearGradient(fade, startPoint: fp(a), endPoint: fp(b)))
+                layer.fill(Path(strip), with: .linearGradient(fade, startPoint: a, endPoint: b))
             }
             if vertical {
                 feather(NSRect(x: ext.minX, y: ext.minY, width: ext.width, height: ramp),

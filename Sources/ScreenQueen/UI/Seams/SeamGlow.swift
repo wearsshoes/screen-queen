@@ -40,15 +40,15 @@ final class SeamGlow {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer.frame = rect
-        // Gradient start/end points are in the layer's unit space. This layer is hosted in an
-        // unflipped NSView, so its unit space is y-up like the view: unit y=0 is the bar's
-        // bottom (minY), y=1 the top (maxY). Fade from the seam (outward) edge → inward edge.
+        // Gradient start/end points are in the layer's unit space, which rides the host
+        // view's orientation — unit y=0 is the bar's minY edge either way, so the mapping
+        // is flip-invariant. Fade from the seam (outward) edge → inward edge.
         switch inward {
         case .minX: layer.startPoint = CGPoint(x: 1, y: 0.5); layer.endPoint = CGPoint(x: 0, y: 0.5)
         case .maxX: layer.startPoint = CGPoint(x: 0, y: 0.5); layer.endPoint = CGPoint(x: 1, y: 0.5)
-        // inward .minY: seam at top (maxY, y=1) → fade toward bottom (minY, y=0).
+        // inward .minY: seam at the maxY edge → fade toward minY.
         case .minY: layer.startPoint = CGPoint(x: 0.5, y: 1); layer.endPoint = CGPoint(x: 0.5, y: 0)
-        // inward .maxY: seam at bottom (minY, y=0) → fade toward top (maxY, y=1).
+        // inward .maxY: seam at the minY edge → fade toward maxY.
         case .maxY: layer.startPoint = CGPoint(x: 0.5, y: 0); layer.endPoint = CGPoint(x: 0.5, y: 1)
         }
         // Bright core at the seam, quick fade to clear — this is the front highlight, so it

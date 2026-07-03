@@ -30,19 +30,20 @@ final class GhostCursorLayer: CAShapeLayer {
 
     override init() {
         super.init()
+        // Art is authored y-down (tip at the origin); the layer rides the flipped
+        // canvas, so it draws as-is.
         let art: [CGPoint] = [
             CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 16.5), CGPoint(x: 3.9, y: 12.8),
             CGPoint(x: 6.3, y: 18.4), CGPoint(x: 9.0, y: 17.2), CGPoint(x: 6.6, y: 11.6),
             CGPoint(x: 12.0, y: 11.6),
         ]
         let s: CGFloat = 1.35
-        let h: CGFloat = 18.4 * s
         let path = CGMutablePath()
-        path.addLines(between: art.map { CGPoint(x: $0.x * s, y: h - $0.y * s) })
+        path.addLines(between: art.map { CGPoint(x: $0.x * s, y: $0.y * s) })
         path.closeSubpath()
         self.path = path
-        bounds = CGRect(x: 0, y: 0, width: 12.0 * s, height: h)
-        anchorPoint = CGPoint(x: 0, y: 1)           // the tip is the hotspot
+        bounds = CGRect(x: 0, y: 0, width: 12.0 * s, height: 18.4 * s)
+        anchorPoint = CGPoint(x: 0, y: 0)           // the tip is the hotspot
         let pink = SeamPalette.colors[0]
         fillColor = pink.withAlphaComponent(0.35).cgColor
         strokeColor = pink.cgColor
@@ -119,7 +120,7 @@ extension Arranger {
         let size = host.fittingSize
         let cursor = ghostPoint(p)
         let gap: CGFloat = 14
-        var origin = CGPoint(x: cursor.x + gap, y: cursor.y - gap - size.height)
+        var origin = CGPoint(x: cursor.x + gap, y: cursor.y + gap)
         origin.x = min(max(origin.x, 4), bounds.width - size.width - 4)
         origin.y = min(max(origin.y, 4), bounds.height - size.height - 4)
         host.frame = CGRect(origin: origin, size: size)

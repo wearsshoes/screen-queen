@@ -12,26 +12,23 @@ enum ArrangerGeometry {
         let scale: CGFloat            // view px per plane inch
         let offset: CGPoint
         let unionOrigin: CGPoint
-        let viewHeight: CGFloat       // for the single plane→view y-flip
 
-        // The physical plane is y-down (top-left origin, from `CGDisplayBounds`); the view
-        // is y-up. Flip y exactly here — the one gate — so no consumer flips downstream.
-        private func flipY(_ y: CGFloat) -> CGFloat { viewHeight - y }
-
+        // The physical plane is y-down (top-left origin, from `CGDisplayBounds`), and so
+        // is the view (the Arranger NSView is flipped, like SwiftUI's Canvas and gesture
+        // space) — one shared orientation, no flip anywhere.
         func viewRect(_ r: CGRect) -> CGRect {
-            let x = offset.x + (r.minX - unionOrigin.x) * scale
-            let yDown = offset.y + (r.minY - unionOrigin.y) * scale
-            let h = r.height * scale
-            return CGRect(x: x, y: flipY(yDown + h), width: r.width * scale, height: h)
+            CGRect(x: offset.x + (r.minX - unionOrigin.x) * scale,
+                   y: offset.y + (r.minY - unionOrigin.y) * scale,
+                   width: r.width * scale, height: r.height * scale)
         }
         func viewPoint(_ g: CGPoint) -> CGPoint {
             CGPoint(x: offset.x + (g.x - unionOrigin.x) * scale,
-                    y: flipY(offset.y + (g.y - unionOrigin.y) * scale))
+                    y: offset.y + (g.y - unionOrigin.y) * scale)
         }
-        /// Inverse of `viewPoint` (`flipY` is its own inverse, so the round-trip is exact).
+        /// Inverse of `viewPoint` (a pure scale + translate, so the round-trip is exact).
         func planePoint(_ v: CGPoint) -> CGPoint {
             CGPoint(x: (v.x - offset.x) / scale + unionOrigin.x,
-                    y: (flipY(v.y) - offset.y) / scale + unionOrigin.y)
+                    y: (v.y - offset.y) / scale + unionOrigin.y)
         }
     }
 
@@ -66,8 +63,7 @@ enum ArrangerGeometry {
 
         let offset = CGPoint(x: bounds.midX - (focus.x - union.minX) * scale,
                              y: bounds.midY - (focus.y - union.minY) * scale)
-        return Transform(scale: scale, offset: offset, unionOrigin: union.origin,
-                         viewHeight: bounds.height)
+        return Transform(scale: scale, offset: offset, unionOrigin: union.origin)
     }
 
     // MARK: - Chrome placement
@@ -97,7 +93,7 @@ enum ArrangerGeometry {
 
     /// Map a global cursor point onto the physical plane: its fraction within the
     /// display's point bounds transfers to the display's plane rect. Both spaces are
-    /// y-down — no flip here; that happens in `Transform.viewPoint`.
+    /// y-down, like everything else.
     static func planePoint(cursor: CGPoint, displayBounds: CGRect,
                            planeRect: CGRect) -> CGPoint? {
         guard displayBounds.width > 0, displayBounds.height > 0 else { return nil }

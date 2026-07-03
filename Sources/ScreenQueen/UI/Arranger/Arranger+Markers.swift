@@ -9,41 +9,40 @@ extension Arranger {
         case topLeft, topMid, topRight, leftMid, rightMid, bottomLeft, bottomMid, bottomRight
         func point(in r: NSRect) -> CGPoint {
             switch self {
-            case .topLeft: return CGPoint(x: r.minX, y: r.maxY)
-            case .topMid: return CGPoint(x: r.midX, y: r.maxY)
-            case .topRight: return CGPoint(x: r.maxX, y: r.maxY)
+            case .topLeft: return CGPoint(x: r.minX, y: r.minY)
+            case .topMid: return CGPoint(x: r.midX, y: r.minY)
+            case .topRight: return CGPoint(x: r.maxX, y: r.minY)
             case .leftMid: return CGPoint(x: r.minX, y: r.midY)
             case .rightMid: return CGPoint(x: r.maxX, y: r.midY)
-            case .bottomLeft: return CGPoint(x: r.minX, y: r.minY)
-            case .bottomMid: return CGPoint(x: r.midX, y: r.minY)
-            case .bottomRight: return CGPoint(x: r.maxX, y: r.minY)
+            case .bottomLeft: return CGPoint(x: r.minX, y: r.maxY)
+            case .bottomMid: return CGPoint(x: r.midX, y: r.maxY)
+            case .bottomRight: return CGPoint(x: r.maxX, y: r.maxY)
             }
         }
-        // Unit vector from the anchor toward the tile center.
+        // Unit vector from the anchor toward the tile center (y-down: down = +y).
         var inward: CGVector {
             switch self {
-            case .topLeft: return CGVector(dx: 1, dy: -1)
-            case .topMid: return CGVector(dx: 0, dy: -1)
-            case .topRight: return CGVector(dx: -1, dy: -1)
+            case .topLeft: return CGVector(dx: 1, dy: 1)
+            case .topMid: return CGVector(dx: 0, dy: 1)
+            case .topRight: return CGVector(dx: -1, dy: 1)
             case .leftMid: return CGVector(dx: 1, dy: 0)
             case .rightMid: return CGVector(dx: -1, dy: 0)
-            case .bottomLeft: return CGVector(dx: 1, dy: 1)
-            case .bottomMid: return CGVector(dx: 0, dy: 1)
-            case .bottomRight: return CGVector(dx: -1, dy: 1)
+            case .bottomLeft: return CGVector(dx: 1, dy: -1)
+            case .bottomMid: return CGVector(dx: 0, dy: -1)
+            case .bottomRight: return CGVector(dx: -1, dy: -1)
             }
         }
     }
 
     /// Eight notch markers per tile; the two aligned anchors become arrows pointing
-    /// at each other. Native GraphicsContext: geometry stays y-up, `yDown` flips at
-    /// the draw boundary (direction vectors flip dy).
+    /// at each other. Native GraphicsContext, one y-down space.
     func drawAnchors(_ ctx: GraphicsContext, for display: DisplaySnapshot, in rect: NSRect,
                      active: (pos: AnchorPos, dir: CGVector)?) {
         let tile = rect.insetBy(dx: 1.5, dy: 1.5), r = tileCornerRadius
         // Markers sit inside the reference bars / menu strip (corners move diagonally).
         let marginTile = tile.insetBy(dx: 24, dy: 24)
         var clipped = ctx
-        clipped.clip(to: Path(roundedRect: yDown(tile), cornerRadius: r))
+        clipped.clip(to: Path(roundedRect: tile, cornerRadius: r))
         for pos in AnchorPos.allCases where active?.pos != pos {
             drawNotch(clipped, at: pos.point(in: marginTile), dir: pos.inward)
         }
@@ -55,8 +54,7 @@ extension Arranger {
     func drawScreenMarkers(_ ctx: GraphicsContext, _ markers: [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)]) {
         guard let me = centerID, let active = markers[me] else { return }
         let notch = window?.screen?.safeAreaInsets.top ?? 0   // keep clear of the notch on top
-        // The notch is at the top, so reserve its clearance by shrinking the height.
-        let area = NSRect(x: bounds.minX + 40, y: bounds.minY + 40,
+        let area = NSRect(x: bounds.minX + 40, y: bounds.minY + 40 + notch,
                           width: bounds.width - 80, height: bounds.height - 80 - notch)
         drawArrow(ctx, at: active.pos.point(in: area), dir: active.dir, scale: 3)
     }
@@ -70,7 +68,7 @@ extension Arranger {
         let curView = t.viewRect(cur)
         for (dir, rect) in alignGhosts() {
             let g = t.viewRect(rect)
-            let box = Path(roundedRect: yDown(g.insetBy(dx: 1.5, dy: 1.5)), cornerRadius: tileCornerRadius)
+            let box = Path(roundedRect: g.insetBy(dx: 1.5, dy: 1.5), cornerRadius: tileCornerRadius)
             ctx.fill(box, with: .color(Color(white: 0.5).opacity(0.35)))
             ctx.stroke(box, with: .color(.white.opacity(0.5)), lineWidth: 1)   // lighter outline
 
@@ -97,23 +95,18 @@ extension Arranger {
             switch dir {
             case .left:  travel = CGVector(dx: -1, dy: 0)
             case .right: travel = CGVector(dx: 1, dy: 0)
-            case .up:    travel = CGVector(dx: 0, dy: 1)
-            case .down:  travel = CGVector(dx: 0, dy: -1)
+            case .up:    travel = CGVector(dx: 0, dy: -1)
+            case .down:  travel = CGVector(dx: 0, dy: 1)
             }
             drawDirectionArrow(ctx, centeredAt: at, pointing: travel, length: 34)
         }
     }
 
-    /// A y-up view point in the Canvas's y-down space.
-    private func yDownPoint(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x, y: bounds.height - p.y) }
-    /// A y-up direction in the Canvas's y-down space.
-    private func yDownDir(_ v: CGVector) -> CGVector { CGVector(dx: v.dx, dy: -v.dy) }
-
     /// A clean "→"-style arrow (line shaft + open chevron head) pointing along `dir`,
-    /// centered at `p` (both y-up).
-    private func drawDirectionArrow(_ ctx: GraphicsContext, centeredAt pUp: CGPoint,
-                                    pointing dirUp: CGVector, length: CGFloat) {
-        let p = yDownPoint(pUp), n = unit(yDownDir(dirUp))
+    /// centered at `p`.
+    private func drawDirectionArrow(_ ctx: GraphicsContext, centeredAt p: CGPoint,
+                                    pointing dir: CGVector, length: CGFloat) {
+        let n = unit(dir)
         let tail = CGPoint(x: p.x - n.dx * length / 2, y: p.y - n.dy * length / 2)
         let tip  = CGPoint(x: p.x + n.dx * length / 2, y: p.y + n.dy * length / 2)
         let perp = CGVector(dx: -n.dy, dy: n.dx)
@@ -169,7 +162,7 @@ extension Arranger {
     private func dirV(_ pos: AnchorPos, corner: Bool, partner: VAnchor) -> CGVector {
         if corner { return pos.inward }
         guard partner != .center else { return pos.inward }
-        return CGVector(dx: pos.inward.dx, dy: partner == .top ? 1 : -1)
+        return CGVector(dx: pos.inward.dx, dy: partner == .top ? -1 : 1)
     }
     private func dirH(_ pos: AnchorPos, corner: Bool, partner: HAnchor) -> CGVector {
         if corner { return pos.inward }
@@ -177,17 +170,16 @@ extension Arranger {
         return CGVector(dx: partner == .left ? -1 : 1, dy: pos.inward.dy)
     }
 
-    private func drawNotch(_ ctx: GraphicsContext, at pUp: CGPoint, dir dirUp: CGVector) {
-        let p = yDownPoint(pUp), n = unit(yDownDir(dirUp)), len: CGFloat = 4
+    private func drawNotch(_ ctx: GraphicsContext, at p: CGPoint, dir: CGVector) {
+        let n = unit(dir), len: CGFloat = 4
         var path = Path()
         path.move(to: p); path.addLine(to: CGPoint(x: p.x + n.dx * len, y: p.y + n.dy * len))
         ctx.stroke(path, with: .color(.white.opacity(0.9)),
                    style: StrokeStyle(lineWidth: 2, lineCap: .round))
     }
 
-    private func drawArrow(_ ctx: GraphicsContext, at pUp: CGPoint, dir dirUp: CGVector, scale: CGFloat = 1) {
-        let p = yDownPoint(pUp)
-        let inward = unit(yDownDir(dirUp)), out = CGVector(dx: -inward.dx, dy: -inward.dy)
+    private func drawArrow(_ ctx: GraphicsContext, at p: CGPoint, dir: CGVector, scale: CGFloat = 1) {
+        let inward = unit(dir), out = CGVector(dx: -inward.dx, dy: -inward.dy)
         let len: CGFloat = 7 * scale, half: CGFloat = 4 * scale
         let perp = CGVector(dx: -out.dy, dy: out.dx)
         let apex = CGPoint(x: p.x + out.dx * len, y: p.y + out.dy * len)

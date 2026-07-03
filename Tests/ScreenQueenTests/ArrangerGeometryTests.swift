@@ -64,7 +64,7 @@ final class ArrangerGeometryTests: XCTestCase {
                                                 centreOffsetInches: CGPoint(x: 0, y: -10),
                                                 bounds: bounds, scale: 17)
         XCTAssertEqual(r.midX, 500, accuracy: 1e-9)
-        XCTAssertEqual(r.midY, 400 - 10 * 17, accuracy: 1e-9)   // 10 plane inches below centre
+        XCTAssertEqual(r.midY, 400 - 10 * 17, accuracy: 1e-9)   // 10 plane inches above centre (y-down)
         XCTAssertEqual(r.size, CGSize(width: 200, height: 50))
     }
 

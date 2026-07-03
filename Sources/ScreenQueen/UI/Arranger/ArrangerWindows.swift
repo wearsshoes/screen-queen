@@ -204,7 +204,8 @@ final class ArrangerWindows {
         var cursorActivePoint: CGPoint?
         if let activeID, let window = windows[activeID] {
             let up = cocoaGlobal(fromCG: cursor)
-            cursorActivePoint = CGPoint(x: up.x - window.frame.minX, y: up.y - window.frame.minY)
+            // The canvas is flipped (y-down from the window top).
+            cursorActivePoint = CGPoint(x: up.x - window.frame.minX, y: window.frame.maxY - up.y)
         }
         if activeID != activeDisplayID {
             activeDisplayID = activeID

@@ -9,8 +9,8 @@ extension NSImage {
 }
 
 /// One tile: fill, wallpaper/live feed, letterbox hatching, menu-bar strip, Dock
-/// indicator, the selected halo, and the info-card feed. Drawing is native
-/// GraphicsContext: geometry stays y-up, rects flip at the draw boundary (`yDown`).
+/// indicator, the selected halo, and the info-card feed. Native GraphicsContext,
+/// one y-down space throughout.
 extension Arranger {
 
     func drawTile(_ ctx: GraphicsContext, for display: DisplaySnapshot, in rect: NSRect) {
@@ -20,7 +20,7 @@ extension Arranger {
             ? NSColor.systemPink.blended(withFraction: 0.75, of: .white) ?? .white
             : NSColor(white: 0.72, alpha: 0.85))
         let inset = rect.insetBy(dx: 1.5, dy: 1.5)
-        let path = Path(roundedRect: yDown(inset), cornerRadius: tileCornerRadius)
+        let path = Path(roundedRect: inset, cornerRadius: tileCornerRadius)
         ctx.fill(path, with: .color(color))
         ctx.stroke(path, with: .color(color), lineWidth: 1.5)
         drawWallpaper(ctx, for: display, in: inset, selected: selected)
@@ -33,7 +33,7 @@ extension Arranger {
     /// bleeds out (seam glitter, drawn later, is untouched). Two passes: wide soft
     /// bloom, then a tight bright ring.
     func drawSelectedShadow(_ ctx: GraphicsContext, _ tileRect: NSRect) {
-        let path = Path(roundedRect: yDown(tileRect.insetBy(dx: 1.5, dy: 1.5)),
+        let path = Path(roundedRect: tileRect.insetBy(dx: 1.5, dy: 1.5),
                         cornerRadius: tileCornerRadius)
         for (blur, alpha) in [(30.0, 0.55), (12.0, 0.95)] as [(CGFloat, CGFloat)] {
             var glow = ctx
@@ -74,7 +74,7 @@ extension Arranger {
         // Depth band (perpendicular to the Dock axis) shared by icons + tray.
         let depthLo: CGFloat   // near edge in view coords
         switch edge {
-        case .bottom: depthLo = inset.minY + margin          // minY is the screen bottom
+        case .bottom: depthLo = inset.maxY - margin - icon   // maxY is the screen bottom
         case .left:   depthLo = inset.minX + margin
         case .right:  depthLo = inset.maxX - margin - icon
         }
@@ -89,11 +89,11 @@ extension Arranger {
             ? NSRect(x: startA - tray, y: depthLo - tray, width: runLen + tray * 2, height: icon + tray * 2)
             : NSRect(x: depthLo - tray, y: startA - tray, width: icon + tray * 2, height: runLen + tray * 2)
         let trayR = (horizontal ? trayRect.height : trayRect.width) * 0.32
-        ctx.fill(Path(roundedRect: yDown(trayRect), cornerRadius: trayR),
+        ctx.fill(Path(roundedRect: trayRect, cornerRadius: trayR),
                  with: .color(Color(white: 0.32).opacity(0.6)))
 
         func squircle(_ rect: NSRect) {
-            ctx.fill(Path(roundedRect: yDown(rect), cornerRadius: r),
+            ctx.fill(Path(roundedRect: rect, cornerRadius: r),
                      with: .color(.white.opacity(0.92)))
         }
 
@@ -104,7 +104,7 @@ extension Arranger {
         let line: NSRect = horizontal
             ? NSRect(x: a, y: s.minY + icon * 0.1, width: lineThick, height: icon * 0.8)
             : NSRect(x: s.minX + icon * 0.1, y: a, width: icon * 0.8, height: lineThick)
-        ctx.fill(Path(roundedRect: yDown(line), cornerRadius: min(line.width, line.height) / 2),
+        ctx.fill(Path(roundedRect: line, cornerRadius: min(line.width, line.height) / 2),
                  with: .color(.white.opacity(0.5)))
         a += lineThick + postDivider
         squircle(square(at: a))                                     // 4th icon (Trash)
@@ -119,11 +119,11 @@ extension Arranger {
         guard let image else { return }
 
         var clipped = ctx
-        clipped.clip(to: Path(roundedRect: yDown(tile), cornerRadius: tileCornerRadius))
+        clipped.clip(to: Path(roundedRect: tile, cornerRadius: tileCornerRadius))
         drawImageAspectFill(clipped, image, in: tile, alpha: selected ? 1.0 : 0.95)
 
         // A faint scrim so seam bars/anchors keep contrast against busy content.
-        clipped.fill(Path(yDown(tile)), with: .color(.black.opacity(selected ? 0.06 : 0.12)))
+        clipped.fill(Path(tile), with: .color(.black.opacity(selected ? 0.06 : 0.12)))
     }
 
     /// Draw `image` aspect-filled (cover, center-crop) into `rect`.
@@ -138,7 +138,7 @@ extension Arranger {
                          width: pixelSnap(w), height: pixelSnap(h))
         var c = ctx
         c.opacity = alpha
-        c.draw(Image(decorative: image, scale: 1), in: yDown(dst))
+        c.draw(Image(decorative: image, scale: 1), in: dst)
     }
 
     /// The desktop wallpaper for `display` (its master, if mirrored), cached and
@@ -177,7 +177,7 @@ extension Arranger {
             let w = img.height * CGFloat(imgAspect)
             img = NSRect(x: img.midX - w / 2, y: img.minY, width: w, height: img.height)
         }
-        ctx.stroke(Path(yDown(img)), with: .color(.black.opacity(0.35)), lineWidth: 1)
+        ctx.stroke(Path(img), with: .color(.black.opacity(0.35)), lineWidth: 1)
         hatch(ctx, tile.insetBy(dx: 2, dy: 2), excluding: img, opacity: 0.3)
     }
 
@@ -190,8 +190,7 @@ extension Arranger {
     }
 
     /// Fill the region of `rect` outside `hole` with faint diagonal hatch lines.
-    private func hatch(_ ctx: GraphicsContext, _ rectUp: NSRect, excluding holeUp: NSRect, opacity: Double) {
-        let rect = yDown(rectUp), hole = yDown(holeUp)
+    private func hatch(_ ctx: GraphicsContext, _ rect: NSRect, excluding hole: NSRect, opacity: Double) {
         var clip = Path(rect)
         clip.addPath(Path(hole))
         var c = ctx
@@ -199,7 +198,7 @@ extension Arranger {
         var lines = Path()
         var x = rect.minX - rect.height
         while x < rect.maxX {
-            // Same "/" strokes as before (bottom-left → top-right, in y-down terms).
+            // "/" strokes: bottom-left → top-right.
             lines.move(to: CGPoint(x: x, y: rect.maxY))
             lines.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
             x += 6
@@ -210,11 +209,11 @@ extension Arranger {
     /// The menu-bar strip across the top of a tile.
     func menuBarRect(inTile tile: NSRect) -> NSRect {
         let h = min(18, tile.height * 0.2)
-        return NSRect(x: tile.minX, y: tile.maxY - h, width: tile.width, height: h)
+        return NSRect(x: tile.minX, y: tile.minY, width: tile.width, height: h)
     }
 
     func drawMenuBar(_ ctx: GraphicsContext, in rect: NSRect) {
-        ctx.fill(Path(roundedRect: yDown(rect.insetBy(dx: 0.5, dy: 0.5)), cornerRadius: 3),
+        ctx.fill(Path(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 3),
                  with: .color(.white.opacity(0.6)))
     }
 

@@ -13,6 +13,10 @@ import SwiftUI
 /// alignment; ⌘ +/−/0 change resolution.
 final class Arranger: NSView {
 
+    /// One coordinate system everywhere: the plane is y-down (`CGDisplayBounds`), the
+    /// SwiftUI Canvas and gestures are y-down, so the view is too — no flip gates.
+    override var isFlipped: Bool { true }
+
     /// Shared editing state — one instance across every per-screen canvas.
     let state: ArrangerState
 
@@ -307,11 +311,6 @@ final class Arranger: NSView {
     /// The plane↔view transform and the fit that chooses it live in `ArrangerGeometry`
     /// (framework-free, tested); this canvas supplies its own bounds/padding.
     typealias Transform = ArrangerGeometry.Transform
-
-    /// The y-flip gate for content drawn in *this screen's own point space* (y-down)
-    /// against the real window bounds (y-up) — the point-space counterpart of
-    /// `Transform.flipY`, for the one path that doesn't ride the plane transform.
-    func pointYToView(_ y: CGFloat) -> CGFloat { bounds.height - y }
 
     func transform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
         ArrangerGeometry.fit(rects, in: bounds, padding: outerPadding)

@@ -1,13 +1,12 @@
 import SwiftUI
 
 /// The schematic, hosted in a SwiftUI `Canvas`. The render pass
-/// (`Arranger.drawSchematic(in:size:)`) draws natively into the GraphicsContext where
-/// subjects have been migrated, and runs the rest through the `legacyDraw` y-up shim —
-/// see Arranger+Drawing for the migration state.
+/// (`Arranger.drawSchematic(in:size:)`) draws natively into the GraphicsContext.
 ///
 /// Mouse input lives here too (phase 2 of the input port): one DragGesture drives the
 /// canvas's began/moved/ended handlers — a plain click is a zero-distance drag, same as
-/// mouseDown/mouseUp. Points are flipped to the y-up view space the handlers speak.
+/// mouseDown/mouseUp. Gesture points pass straight through: the view is flipped, so
+/// gesture, Canvas, and view space are all the same y-down coordinates.
 struct SchematicCanvasView: View {
     weak var canvas: Arranger?
     /// Bumped by `repaintSchematic()` — the Canvas closure re-runs when inputs change.
@@ -21,14 +20,11 @@ struct SchematicCanvasView: View {
         .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { g in
                 guard let canvas else { return }
-                let p = CGPoint(x: g.location.x, y: canvas.bounds.height - g.location.y)
-                if canvas.mouseGestureActive { canvas.mouseMoved(to: p) }
-                else { canvas.mouseBegan(at: p, option: NSEvent.modifierFlags.contains(.option)) }
+                if canvas.mouseGestureActive { canvas.mouseMoved(to: g.location) }
+                else { canvas.mouseBegan(at: g.location, option: NSEvent.modifierFlags.contains(.option)) }
             }
             .onEnded { g in
-                guard let canvas else { return }
-                canvas.mouseEnded(at: CGPoint(x: g.location.x,
-                                              y: canvas.bounds.height - g.location.y))
+                canvas?.mouseEnded(at: g.location)
             })
     }
 }

@@ -39,7 +39,7 @@ extension Arranger {
     }
 
     /// Gesture began (the SwiftUI DragGesture's first change — a plain click included).
-    /// `p` is in this view's y-up coordinates; window keying happens in the schematic
+    /// `p` is in this view's (y-down) coordinates; window keying happens in the schematic
     /// host's mouseDown, before the gesture fires.
     func mouseBegan(at p: CGPoint, option: Bool) {
         mouseGestureActive = true
@@ -86,9 +86,9 @@ extension Arranger {
         if optionMirrorDrag { mirrorDragPoint = p; dragMoved = true; repaintSchematic(); return }
         guard let id = draggedID, let dragged = displays.first(where: { $0.id == id }),
               let t = dragTransform ?? transform(plane) else { return }
-        // 1:1 cursor tracking: view delta ÷ scale = physical delta (plane y-down → negate y).
+        // 1:1 cursor tracking: view delta ÷ scale = physical delta (both y-down).
         let free = CGPoint(x: dragStartPhys.x + (p.x - dragStartMouse.x) / t.scale,
-                           y: dragStartPhys.y - (p.y - dragStartMouse.y) / t.scale)
+                           y: dragStartPhys.y + (p.y - dragStartMouse.y) / t.scale)
         let snap = SchematicSnapping.dockAndSnap(dragged: SchematicLayout.physSize(dragged), id: id,
                                                  free: free, scale: t.scale, snap: true, plane: plane)
         activeV = snap.activeV; activeH = snap.activeH

@@ -142,8 +142,8 @@ extension Arranger {
     }
 
     /// The bar centre's offset from the screen centre, in **plane inches** (map-relative,
-    /// like the granny viewer — drifts/rescales with the minimap).
-    private var barCentreOffsetInches: CGPoint { CGPoint(x: 0, y: -10) }
+    /// like the granny viewer — drifts/rescales with the minimap). +y is down.
+    private var barCentreOffsetInches: CGPoint { CGPoint(x: 0, y: 10) }
 
     /// Position the footer under this canvas's own bar, font scaled with it (text laid
     /// out at the target point size — crisp, not a layer-scaled bitmap). Called from
@@ -153,7 +153,7 @@ extension Arranger {
         if footer.rootView.scale != s { footer.rootView = FooterView(scale: s) }
         let size = footer.fittingSize
         footer.frame = CGRect(x: pixelSnap(bar.frame.midX - size.width / 2),
-                              y: pixelSnap(bar.frame.minY - 8 * s - size.height),
+                              y: pixelSnap(bar.frame.maxY + 8 * s),
                               width: size.width, height: size.height)
     }
 
