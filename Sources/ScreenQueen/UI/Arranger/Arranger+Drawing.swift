@@ -1,71 +1,93 @@
-import AppKit
+import SwiftUI
 
-/// The render pass: `drawSchematic()` orchestrates the schematic in paint order, called
-/// from the SwiftUI Canvas host (see SchematicCanvas.swift). The subjects live in their
-/// own files — seams (Arranger+Seams), tiles (Arranger+Tiles), alignment markers
-/// (Arranger+Markers), mirror column (Arranger+Sidebar).
+/// The render pass: `drawSchematic(in:size:)` orchestrates the schematic in paint order,
+/// called from the SwiftUI Canvas host (see SchematicCanvas.swift). The subjects live in
+/// their own files — seams (Arranger+Seams), tiles (Arranger+Tiles), alignment markers
+/// (Arranger+Markers), mirror column (Arranger+Sidebar). Migration state: subjects draw
+/// natively into the GraphicsContext one at a time; the rest run inside `legacyDraw`
+/// (the y-up AppKit-idiom shim), interleaved so paint order never changes.
 extension Arranger {
 
-    func drawSchematic() {
+    /// Run not-yet-native draw code (NSBezierPath / NSString idiom reading
+    /// NSGraphicsContext.current) inside `ctx`, flipped to the y-up view space it speaks.
+    func legacyDraw(_ ctx: GraphicsContext, _ body: () -> Void) {
+        ctx.withCGContext { cg in
+            cg.translateBy(x: 0, y: bounds.height)
+            cg.scaleBy(x: 1, y: -1)
+            let ns = NSGraphicsContext(cgContext: cg, flipped: false)
+            let prev = NSGraphicsContext.current
+            NSGraphicsContext.current = ns
+            body()
+            NSGraphicsContext.current = prev
+        }
+    }
+
+    /// A y-up view rect in the Canvas's y-down space (native subjects use this at their
+    /// boundary; geometry sources like `Transform.viewRect` stay y-up).
+    func yDown(_ r: CGRect) -> CGRect {
+        CGRect(x: r.minX, y: bounds.height - r.maxY, width: r.width, height: r.height)
+    }
+
+    func drawSchematic(in ctx: GraphicsContext, size: CGSize) {
         // The backdrop wash. If this screen's own tile is being dragged (from any
         // canvas), brighten it — a real-world "you're dragging me" cue.
         let beingDragged = centerID != nil && state.draggingDisplayID == centerID
-        if beingDragged {
-            (NSColor.systemPink.blended(withFraction: 0.2, of: .black) ?? .systemPink)
-                .withAlphaComponent(0.75).setFill()
-        } else {
-            NSColor.black.withAlphaComponent(0.55).setFill()
-        }
-        bounds.fill()
+        let wash: Color = beingDragged
+            ? Color(nsColor: NSColor.systemPink.blended(withFraction: 0.2, of: .black) ?? .systemPink).opacity(0.75)
+            : Color.black.opacity(0.55)
+        ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(wash))
 
         let rects = currentRects()
         guard let t = drawTransform(rects) else {
-            drawCenteredMessage(Copy.emptyState)
+            ctx.draw(Text(Copy.emptyState).font(.system(size: 14))
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor)),
+                     at: CGPoint(x: size.width / 2, y: size.height / 2))
             return
         }
         let bars = currentBars()
         let seamColor = seamColors(bars)   // color per seam; both its bars share it
-        if showAlignGhosts { drawAlignGhosts(t: t) }   // under the tiles
-        // Selection halo before the tiles, so it reads under the lifted tile.
-        if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
-        for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!)) }
-        // Predicted Dock strip. With the live feed on the tiles already show the real
-        // Dock, so only surface it when informative (Dock would move / mid menu-bar drag).
-        if let dockID = predictedDockDisplay(), let r = rects[dockID] {
-            let dockWouldMove = dockID != state.currentDockDisplay()
-            let showDock = !state.feedEnabled || dockWouldMove || draggingMenuBar != nil
-            if showDock {
-                drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
+        legacyDraw(ctx) {
+            if showAlignGhosts { drawAlignGhosts(t: t) }   // under the tiles
+            // Selection halo before the tiles, so it reads under the lifted tile.
+            if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
+            for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!)) }
+            // Predicted Dock strip. With the live feed on the tiles already show the real
+            // Dock, so only surface it when informative (Dock would move / mid menu-bar drag).
+            if let dockID = predictedDockDisplay(), let r = rects[dockID] {
+                let dockWouldMove = dockID != state.currentDockDisplay()
+                let showDock = !state.feedEnabled || dockWouldMove || draggingMenuBar != nil
+                if showDock {
+                    drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
+                }
             }
+            // Seam glows, painted from the same edge sets `updateSeamEffects` feeds to the
+            // emitter/glow layers (on the refresh path — draw registers nothing).
+            for e in miniBarEdges(bars, t: t, seamColor: seamColor) { drawBehindGlow(e) }
+            let markers = activeMarkers(rects)
+            for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
+            for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(e) }
+            drawScreenMarkers(markers)                // alignment notches/arrows at this screen's real edges
+            drawMirrorColumn()                        // mirrored displays live in the right column
         }
-        // Seam glows, painted from the same edge sets `updateSeamEffects` feeds to the
-        // emitter/glow layers (on the refresh path — draw registers nothing).
-        for e in miniBarEdges(bars, t: t, seamColor: seamColor) { drawBehindGlow(e) }
-        let markers = activeMarkers(rects)
-        for d in displays where rects[d.id] != nil { drawAnchors(for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
-        for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(e) }
-        drawScreenMarkers(markers)                // alignment notches/arrows at this screen's real edges
-        drawMirrorColumn()                        // mirrored displays live in the right column
         if let p = draggingMenuBar {
             // The strip follows the cursor; highlight the tile it would land on.
             if let over = display(at: p), !over.isMain, let r = rects[over.id] {
-                let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
-                NSColor.white.withAlphaComponent(0.25).setFill()
-                NSBezierPath(roundedRect: vr, xRadius: tileCornerRadius, yRadius: tileCornerRadius).fill()
+                let vr = yDown(t.viewRect(r).insetBy(dx: 1.5, dy: 1.5))
+                ctx.fill(Path(roundedRect: vr, cornerRadius: tileCornerRadius),
+                         with: .color(.white.opacity(0.25)))
             }
-            drawMenuBar(in: NSRect(x: p.x - 40, y: p.y - 8, width: 80, height: 16))
+            legacyDraw(ctx) { drawMenuBar(in: NSRect(x: p.x - 40, y: p.y - 8, width: 80, height: 16)) }
         }
         // Option-mirror drag: highlight the tile the dragged display would mirror onto.
         if let p = mirrorDragPoint, let over = display(at: p), over.id != draggedID, let r = rects[over.id] {
-            let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
-            NSColor.systemPink.withAlphaComponent(0.35).setFill()
-            let path = NSBezierPath(roundedRect: vr, xRadius: tileCornerRadius, yRadius: tileCornerRadius)
-            path.fill()
-            NSColor.systemPink.setStroke(); path.lineWidth = 2; path.stroke()
-            let hint = Copy.mirrorDropHint
-            let a: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.white]
-            let hs = (hint as NSString).size(withAttributes: a)
-            (hint as NSString).draw(at: CGPoint(x: vr.midX - hs.width / 2, y: vr.midY - hs.height / 2), withAttributes: a)
+            let vr = yDown(t.viewRect(r).insetBy(dx: 1.5, dy: 1.5))
+            let pink = Color(nsColor: .systemPink)
+            let path = Path(roundedRect: vr, cornerRadius: tileCornerRadius)
+            ctx.fill(path, with: .color(pink.opacity(0.35)))
+            ctx.stroke(path, with: .color(pink), lineWidth: 2)
+            ctx.draw(Text(Copy.mirrorDropHint).font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white),
+                     at: CGPoint(x: vr.midX, y: vr.midY))
         }
     }
 
@@ -93,9 +115,4 @@ extension Arranger {
         solvePanel.update(content)
     }
 
-    private func drawCenteredMessage(_ message: String) {
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.secondaryLabelColor]
-        let size = (message as NSString).size(withAttributes: attrs)
-        (message as NSString).draw(at: CGPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attrs)
-    }
 }

@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The schematic, hosted in a SwiftUI `Canvas`. The render pass itself is still the
-/// CoreGraphics code (`Arranger.drawSchematic`), run through `withCGContext` with a
-/// y-flip so the AppKit-era drawing keeps its y-up view space — the mechanical first
-/// step of the Canvas port; subjects can go native `GraphicsContext` incrementally.
+/// The schematic, hosted in a SwiftUI `Canvas`. The render pass
+/// (`Arranger.drawSchematic(in:size:)`) draws natively into the GraphicsContext where
+/// subjects have been migrated, and runs the rest through the `legacyDraw` y-up shim —
+/// see Arranger+Drawing for the migration state.
 ///
 /// Mouse input lives here too (phase 2 of the input port): one DragGesture drives the
 /// canvas's began/moved/ended handlers — a plain click is a zero-distance drag, same as
@@ -16,17 +16,7 @@ struct SchematicCanvasView: View {
     var body: some View {
         Canvas { ctx, size in
             _ = generation
-            guard let canvas else { return }
-            ctx.withCGContext { cg in
-                // Canvas is y-down top-left; the draw code is y-up. Flip once here.
-                cg.translateBy(x: 0, y: size.height)
-                cg.scaleBy(x: 1, y: -1)
-                let ns = NSGraphicsContext(cgContext: cg, flipped: false)
-                let prev = NSGraphicsContext.current
-                NSGraphicsContext.current = ns
-                canvas.drawSchematic()
-                NSGraphicsContext.current = prev
-            }
+            canvas?.drawSchematic(in: ctx, size: size)
         }
         .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { g in
