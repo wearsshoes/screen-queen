@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The seam system's on-glass half: full-screen bars hugging *this* screen's real
 /// edges — the physical depiction of a window's size jump crossing the seam, in the
-/// window's own point space (vs. the mini-map bars' tile space, Arranger+Seams.swift;
-/// the shared glow/emitter engine lives there too).
+/// window's own point space (vs. the mini-map bars' tile space, Arranger+TileSeams;
+/// the shared glow/emitter engine is Seams/SeamEngine.swift).
 extension Arranger {
 
     /// The full-screen bars hugging *this* screen's real edges — the on-glass depiction
