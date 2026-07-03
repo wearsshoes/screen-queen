@@ -114,28 +114,32 @@ final class Arranger: NSView {
     /// lifted above the sparkle emitters (zPosition 1) and the front seam glow (2), so the
     /// map never draws over its own readout. Draggable by its title bar; body click-through.
     private(set) lazy var solvePanel: SolvePanel = {
-        let p = SolvePanel(frame: NSRect(origin: state.solvePanelOrigin,
-                                         size: NSSize(width: 240, height: 166)))
+        let p = SolvePanel(frame: NSRect(origin: .zero, size: NSSize(width: 240, height: 166)))
         p.wantsLayer = true
         p.layer?.zPosition = 3
-        // Drags update the shared origin so every canvas's panel moves together.
+        // A drag updates the shared centre offset so every canvas's panel moves together.
         p.onMoved = { [weak self] origin in
             guard let self else { return }
-            self.state.solvePanelOrigin = self.clampedPanelOrigin(origin, size: p.frame.size)
+            self.state.solvePanelCenterOffset = self.panelOffset(forOrigin: origin, size: p.frame.size)
             self.state.notify()
         }
         addSubview(p)
         return p
     }()
 
-    /// Clamp a solve-panel drag to *this* canvas's own bounds — the screen you're
-    /// dragging on keeps it fully in view. Other canvases render the shared origin
-    /// raw (see `refresh`), so a ghost panel mirrors the real one's position exactly,
-    /// even where that runs partly or fully off a smaller/differently-shaped screen.
-    func clampedPanelOrigin(_ o: CGPoint, size: NSSize) -> CGPoint {
-        let maxX = max(0, bounds.width - size.width)
-        let maxY = max(0, bounds.height - size.height)
-        return CGPoint(x: min(max(0, o.x), maxX), y: min(max(0, o.y), maxY))
+    /// The panel's frame origin on this canvas from the shared centre offset.
+    func panelOrigin(size: NSSize) -> CGPoint {
+        CGPoint(x: bounds.midX + state.solvePanelCenterOffset.x - size.width / 2,
+                y: bounds.midY + state.solvePanelCenterOffset.y - size.height / 2)
+    }
+
+    /// A drag's new frame origin → a centre offset, clamped so the panel stays
+    /// grabbable on *this* (the dragged) canvas. Other canvases render the offset raw
+    /// (see `refresh`), so a smaller screen can push its panel partly off — fine.
+    private func panelOffset(forOrigin o: CGPoint, size: NSSize) -> CGPoint {
+        let cx = min(max(o.x + size.width / 2, size.width / 2), bounds.width - size.width / 2)
+        let cy = min(max(o.y + size.height / 2, size.height / 2), bounds.height - size.height / 2)
+        return CGPoint(x: cx - bounds.midX, y: cy - bounds.midY)
     }
 
     override func viewDidMoveToWindow() {
@@ -258,12 +262,10 @@ final class Arranger: NSView {
     /// Called by the state after a mutation so this view repaints.
     func refresh() {
         syncButtons(); syncBanner()
-        // Every canvas's panel sits at the shared origin *raw* — a drag on any canvas
-        // moved it for all of them, and a ghost panel must mirror the real one's spot
-        // exactly, clipping off-screen if that's where it truly is.
-        if solvePanel.frame.origin != state.solvePanelOrigin {
-            solvePanel.setFrameOrigin(state.solvePanelOrigin)
-        }
+        // Every canvas's panel sits at the shared centre offset — a drag on any canvas
+        // moved it for all of them; a smaller screen may clip it, which is fine.
+        let origin = panelOrigin(size: solvePanel.frame.size)
+        if solvePanel.frame.origin != origin { solvePanel.setFrameOrigin(origin) }
         needsDisplay = true
     }
 

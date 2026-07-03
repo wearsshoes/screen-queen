@@ -117,9 +117,11 @@ final class ArrangerState {
     var uniformMenuBarInset: CGFloat = 0
     var minScreenExtent = CGSize(width: 100_000, height: 100_000)
 
-    /// The solve panel's shared origin (bottom-left anchor offset). Dragging the
-    /// panel on any canvas moves it on all of them — positional identity again.
-    var solvePanelOrigin = CGPoint(x: 12, y: 28)
+    /// The granny panel's centre, as an offset from the screen centre (points) — the
+    /// same centre-based math the ghost chrome scales by, so it sits consistently
+    /// across screens (and off a smaller one where it can't fit). Movable: drag its
+    /// title bar. Dragging on any canvas moves it on all of them.
+    var solvePanelCenterOffset = CGPoint(x: -360, y: -300)
 
     // MARK: - Countdowns (the top-of-screen banner)
 

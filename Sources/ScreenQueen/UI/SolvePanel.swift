@@ -21,9 +21,9 @@ final class SolvePanel: NSView {
     private let titleBarHeight: CGFloat = 16
 
     /// Dragging reports the desired origin here instead of moving the panel itself —
-    /// the origin lives in shared state (`ArrangerState.solvePanelOrigin`) so the
-    /// panel sits at the same anchor offset on every canvas; the canvases reposition
-    /// (clamped everywhere-in-bounds) on the resulting notify.
+    /// the canvas converts it to a centre offset in shared state
+    /// (`ArrangerState.solvePanelCenterOffset`), so the panel sits at the same
+    /// centre-relative spot on every canvas; all reposition on the resulting notify.
     var onMoved: ((CGPoint) -> Void)?
 
     func update(_ content: Content) {
