@@ -87,45 +87,29 @@ final class VirtualMouseTests: XCTestCase {
         XCTAssertEqual(VirtualMouse.smoothstep(2), 1)
     }
 
-    // MARK: - Docking (fraction transfer onto the twin control)
+    // MARK: - Cross-canvas projection (the one mapping the ghost rides everywhere)
 
-    func testDockedPointPreservesFraction() {
-        let host = CGRect(x: 100, y: 50, width: 200, height: 40)
-        let dest = CGRect(x: 400, y: 900, width: 200, height: 40)
-        // Corners and center transfer exactly.
-        XCTAssertEqual(VirtualMouse.dockedPoint(hostPoint: CGPoint(x: 100, y: 50), hostRect: host, destRect: dest),
-                       CGPoint(x: 400, y: 900))
-        XCTAssertEqual(VirtualMouse.dockedPoint(hostPoint: CGPoint(x: 200, y: 70), hostRect: host, destRect: dest),
-                       CGPoint(x: 500, y: 920))
-        // A quarter along the (identically sized) slider stays a quarter along.
-        let q = VirtualMouse.dockedPoint(hostPoint: CGPoint(x: 150, y: 60), hostRect: host, destRect: dest)
-        XCTAssertEqual(q.x, 450, accuracy: 1e-9)
-        // Degenerate host rect: fall to the destination's center, not a crash.
-        let deg = VirtualMouse.dockedPoint(hostPoint: .zero,
-                                           hostRect: CGRect(x: 0, y: 0, width: 0, height: 0),
-                                           destRect: dest)
-        XCTAssertEqual(deg, CGPoint(x: dest.midX, y: dest.midY))
-    }
-
-    // MARK: - Anchor-space translations (chrome zones across differing canvases)
-
-    func testAnchorMappedPointsAgreeWithAnchors() {
-        let host = CGSize(width: 2880, height: 1864)     // roomy Retina
-        let dest = CGSize(width: 1920, height: 1080)     // smaller external
-        // Bottom-center: distance from bottom and from centerline both survive.
-        let barPoint = CGPoint(x: 2880 / 2 + 130, y: 96)   // 130 right of center, 96 up
-        let mapped = VirtualMouse.bottomCenterMapped(barPoint, hostSize: host, destSize: dest)
-        XCTAssertEqual(mapped.x - dest.width / 2, 130, accuracy: 1e-9)
-        XCTAssertEqual(mapped.y, 96)
-        // Top-center: distance from the top survives.
-        let bannerPoint = CGPoint(x: 2880 / 2 - 40, y: 1864 - 30)
-        let m2 = VirtualMouse.topCenterMapped(bannerPoint, hostSize: host, destSize: dest)
-        XCTAssertEqual(m2.x - dest.width / 2, -40, accuracy: 1e-9)
-        XCTAssertEqual(dest.height - m2.y, 30, accuracy: 1e-9)
-        // Round-trip is exact.
-        let back = VirtualMouse.bottomCenterMapped(mapped, hostSize: dest, destSize: host)
-        XCTAssertEqual(back.x, barPoint.x, accuracy: 1e-9)
-        XCTAssertEqual(back.y, barPoint.y, accuracy: 1e-9)
+    func testHostToDestProjectionIsContinuousAndInvertible() {
+        // Two canvases over the same plane at different scales/offsets — the shape of
+        // two differently-sized screens showing the same schematic.
+        let hostT = Arranger.Transform(scale: 20, offset: CGPoint(x: 400, y: 300),
+                                       unionOrigin: CGPoint(x: -2, y: 1), viewHeight: 1864)
+        let destT = Arranger.Transform(scale: 12, offset: CGPoint(x: 250, y: 180),
+                                       unionOrigin: CGPoint(x: -2, y: 1), viewHeight: 1080)
+        func project(_ p: CGPoint) -> CGPoint { destT.viewPoint(hostT.planePoint(p)) }
+        // Invertible: host → dest → host is exact.
+        for p in [CGPoint(x: 0, y: 0), CGPoint(x: 1440, y: 96), CGPoint(x: 2879, y: 1863)] {
+            let back = hostT.viewPoint(destT.planePoint(project(p)))
+            XCTAssertEqual(back.x, p.x, accuracy: 1e-9)
+            XCTAssertEqual(back.y, p.y, accuracy: 1e-9)
+        }
+        // Affine (scale + translate): distances scale uniformly by destScale/hostScale,
+        // which is what makes a projected chrome rect stay a rect — and means the
+        // arrow can never "snap": equal cursor steps are equal ghost steps.
+        let a = project(CGPoint(x: 100, y: 100)), b = project(CGPoint(x: 200, y: 100))
+        let c = project(CGPoint(x: 1000, y: 900)), d = project(CGPoint(x: 1100, y: 900))
+        XCTAssertEqual(b.x - a.x, d.x - c.x, accuracy: 1e-9)
+        XCTAssertEqual(b.x - a.x, 100 * 12 / 20, accuracy: 1e-9)
     }
 
     // MARK: - Bar width cap (the never-out-of-bounds rule)

@@ -13,12 +13,15 @@ import AppKit
 ///      the cursor's screen wears it real, far screens wear the dashed ghost frame.
 ///      Buttons stay functional at any presence: blind clicks are the feature,
 ///      because every control acts on shared state (the twin of Done IS Done).
-///   2. *The ghost arrow*: on cursor-less canvases, docked on the twin control when
-///      the cursor is on one (same fraction — a slider scrub mirrors live), riding
-///      the anchor translation over chrome gaps, and mirroring the shared schematic
-///      everywhere else (so you can rearrange while watching any screen).
-///   3. *The halo* (`GhostHighlightLayer`): the twin control under the cursor lights
-///      up on every other canvas — "she's on Done over there," readable at a glance.
+///   2. *The ghost arrow*: on cursor-less canvases, the cursor mirrored through the
+///      ONE plane (minimap) transform — everywhere, chrome included, so nothing ever
+///      snaps between coordinate regimes. The host's chrome is *projected* through
+///      the same transform as dashed outlines that materialize as the cursor nears
+///      them, so the arrow is honestly "on" the projected bar when the real cursor
+///      is on the real one (a slider scrub mirrors live, by construction).
+///   3. *The halo* (`GhostHighlightLayer`): the projected outline of the control
+///      under the cursor lights up on every other canvas — "she's on Done," readable
+///      at a glance, and exactly where the arrow already is.
 ///
 /// Each aid is deliberately styled as *not the real cursor* — pins, dashes, halos,
 /// never an opaque arrow. Flip either flag to bench that girl; they're independent.
@@ -62,29 +65,6 @@ enum VirtualMouse {
         return c * c * (3 - 2 * c)
     }
 
-    /// Fraction-preserving dock: where `hostPoint` sits within `hostRect`, transferred
-    /// to `destRect`. This is what makes the mirrored arrow ride the twin slider at
-    /// the same position along it.
-    static func dockedPoint(hostPoint: CGPoint, hostRect: CGRect, destRect: CGRect) -> CGPoint {
-        let fx = hostRect.width > 0 ? (hostPoint.x - hostRect.minX) / hostRect.width : 0.5
-        let fy = hostRect.height > 0 ? (hostPoint.y - hostRect.minY) / hostRect.height : 0.5
-        return CGPoint(x: destRect.minX + fx * destRect.width,
-                       y: destRect.minY + fy * destRect.height)
-    }
-
-    // Anchor-space translations between canvases of different sizes. Chrome sits at
-    // identical anchor offsets everywhere (2a), so these are exact — no frames needed.
-
-    /// Bottom-center anchored (the button bar): x re-centered, y unchanged.
-    static func bottomCenterMapped(_ p: CGPoint, hostSize: CGSize, destSize: CGSize) -> CGPoint {
-        CGPoint(x: p.x + (destSize.width - hostSize.width) / 2, y: p.y)
-    }
-    /// Top-center anchored (the countdown banner): x re-centered, distance-from-top kept.
-    static func topCenterMapped(_ p: CGPoint, hostSize: CGSize, destSize: CGSize) -> CGPoint {
-        CGPoint(x: p.x + (destSize.width - hostSize.width) / 2,
-                y: destSize.height - (hostSize.height - p.y))
-    }
-    // Bottom-left anchored (the solve panel): identity — no mapper needed.
 }
 
 /// The six bar controls, by role — twin identity across canvases (every canvas has
@@ -277,6 +257,12 @@ extension Arranger {
     /// `hostPoint` the cursor in the host's y-up view coords, and `target` the
     /// control the cursor is on (frozen by ArrangerWindows for a press-drag's
     /// duration — "outside of a drag action" gating lives there).
+    ///
+    /// ONE mapping, no snapping: everything the ghost shows — the arrow, the halo,
+    /// the projected chrome outlines — rides the same plane (minimap) transform, so
+    /// nothing ever jumps between coordinate regimes. When the cursor is on the
+    /// host's Done, the arrow sits inside the *projection* of the host's bar here,
+    /// by construction.
     func updateMouseOverlays(cursor: CGPoint, hostID: CGDirectDisplayID?,
                              host: Arranger?, hostPoint: CGPoint?, target: GhostTarget?) {
         ensureMouseLayers()
@@ -299,23 +285,67 @@ extension Arranger {
             // The real cursor is here (or nowhere we know): the lead is on stage.
             ghost.isHidden = true
             ghostHighlightLayer?.isHidden = true
+            projectedGhostFrames.values.forEach { $0.isHidden = true }
             return
         }
-        if let target, let myRect = rect(of: target), let hostRect = host.rect(of: target) {
-            // On a control: halo the twin and dock the arrow at the same fraction.
+        if let p = ghostViewPoint(host: host, hostPoint: hostPoint) {
             ghost.isHidden = false
-            ghost.position = VirtualMouse.dockedPoint(hostPoint: hostPoint, hostRect: hostRect,
-                                                      destRect: myRect)
+            ghost.position = p
+        } else {
+            ghost.isHidden = true
+        }
+        updateProjectedChrome(host: host, hostPoint: hostPoint)
+        if let target, let hostRect = host.rect(of: target),
+           let myRect = projected(hostRect, from: host) {
+            // On a control: halo its *projection* — where the arrow already is.
             ghostHighlightLayer?.show(over: myRect)
         } else {
             ghostHighlightLayer?.isHidden = true
-            if let p = ghostViewPoint(host: host, hostPoint: hostPoint) {
-                ghost.isHidden = false
-                ghost.position = p
-            } else {
-                ghost.isHidden = true
-            }
         }
+    }
+
+    /// Project the host's chrome pieces onto this canvas through the shared plane —
+    /// dashed outlines that materialize as the cursor nears each piece (opacity is
+    /// the only thing that changes; positions ride the one transform). They give the
+    /// arrow something to be "on" when it hovers the host's chrome, without any
+    /// coordinate hand-offs.
+    private func updateProjectedChrome(host: Arranger, hostPoint: CGPoint) {
+        func strength(near rect: CGRect) -> CGFloat {
+            let dx = max(0, max(rect.minX - hostPoint.x, hostPoint.x - rect.maxX))
+            let dy = max(0, max(rect.minY - hostPoint.y, hostPoint.y - rect.maxY))
+            return VirtualMouse.smoothstep(1 - min(hypot(dx, dy) / 80, 1))
+        }
+        func update(_ piece: ChromePiece, hostRect: CGRect?, radius: CGFloat) {
+            guard let hostRect, let r = projected(hostRect, from: host) else {
+                projectedGhostFrames[piece]?.isHidden = true
+                return
+            }
+            projectedGhostFrame(piece).update(around: r, radius: radius, strength: strength(near: hostRect))
+        }
+        update(.bar, hostRect: host.barContainer?.frame,
+               radius: (host.barContainer?.frame.height ?? 0) / 2)
+        update(.banner, hostRect: (host.banner?.isHidden == false) ? host.banner?.frame : nil, radius: 18)
+        update(.panel, hostRect: host.solvePanel.isHidden ? nil : host.solvePanel.frame, radius: 6)
+    }
+
+    /// A host-canvas rect mapped onto this canvas through the shared plane (both
+    /// transforms are scale+translate, so a rect maps to a rect).
+    func projected(_ rect: CGRect, from host: Arranger) -> CGRect? {
+        guard let hostT = host.drawTransform(host.currentRects()),
+              let myT = drawTransform(currentRects()) else { return nil }
+        let a = myT.viewPoint(hostT.planePoint(CGPoint(x: rect.minX, y: rect.minY)))
+        let b = myT.viewPoint(hostT.planePoint(CGPoint(x: rect.maxX, y: rect.maxY)))
+        return CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
+                      width: abs(b.x - a.x), height: abs(b.y - a.y))
+    }
+
+    private func projectedGhostFrame(_ piece: ChromePiece) -> GhostFrameLayer {
+        if let layer = projectedGhostFrames[piece] { return layer }
+        let layer = GhostFrameLayer()
+        layer.zPosition = 5
+        self.layer?.addSublayer(layer)
+        projectedGhostFrames[piece] = layer
+        return layer
     }
 
     /// Flash this canvas's halo (the press-echo; ArrangerWindows calls it on the
@@ -419,25 +449,13 @@ extension Arranger {
         return t.viewPoint(pp)
     }
 
-    /// The understudy's off-target position on this canvas for a cursor at
-    /// `hostPoint` on `host`. Chrome zones map by pure anchor translation (the
-    /// chrome sits at identical anchor offsets everywhere — 2a); everything else
-    /// rides the shared physical plane through both (drag-frozen) transforms.
+    /// The understudy's position on this canvas for a cursor at `hostPoint` on
+    /// `host`: the shared plane transform, everywhere — the schematic is the same
+    /// layout on every canvas, and the host's chrome is *projected* through the same
+    /// transform (see `updateProjectedChrome`), so there are no zones and nothing to
+    /// snap between. Clamped so an extrapolated background point can't wander off a
+    /// smaller canvas.
     private func ghostViewPoint(host: Arranger, hostPoint: CGPoint) -> CGPoint? {
-        if let hostBar = host.barContainer, hostBar.frame.contains(hostPoint) {
-            return VirtualMouse.bottomCenterMapped(hostPoint, hostSize: host.bounds.size,
-                                                   destSize: bounds.size)
-        }
-        if let hostBanner = host.banner, !hostBanner.isHidden, hostBanner.frame.contains(hostPoint) {
-            return VirtualMouse.topCenterMapped(hostPoint, hostSize: host.bounds.size,
-                                                destSize: bounds.size)
-        }
-        if !host.solvePanel.isHidden, host.solvePanel.frame.contains(hostPoint) {
-            return hostPoint   // bottom-left anchored: same coords by construction
-        }
-        // The schematic (and anything unmapped): through the shared plane — the same
-        // layout on every canvas, so a blind drag mirrors exactly. Clamped so an
-        // extrapolated background point can't wander off a smaller canvas.
         guard let hostT = host.drawTransform(host.currentRects()),
               let myT = drawTransform(currentRects()) else { return nil }
         let p = myT.viewPoint(hostT.planePoint(hostPoint))
