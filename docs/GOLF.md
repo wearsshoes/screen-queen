@@ -24,6 +24,16 @@ entries argue against choices you made on purpose. They're listed anyway; veto f
 - **Dead code**: `Copy.menuShowArranger` (orphaned when the house menu moved into the
   bar); label + mirror cards now share `ArrangerState.effectivePPI(_:)`.
 
+**Second wave** (be13feb → 50dbbc7, "do all the non-design ones"): ledger items
+**2, 3, 4, 8, 10, 13, 14, 15** landed, plus **12** (sessionPlan, with the aspect-link
+invariant now under test — 45 tests total). #9 (DefaultsTable) turned out to be a
+design decision after all: unifying the three stores means migrating their on-disk
+formats (two plist dicts vs. one JSON blob) or a forced abstraction — moved to the
+open list. The banner-rows-array idea (#17) was examined and dropped: the
+kind-keyed dictionary + `allCases` ordering is already the simplest true shape.
+Remaining open: **1, 5, 6, 7, 9, 11, 16** and the rest of #17 — all genuine
+design calls.
+
 ---
 
 ## The ledger
