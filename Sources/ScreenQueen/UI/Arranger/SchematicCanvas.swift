@@ -50,7 +50,7 @@ final class SchematicCanvasHost: NSHostingView<SchematicCanvasView> {
 
 /// `drawSchematic(in:size:)` orchestrates the schematic in paint order. The subjects
 /// live in their own files — the minimap (Minimap/Stage+Tiles, +TileSeams,
-/// +TileMarkers) and the on-glass halves (Chrome/EdgeSeams, EdgeMarkers).
+/// +TileMarkers) and the on-glass halves (Chrome/Glass/EdgeSeams, EdgeMarkers).
 extension Stage {
 
     func drawSchematic(in ctx: GraphicsContext, size: CGSize) {

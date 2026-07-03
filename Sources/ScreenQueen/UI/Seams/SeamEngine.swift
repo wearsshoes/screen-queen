@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The machinery both seam depictions share — the tile-space bars (Stage+TileSeams)
-/// and the on-glass edge bars (Chrome/EdgeSeams): one seam's two depictions share
+/// and the on-glass edge bars (Chrome/Glass/EdgeSeams): one seam's two depictions share
 /// color, glow rendering, and emitter registration.
 ///
 /// The edge set is computed once (`miniBarEdges`/`edgeBarEdges`, pure); the draw pass

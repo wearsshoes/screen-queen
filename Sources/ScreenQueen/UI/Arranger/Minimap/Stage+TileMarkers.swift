@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Alignment feedback on the minimap: the eight per-tile anchor notches, the paired
 /// arrows for the active alignment, and the ⌘⇧ align-destination ghosts. The on-glass
-/// counterpart (the big arrow at this screen's real edges) is Chrome/EdgeMarkers.
+/// counterpart (the big arrow at this screen's real edges) is Chrome/Glass/EdgeMarkers.
 extension Stage {
 
     /// The eight perimeter anchor positions (corners + edge midpoints).

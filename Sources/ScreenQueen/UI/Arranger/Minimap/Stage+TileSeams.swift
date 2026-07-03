@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The seam system's map half: the mini-map reference bars, in tile space — the
 /// reference window shown on each side of a seam at its own physical size (the size
-/// jump a window makes crossing it). The on-glass half lives in Chrome/EdgeSeams.swift;
+/// jump a window makes crossing it). The on-glass half lives in Chrome/Glass/EdgeSeams.swift;
 /// the shared glow/emitter engine in Seams/SeamEngine.swift.
 extension Stage {
 

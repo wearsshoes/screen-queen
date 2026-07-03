@@ -45,42 +45,34 @@ most of the weird wiring below.
 | `Stage+TileSeams.swift` | The mini reference bars flanking each seam, in tile space. |
 | `Stage+TileMarkers.swift` | The eight anchor notches, paired alignment arrows, ⌘⇧ align-destination ghosts. Owns the shared arrow art. |
 
-**Elements that scale with the minimap** (they live in `Chrome/` but their size
-is `chromeTileScale` and their position is plane-inches from screen centre):
+**Elements that scale with the minimap** — sorted into `Chrome/Map/` (size is
+`chromeTileScale`, position is plane-inches from screen centre):
 
-- `ButtonBar` + footer — sized by `chromeTileScale`, placed via `chromeViewRect`.
-- `SolvePanel` — natural size × tile scale; its centre is a plane-inch offset in shared state.
-- `LabelCard` — font scale derived from `viewScale / ppi` (the true-size preview).
-- `Beacon` — constant-size marker but *positioned* on the minimap (cursor → plane → view).
+- `Chrome/Map/ButtonBar.swift` + footer — sized by `chromeTileScale`, placed via `chromeViewRect`.
+- `Chrome/Map/SolvePanel.swift` — natural size × tile scale; its centre is a plane-inch offset in shared state.
+- `Chrome/Map/LabelCard.swift` — the deliberate hybrid: position rides the tiles, plate is fitting-size, but font scale is `viewScale / ppi` (the true-size preview) — the one place the two regimes are crossed on purpose.
 
 ## Global map — the real desk
 
-This layer has **no home file today**. Its logic lives in:
+Home: `UI/GlobalMap.swift` — the one CG↔Cocoa flip, the displayID↔NSScreen table,
+cursor→host-display, and the uniform Dock/menu-bar insets (landed in the Ensemble
+refactor, Phase 1). The calibration edge/placement math lives in
+`CalibrationMath.sessionPlan`.
 
-- `Arranger.cocoaGlobal(fromCG:)` — CG global (y-down) → Cocoa global (y-up).
-- `SeamLights.cocoaRect(_:)` — the *same flip*, hand-rolled a second time.
-- `Arranger.updateChromeMetrics()` — max Dock/menu-bar insets, min screen extent.
-- `Arranger.screenMap()` — displayID → NSScreen.
-- `NSScreen+DisplayID.swift` — the id↔screen bridge (also used by Services).
-- `CalibrationController`'s edge/placement math — which screen edge faces which display, full-edge extents.
-
-**Elements that scale with the global map** (this screen's own points / PPI):
+**Glass-anchored chrome** — sorted into `Chrome/Glass/` (this screen's own points
+/ PPI; the map can zoom all it wants, these don't move):
 
 | File | What it is |
 |---|---|
-| `Chrome/EdgeSeams.swift` | Full-screen bars hugging this screen's real edges; constant *physical* thickness (inches × PPI); rescales during a zoom preview (`axisReal / axisPreview`). |
-| `Chrome/EdgeMarkers.swift` | The active alignment arrow drawn large at this screen's real edges. |
-| `Calibration/CalibrationTape.swift` | A ruler whose graduations *are* the pitch — the purest global-map element in the app, currently living in its own parallel universe (see findings). |
-| `Seams/SeamLights.swift` | The always-on 2px seam strips — global-map geometry rendered as tiny windows. |
-
-**Screen-anchored chrome** (constant size, this screen's points, neither map):
-
-| File | What it is |
-|---|---|
-| `Chrome/CountdownBanner.swift` | Top-of-screen countdown rows on every screen. The only chrome placed with Auto Layout constraints — everyone else uses manual frames. |
-| `Chrome/MirrorColumn.swift` | Right-edge column: mirrored-display cards + AirPlay card. Islanded; buttons swallow their own clicks. |
-| `Chrome/TooltipBubble.swift` | The Comic Sans bubble trailing the (ghost) cursor on every stage. |
-| `Chrome/VirtualMouse.swift` | Feature flags + `GhostTintable` + `GhostCursorLayer` (never scales — cursors don't zoom). QuartzCore-only. |
+| `Chrome/Glass/EdgeSeams.swift` | Full-screen bars hugging this screen's real edges; constant *physical* thickness (inches × PPI); rescales during a zoom preview (`axisReal / axisPreview`). |
+| `Chrome/Glass/EdgeMarkers.swift` | The active alignment arrow drawn large at this screen's real edges. |
+| `Chrome/Glass/CountdownBanner.swift` | Top-of-screen countdown rows on every screen (uniform menu-bar inset). The only chrome placed with Auto Layout constraints — everyone else uses manual frames. |
+| `Chrome/Glass/MirrorColumn.swift` | Right-edge column: mirrored-display cards + AirPlay card. Islanded; buttons swallow their own clicks. |
+| `Chrome/Glass/TooltipBubble.swift` | The Comic Sans bubble trailing the (ghost) cursor on every stage. Fixed size. |
+| `Chrome/Glass/VirtualMouse.swift` | `GhostCursorLayer` (never scales — cursors don't zoom; `Prefs` gates the act). QuartzCore-only. |
+| `Chrome/Glass/Beacon.swift` | The pulsing map-pin: fixed-size art (glass), *positioned* on the minimap (cursor → plane → view). |
+| `Calibration/CalibrationTape.swift` | A ruler whose graduations *are* the pitch — the purest glass element in the app (its own windows, same regime). |
+| `Seams/SeamLights.swift` | The always-on 2px seam strips — glass geometry rendered as tiny windows. |
 
 ## Inputs
 
