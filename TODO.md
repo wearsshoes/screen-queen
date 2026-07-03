@@ -5,8 +5,11 @@
 * attach notarized build to a GitHub Release
 
 **Before strangers run it (recommended, not blocking):**
-* tests for the hotplug/profile logic (handleProfiles, repinSurvivors) — the code most
-  likely to silently scramble someone's monitors
+* ✅ DONE — hotplug/profile decision logic tested: the branch selection
+  (HotplugMath.transition) and repin apply-vs-solve (repinDecision) are pure
+  with 10 cases; the orchestration in AppDelegate+Hotplug just switches on
+  them. Still untested (thin, side-effectful): applyProfile / dockNewcomer
+  wiring against DisplayManager.
 
 **Post-launch (can wait):**
 * Homebrew cask
