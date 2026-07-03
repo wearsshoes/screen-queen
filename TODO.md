@@ -67,8 +67,12 @@
   6. ✅ DONE — AppDelegate split (742 → ~280 shell + Commands + Hotplug); pure hotplug
      rules in `Domain/HotplugMath` with the long-wanted tests (adjacency, validity,
      twin-join, dock placement).
-  7. Calibration.swift (1104 lines) wants the same subject split as Arranger
-     (controller / panel / tape drawing) — its own pass.
+  7. ✅ DONE — Calibration split (controller / panel / tape) + standalone-overlay
+     redundancy trimmed: dead CalibrationMath fns, unreachable nil-anchor /
+     non-interactive-window fallbacks, seam init reduced to seamEdge; pure pitch
+     and size-inference math into CalibrationMath with tests; NSScreen.displayID
+     replaces five hand-rolled NSScreenNumber lookups; KeyableBorderlessWindow
+     into its own file; BarView renamed TapeView.
   8. ✅ DONE (mechanical moves): Arranger+Drawing split into Seams/Tiles/Markers +
      orchestrator; SeamColorBook + palette out of ArrangerState.swift into SeamPalette
      (SeamLights no longer imports the arranger's state file); DragFont → Services;
