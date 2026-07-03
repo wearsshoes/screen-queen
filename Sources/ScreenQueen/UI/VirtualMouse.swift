@@ -30,29 +30,41 @@ struct GhostKey: Hashable {
     }
 }
 
-/// One control's *ghost self*: the whole element as a solid pink shape (its real self
-/// is the live control; this is the pink twin). Positioned and sized by the
-/// projection, so the bar's shapes still read left-to-right — feed, reset, undo,
-/// slider, done — just in pink.
-final class GhostElementLayer: CAShapeLayer {
+/// One control's *ghost self*: the same element, pink and non-interactive — a
+/// translucent pink capsule (it keeps the glass's see-through feel) carrying the
+/// control's own icon, so a ghosted Done still wears its checkmark. Positioned and
+/// sized by the projection.
+final class GhostElementLayer: CALayer {
+
+    private let icon = CALayer()
 
     override init() {
         super.init()
         let pink = ArrangerState.seamPalette[0]
-        fillColor = pink.withAlphaComponent(0.85).cgColor
-        strokeColor = (pink.blended(withFraction: 0.35, of: .white) ?? pink).cgColor
-        lineWidth = 1.5
+        backgroundColor = pink.withAlphaComponent(0.38).cgColor   // translucent like the glass
+        borderColor = pink.withAlphaComponent(0.9).cgColor
+        borderWidth = 1.5
+        masksToBounds = true
+        icon.contentsGravity = .resizeAspect
+        addSublayer(icon)
         isHidden = true
     }
 
-    /// Fit the pink shape to `rect` (this canvas's view coords — may run off-screen,
-    /// which is fine). `radius` is the corner already scaled to the projection.
-    func update(around rect: CGRect, radius: CGFloat) {
+    /// Fit the pink twin to `rect` (this canvas's view coords — may run off-screen,
+    /// which is fine). `radius` is the corner already scaled to the projection;
+    /// `iconImage` is the control's own glyph (nil for the slider/panel).
+    func update(around rect: CGRect, radius: CGFloat, iconImage: CGImage?) {
         guard !rect.isEmpty else { isHidden = true; return }
         frame = rect
-        let radius = max(0, min(radius, rect.height / 2))
-        path = CGPath(roundedRect: CGRect(origin: .zero, size: rect.size),
-                      cornerWidth: radius, cornerHeight: radius, transform: nil)
+        cornerRadius = max(0, min(radius, rect.height / 2))
+        if let iconImage {
+            icon.contents = iconImage
+            let s = min(bounds.width, bounds.height) * 0.55
+            icon.frame = CGRect(x: (bounds.width - s) / 2, y: (bounds.height - s) / 2, width: s, height: s)
+            icon.isHidden = false
+        } else {
+            icon.isHidden = true
+        }
         isHidden = false
     }
 
@@ -90,18 +102,19 @@ extension Arranger {
                 let scale = r.height > 0 ? out.height / r.height : 1
                 return (out, scale)
             }
-            func paint(_ element: GhostKey.Element, _ srcRect: CGRect, corner: CGFloat) {
+            func paint(_ element: GhostKey.Element, _ srcRect: CGRect, corner: CGFloat, icon: CGImage? = nil) {
                 let key = GhostKey(display: srcID, element: element)
                 let p = project(srcRect)
-                ghostLayer(key).update(around: p.rect, radius: corner * p.scale)
+                ghostLayer(key).update(around: p.rect, radius: corner * p.scale, iconImage: icon)
                 live.insert(key)
             }
             // The bar buttons (the slider + scope share one glass pill: project the
-            // whole pill once, keyed on the slider).
+            // whole pill once, keyed on the slider). Each carries its own glyph.
             for (control, view) in source.barCapsules where control != .scope {
                 let cap = (control == .slider ? (source.sliderPillView ?? view) : view)
                 let r = cap.convert(cap.bounds, to: source)
-                paint(.bar(control), r, corner: r.height / 2)
+                paint(.bar(control), r, corner: r.height / 2,
+                      icon: Self.tinted(source.barButtonImage(control)))
             }
             if let banner = source.banner, !banner.isHidden {
                 for kind in ArrangerState.CountdownKind.allCases {
@@ -118,6 +131,32 @@ extension Arranger {
     }
 
     func hideGhostChrome() { ghostLayers.values.forEach { $0.isHidden = true } }
+
+    /// The SF Symbol image the real button wears, for the ghost to carry too. (The
+    /// slider pill has no glyph.)
+    func barButtonImage(_ control: BarControl) -> NSImage? {
+        switch control {
+        case .feed: return feedButton.image
+        case .reset: return resetButton.image
+        case .undo: return undoButton.image
+        case .done: return doneButton.image
+        case .slider, .scope: return nil
+        }
+    }
+
+    /// A template symbol tinted white for legibility on the pink twin. nil passes
+    /// through (no glyph → no icon layer).
+    fileprivate static func tinted(_ image: NSImage?) -> CGImage? {
+        guard let image, image.size.width > 0, image.size.height > 0 else { return nil }
+        let out = NSImage(size: image.size)
+        out.lockFocus()
+        image.draw(in: CGRect(origin: .zero, size: image.size))
+        NSColor.white.withAlphaComponent(0.92).set()
+        CGRect(origin: .zero, size: image.size).fill(using: .sourceAtop)
+        out.unlockFocus()
+        var r = CGRect(origin: .zero, size: image.size)
+        return out.cgImage(forProposedRect: &r, context: nil, hints: nil)
+    }
 
     private func ghostLayer(_ key: GhostKey) -> GhostElementLayer {
         if let layer = ghostLayers[key] { return layer }
