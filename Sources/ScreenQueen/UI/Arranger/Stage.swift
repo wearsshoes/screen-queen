@@ -363,11 +363,20 @@ enum ChromeMetrics {
 /// gesture, Stage, and view space are all the same y-down coordinates.
 struct StageCanvasView: View {
     weak var stage: Stage?
-    /// Bumped by `repaintCanvas()` — the Canvas closure re-runs when inputs change.
+    /// Bumped by `repaintCanvas()` for the *stage-local* render inputs (drag points,
+    /// frozen transforms) that Observation can't see.
     var generation: Int
 
     var body: some View {
-        Canvas { ctx, size in
+        // Observation: the render pass's model reads, touched in body — reads inside
+        // the Canvas closure aren't tracked. Any model mutation repaints every canvas,
+        // broadcast or no; the stage-local drag state rides `generation`.
+        if let m = stage?.model {
+            _ = (m.plane, m.displays, m.selectedID, m.pendingModes, m.showAlignGhosts,
+                 m.draggingDisplayID, m.lockedPointOrigins, m.feedEnabled,
+                 m.activeV, m.activeH, m.pendingMainID)
+        }
+        return Canvas { ctx, size in
             _ = generation
             stage?.render(in: ctx, size: size)
         }
