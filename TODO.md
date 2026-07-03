@@ -22,6 +22,11 @@
   guts (`CGDirectDisplay`, `CGDisplayMode`, arrangement/mirroring), event/hotkey plumbing
   (`CGEvent`, `CGEventSource`), ScreenCaptureKit feeds, EDID/PPI via IOKit, Dock config via
   `UserDefaults`. These are Core-level C/system APIs with no UI-framework equivalent.
+* Port progress (July 2026): ✅ countdown banner (first NSHostingView island),
+  ✅ Backstage Pass + debug window, ✅ button bar (ArrangerBarView; BarMetrics /
+  HoverGlassView / GhostGlassPill / ArrangerSliderCell dissolved — ghost tint and
+  scale are model inputs now). Remaining: Canvas (the big one), label cards /
+  solve panel / tooltip bubble, menu-bar item → MenuBarExtra, input last.
 * Portable to SwiftUI (was AppKit by choice, not necessity):
   - Menu-bar 👑 item + menu → `MenuBarExtra` (first-class now; supports `.window` style for
     rich content). Replaces `NSStatusItem`. Caveat: no programmatic open/close and less
