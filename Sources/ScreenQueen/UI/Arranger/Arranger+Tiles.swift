@@ -296,15 +296,15 @@ extension Arranger {
         let card = ensureLabelCard(for: display.id)
         card.frame = box
         card.isHidden = false
-        card.update(LabelCard.Content(
-            lines: visible.map { LabelCard.Line(text: $0.0, font: $0.1, color: $0.2) },
+        card.update(LabelCardContent(
+            lines: visible.map { LabelCardContent.Line(text: $0.0, font: $0.1, color: $0.2) },
             selected: selected, gap: gap))
     }
 
     /// The frosted info card for `id`, created on demand and added above the drawn tiles.
-    private func ensureLabelCard(for id: CGDirectDisplayID) -> LabelCard {
+    private func ensureLabelCard(for id: CGDirectDisplayID) -> LabelCardHost {
         if let c = labelCards[id] { return c }
-        let c = LabelCard(frame: .zero)
+        let c = LabelCardHost(rootView: LabelCardView(content: LabelCardContent()))
         addSubview(c)
         labelCards[id] = c
         return c

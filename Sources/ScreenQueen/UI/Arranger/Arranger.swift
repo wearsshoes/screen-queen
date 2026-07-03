@@ -56,7 +56,7 @@ final class Arranger: NSView {
 
     /// The frosted info card per display (see `LabelCard`) — a real backdrop-blur subview,
     /// repositioned to the tile each frame; created on demand, hidden when untouched.
-    var labelCards: [CGDirectDisplayID: LabelCard] = [:]
+    var labelCards: [CGDirectDisplayID: LabelCardHost] = [:]
 
     /// Fired at the end of `layout()`, once `bounds` is final, so the chrome re-renders
     /// with the settled size.
