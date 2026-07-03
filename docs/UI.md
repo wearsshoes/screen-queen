@@ -37,20 +37,27 @@ most of the weird wiring below.
 | `Stage+Resolution.swift` | ⌘± single-display steps, ⌘⇧± global proportional zoom, preview/commit of pending modes. Thin live-system wrapper over `ResolutionLadder`. |
 | `Stage+Menu.swift` | The per-tile right-click NSMenu (resolution submenu, calibration entries) + its `@objc` actions. |
 
-## Minimap — subjects drawn at `transform.scale` (`UI/Arranger/Minimap/`)
+## Minimap — its own type (`UI/Arranger/Minimap/`)
+
+`Minimap` is a class, one per stage (owned by it) — not Stage extensions — so its
+subjects keep their own storage (caches, card hosts, the beacon layer). The stage
+stays the input owner and its render pass sets paint order.
 
 | File | What it is |
 |---|---|
-| `Stage+Tiles.swift` | Tiles: fill, wallpaper/live feed, letterbox hatching, menu-bar strip, Dock miniature, selected halo — plus label-card layout (subview placement, so refresh-path). |
-| `Stage+TileSeams.swift` | The mini reference bars flanking each seam, in tile space. |
-| `Stage+TileMarkers.swift` | The eight anchor notches, paired alignment arrows, ⌘⇧ align-destination ghosts. Owns the shared arrow art. |
+| `Minimap.swift` | The type: stage ref, tile corner radius, the caches, card hosts, beacon layer. |
+| `Tiles.swift` | Tiles: fill, wallpaper/live feed, letterbox hatching, menu-bar strip, Dock miniature, selected halo — plus label-card layout (subview placement, so refresh-path). |
+| `TileSeams.swift` | The mini reference bars flanking each seam, in tile space. |
+| `TileMarkers.swift` | The eight anchor notches, paired alignment arrows, ⌘⇧ align-destination ghosts. Owns the shared arrow art (Glass/EdgeMarkers borrows it). |
+| `LabelCard.swift` | The frosted info card — position rides the tiles; font scale is `viewScale / ppi` (the true-size preview), the one deliberate crossing of the regimes. |
+| `Beacon.swift` | The pulsing map-pin at the cursor's minimap location (cursor → plane → view). Fixed-size art — map pins don't zoom. |
 
-**Elements that scale with the minimap** — sorted into `Chrome/Map/` (size is
-`chromeTileScale`, position is plane-inches from screen centre):
+**Scene-referred chrome** — `Chrome/SceneReferred/`: chrome that takes its scale cue
+from the scene (size is `chromeTileScale`, position is plane-inches from screen
+centre) without being *of* the minimap:
 
-- `Chrome/Map/ButtonBar.swift` + footer — sized by `chromeTileScale`, placed via `chromeViewRect`.
-- `Chrome/Map/SolvePanel.swift` — natural size × tile scale; its centre is a plane-inch offset in shared state.
-- `Chrome/Map/LabelCard.swift` — the deliberate hybrid: position rides the tiles, plate is fitting-size, but font scale is `viewScale / ppi` (the true-size preview) — the one place the two regimes are crossed on purpose.
+- `ButtonBar.swift` + footer — sized by `chromeTileScale`, placed via `chromeViewRect`.
+- `SolvePanel.swift` — natural size × tile scale; its centre is a plane-inch offset in shared state.
 
 ## Global map — the real desk
 
@@ -70,7 +77,6 @@ refactor, Phase 1). The calibration edge/placement math lives in
 | `Chrome/Glass/MirrorColumn.swift` | Right-edge column: mirrored-display cards + AirPlay card. Islanded; buttons swallow their own clicks. |
 | `Chrome/Glass/TooltipBubble.swift` | The Comic Sans bubble trailing the (ghost) cursor on every stage. Fixed size. |
 | `Chrome/Glass/VirtualMouse.swift` | `GhostCursorLayer` (never scales — cursors don't zoom; `Prefs` gates the act). QuartzCore-only. |
-| `Chrome/Glass/Beacon.swift` | The pulsing map-pin: fixed-size art (glass), *positioned* on the minimap (cursor → plane → view). |
 | `Calibration/CalibrationTape.swift` | A ruler whose graduations *are* the pitch — the purest glass element in the app (its own windows, same regime). |
 | `Seams/SeamLights.swift` | The always-on 2px seam strips — glass geometry rendered as tiny windows. |
 
@@ -101,7 +107,8 @@ refactor, Phase 1). The calibration edge/placement math lives in
 | `Seams/SeamEngine.swift` | The shared seam machinery: edge registration for both depictions, behind-glow painting, flip-invariant particle directions. |
 | `Seams/SeamEmitters.swift` | CAEmitterLayer sparkles, cell-keyed so moving bars leave wakes. GPU, no frame loop. |
 | `Seams/SeamGlow.swift` | The tight front glow, one gradient layer per edge, begin/add/commit lifecycle. |
-| `Seams/SeamPalette.swift` | The palette + `SeamColorBook` (the one seam→color assignment) + `ArrangerState.seamColors`. The one NSColor home. |
+| `UI/SeamPalette.swift` | The house palette (colors only — the lead pink dresses ghost chrome, cursor aids, beacon, tape chalk). |
+| `Seams/SeamEngine.swift` | The seam machinery: `SeamColorBook` (the one seam→color assignment) + `ArrangerState.seamColors` + `SeamEngine.committedSeams` (stage-free detection over the real desk) + the Stage-side glow/emitter registration. |
 | `GhostCursorLayer`, `PlaneMouseMarkerLayer` | Layer critters in their feature files (VirtualMouse, Beacon). |
 
 ## Copy
