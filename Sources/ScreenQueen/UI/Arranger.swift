@@ -65,13 +65,11 @@ final class Arranger: NSView {
     /// unused or when their feature flags are off).
     var planeMarkerLayer: PlaneMouseMarkerLayer?
     var ghostCursorLayer: GhostCursorLayer?
-    /// The halo over the twin of the control the cursor is on (VirtualMouse.swift).
+    /// The halo brightening the ghost of the control the cursor is on (VirtualMouse.swift).
     var ghostHighlightLayer: GhostHighlightLayer?
-    /// Dashed "the cursor isn't here" outlines per chrome piece, driven by presence.
-    var ghostFrames: [ChromePiece: GhostFrameLayer] = [:]
-    /// The HOST screen's chrome projected onto this canvas through the plane transform
-    /// (dashed outlines the ghost arrow can honestly be "on" — VirtualMouse.swift).
-    var projectedGhostFrames: [ChromePiece: GhostFrameLayer] = [:]
+    /// Per-control pink ghost overlays (the buttons wear the ghost), driven by the
+    /// cursor's distance from this screen. Keyed so each control's layer persists.
+    var ghostElementLayers: [GhostElementKey: GhostElementLayer] = [:]
 
     /// The bar's controls by role, for the ghost's twin lookup (same six controls on
     /// every canvas). On macOS 26 the circle capsules stand in for their buttons —

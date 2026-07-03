@@ -13,15 +13,16 @@ import AppKit
 ///      the cursor's screen wears it real, far screens wear the dashed ghost frame.
 ///      Buttons stay functional at any presence: blind clicks are the feature,
 ///      because every control acts on shared state (the twin of Done IS Done).
-///   2. *The ghost arrow*: on cursor-less canvases, the cursor mirrored through the
-///      ONE plane (minimap) transform — everywhere, chrome included, so nothing ever
-///      snaps between coordinate regimes. The host's chrome is *projected* through
-///      the same transform as dashed outlines that materialize as the cursor nears
-///      them, so the arrow is honestly "on" the projected bar when the real cursor
-///      is on the real one (a slider scrub mirrors live, by construction).
-///   3. *The halo* (`GhostHighlightLayer`): the projected outline of the control
-///      under the cursor lights up on every other canvas — "she's on Done," readable
-///      at a glance, and exactly where the arrow already is.
+///   2. *The pink chrome*: on a cursor-less screen the controls wear the ghost
+///      themselves — each button a pink outline and wash (`GhostElementLayer`),
+///      fading in with the cursor's distance from this screen. No box around empty
+///      space; the buttons *are* the ghost, and they sit exactly where the real
+///      chrome sits, so it's the one indication that distance-matches the real.
+///   3. *The ghost arrow* + *halo*: over the schematic, the cursor mirrored through
+///      the plane (minimap) transform — one mapping, so it never snaps. Over a
+///      control the arrow steps aside and that control's ghost lights up brighter
+///      (`GhostHighlightLayer`, with a click flash) — "she's on Done," readable at
+///      a glance.
 ///
 /// Each aid is deliberately styled as *not the real cursor* — pins, dashes, halos,
 /// never an opaque arrow. Flip either flag to bench that girl; they're independent.
@@ -79,8 +80,13 @@ enum GhostTarget: Hashable {
     case banner(ArrangerState.CountdownKind, CountdownBanner.Role)
 }
 
-/// The chrome pieces that carry presence (alpha + ghost frame).
-enum ChromePiece: Hashable { case bar, banner, panel }
+/// A single chrome control that wears the ghost itself (pink outline + wash), keyed
+/// so its overlay layer persists frame to frame.
+enum GhostElementKey: Hashable {
+    case bar(BarControl)
+    case banner(ArrangerState.CountdownKind, CountdownBanner.Role)
+    case panel
+}
 
 // MARK: - Layers
 
@@ -216,29 +222,33 @@ final class GhostHighlightLayer: CAShapeLayer {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-/// The ghost frame: a dashed outline around a whole chrome piece whose presence has
-/// faded — "these controls work, but the cursor isn't here."
-final class GhostFrameLayer: CAShapeLayer {
+/// A chrome control's own ghost: a pink outline and translucent wash laid right over
+/// the real button, fading in with the cursor's distance. The buttons *are* the
+/// ghost — no bounding box around empty space.
+final class GhostElementLayer: CAShapeLayer {
 
     override init() {
         super.init()
         let pink = ArrangerState.seamPalette[0]
-        fillColor = nil
+        fillColor = pink.withAlphaComponent(0.22).cgColor
         strokeColor = pink.cgColor
-        lineWidth = 1.5
-        lineDashPattern = [5, 4]
+        lineWidth = 2
+        shadowColor = pink.cgColor
+        shadowOpacity = 0.7
+        shadowRadius = 5
+        shadowOffset = .zero
         isHidden = true
     }
 
-    /// Wrap `rect` (view coords); `strength` 0 hides it (fully "real" chrome).
+    /// Lay the ghost over `rect` (view coords); `strength` 0 hides it (chrome fully
+    /// real — the cursor's own screen).
     func update(around rect: CGRect, radius: CGFloat, strength: CGFloat) {
         guard strength > 0.02, !rect.isEmpty else { isHidden = true; return }
-        let r = rect.insetBy(dx: -4, dy: -4)
-        frame = r
-        path = CGPath(roundedRect: CGRect(origin: .zero, size: r.size),
-                      cornerWidth: min(radius, r.height / 2), cornerHeight: min(radius, r.height / 2),
-                      transform: nil)
-        opacity = Float(strength * 0.9)
+        frame = rect
+        let radius = min(radius, rect.height / 2)
+        path = CGPath(roundedRect: CGRect(origin: .zero, size: rect.size),
+                      cornerWidth: radius, cornerHeight: radius, transform: nil)
+        opacity = Float(min(1, strength))
         isHidden = false
     }
 
@@ -258,11 +268,10 @@ extension Arranger {
     /// control the cursor is on (frozen by ArrangerWindows for a press-drag's
     /// duration — "outside of a drag action" gating lives there).
     ///
-    /// ONE mapping, no snapping: everything the ghost shows — the arrow, the halo,
-    /// the projected chrome outlines — rides the same plane (minimap) transform, so
-    /// nothing ever jumps between coordinate regimes. When the cursor is on the
-    /// host's Done, the arrow sits inside the *projection* of the host's bar here,
-    /// by construction.
+    /// Two indications, no snapping: this screen's own chrome wears the ghost
+    /// (`applyChromePresence`, distance-driven, where the real chrome sits), and the
+    /// arrow rides the ONE plane (minimap) transform over the schematic — stepping
+    /// aside over a control so its ghost can light up instead.
     func updateMouseOverlays(cursor: CGPoint, hostID: CGDirectDisplayID?,
                              host: Arranger?, hostPoint: CGPoint?, target: GhostTarget?) {
         ensureMouseLayers()
@@ -285,66 +294,62 @@ extension Arranger {
             // The real cursor is here (or nowhere we know): the lead is on stage.
             ghost.isHidden = true
             ghostHighlightLayer?.isHidden = true
-            projectedGhostFrames.values.forEach { $0.isHidden = true }
             return
         }
-        if let p = ghostViewPoint(host: host, hostPoint: hostPoint) {
-            ghost.isHidden = false
-            ghost.position = p
-        } else {
+        if let target, let myRect = rect(of: target) {
+            // The cursor's on a control: light up THIS screen's own ghost of it (the
+            // one that sits where the real control sits) brighter, and step the arrow
+            // aside — over chrome the pink buttons carry the story, not a pointer.
             ghost.isHidden = true
-        }
-        updateProjectedChrome(host: host, hostPoint: hostPoint)
-        if let target, let hostRect = host.rect(of: target),
-           let myRect = projected(hostRect, from: host) {
-            // On a control: halo its *projection* — where the arrow already is.
             ghostHighlightLayer?.show(over: myRect)
         } else {
             ghostHighlightLayer?.isHidden = true
-        }
-    }
-
-    /// Project the host's chrome pieces onto this canvas through the shared plane —
-    /// dashed outlines that materialize as the cursor nears each piece (opacity is
-    /// the only thing that changes; positions ride the one transform). They give the
-    /// arrow something to be "on" when it hovers the host's chrome, without any
-    /// coordinate hand-offs.
-    private func updateProjectedChrome(host: Arranger, hostPoint: CGPoint) {
-        func strength(near rect: CGRect) -> CGFloat {
-            let dx = max(0, max(rect.minX - hostPoint.x, hostPoint.x - rect.maxX))
-            let dy = max(0, max(rect.minY - hostPoint.y, hostPoint.y - rect.maxY))
-            return VirtualMouse.smoothstep(1 - min(hypot(dx, dy) / 80, 1))
-        }
-        func update(_ piece: ChromePiece, hostRect: CGRect?, radius: CGFloat) {
-            guard let hostRect, let r = projected(hostRect, from: host) else {
-                projectedGhostFrames[piece]?.isHidden = true
-                return
+            if let p = ghostViewPoint(host: host, hostPoint: hostPoint) {
+                ghost.isHidden = false
+                ghost.position = p
+            } else {
+                ghost.isHidden = true
             }
-            projectedGhostFrame(piece).update(around: r, radius: radius, strength: strength(near: hostRect))
         }
-        update(.bar, hostRect: host.barContainer?.frame,
-               radius: (host.barContainer?.frame.height ?? 0) / 2)
-        update(.banner, hostRect: (host.banner?.isHidden == false) ? host.banner?.frame : nil, radius: 18)
-        update(.panel, hostRect: host.solvePanel.isHidden ? nil : host.solvePanel.frame, radius: 6)
     }
 
-    /// A host-canvas rect mapped onto this canvas through the shared plane (both
-    /// transforms are scale+translate, so a rect maps to a rect).
-    func projected(_ rect: CGRect, from host: Arranger) -> CGRect? {
-        guard let hostT = host.drawTransform(host.currentRects()),
-              let myT = drawTransform(currentRects()) else { return nil }
-        let a = myT.viewPoint(hostT.planePoint(CGPoint(x: rect.minX, y: rect.minY)))
-        let b = myT.viewPoint(hostT.planePoint(CGPoint(x: rect.maxX, y: rect.maxY)))
-        return CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
-                      width: abs(b.x - a.x), height: abs(b.y - a.y))
+    /// This screen's chrome wears the ghost itself: each control gets a pink outline
+    /// and wash that fades in as the cursor leaves this screen (presence → 0). The
+    /// buttons *are* the ghost — no box around empty space — and they sit where the
+    /// real chrome sits, so this is the indication that distance-matches the real.
+    private func applyChromePresence(cursor: CGPoint) {
+        guard let id = centerID else { return }
+        let strength = 1 - VirtualMouse.presence(cursor: cursor, screenBounds: CGDisplayBounds(id))
+        var live: Set<GhostElementKey> = []
+        func paint(_ key: GhostElementKey, _ rect: CGRect, radius: CGFloat) {
+            ghostElement(key).update(around: rect, radius: radius, strength: strength)
+            live.insert(key)
+        }
+        if strength > 0.02 {
+            for (control, view) in barCapsules {
+                let r = view.convert(view.bounds, to: self)
+                paint(.bar(control), r, radius: r.height / 2)
+            }
+            if let banner, !banner.isHidden {
+                for kind in ArrangerState.CountdownKind.allCases {
+                    for role in [CountdownBanner.Role.keep, .act] {
+                        if let r = banner.buttonRect(kind: kind, role: role) {
+                            paint(.banner(kind, role), banner.convert(r, to: self), radius: 8)
+                        }
+                    }
+                }
+            }
+            if !solvePanel.isHidden { paint(.panel, solvePanel.frame, radius: 6) }
+        }
+        for (key, layer) in ghostElementLayers where !live.contains(key) { layer.isHidden = true }
     }
 
-    private func projectedGhostFrame(_ piece: ChromePiece) -> GhostFrameLayer {
-        if let layer = projectedGhostFrames[piece] { return layer }
-        let layer = GhostFrameLayer()
+    private func ghostElement(_ key: GhostElementKey) -> GhostElementLayer {
+        if let layer = ghostElementLayers[key] { return layer }
+        let layer = GhostElementLayer()
         layer.zPosition = 5
         self.layer?.addSublayer(layer)
-        projectedGhostFrames[piece] = layer
+        ghostElementLayers[key] = layer
         return layer
     }
 
@@ -393,43 +398,6 @@ extension Arranger {
         case .slider: return resSlider.isEnabled
         default: return true
         }
-    }
-
-    // MARK: Presence
-
-    /// Crossfade this canvas's chrome real ↔ ghost by cursor proximity (see
-    /// `VirtualMouse.presence`). Alpha carries the fade; the dashed ghost frame
-    /// carries the costume. Controls stay clickable at any presence.
-    private func applyChromePresence(cursor: CGPoint) {
-        guard let id = centerID else { return }
-        let presence = VirtualMouse.presence(cursor: cursor, screenBounds: CGDisplayBounds(id))
-        let alpha = 0.45 + 0.55 * presence
-        let strength = 1 - presence
-        if let bar = barContainer {
-            bar.alphaValue = alpha
-            ghostFrame(.bar).update(around: bar.frame, radius: bar.frame.height / 2, strength: strength)
-        }
-        if let banner, !banner.isHidden {
-            banner.alphaValue = alpha
-            ghostFrame(.banner).update(around: banner.frame, radius: 18, strength: strength)
-        } else {
-            ghostFrames[.banner]?.isHidden = true
-        }
-        if !solvePanel.isHidden {
-            solvePanel.alphaValue = alpha
-            ghostFrame(.panel).update(around: solvePanel.frame, radius: 6, strength: strength)
-        } else {
-            ghostFrames[.panel]?.isHidden = true
-        }
-    }
-
-    private func ghostFrame(_ piece: ChromePiece) -> GhostFrameLayer {
-        if let layer = ghostFrames[piece] { return layer }
-        let layer = GhostFrameLayer()
-        layer.zPosition = 5
-        self.layer?.addSublayer(layer)
-        ghostFrames[piece] = layer
-        return layer
     }
 
     // MARK: Placement math
