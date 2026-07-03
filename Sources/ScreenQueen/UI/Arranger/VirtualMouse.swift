@@ -22,17 +22,6 @@ enum VirtualMouse {
 
     /// Feature flag: the beacon (pulsing map-pin on the schematic, every canvas).
     static let planeMarkerEnabled = true
-
-    /// Map a global cursor point onto the physical plane: its fraction within the
-    /// display's point bounds transfers to the display's plane rect. Both spaces are
-    /// y-down — no flip here; that happens in `Transform.viewPoint`.
-    static func planePoint(cursor: CGPoint, displayBounds: CGRect, planeRect: CGRect) -> CGPoint? {
-        guard displayBounds.width > 0, displayBounds.height > 0 else { return nil }
-        let fx = (cursor.x - displayBounds.minX) / displayBounds.width
-        let fy = (cursor.y - displayBounds.minY) / displayBounds.height
-        return CGPoint(x: planeRect.minX + fx * planeRect.width,
-                       y: planeRect.minY + fy * planeRect.height)
-    }
 }
 
 /// The beacon: a hot-pink dot with a repeating expanding pulse ring (Find-My style) —
@@ -187,15 +176,14 @@ extension Arranger {
     /// Map a point from the active canvas's view coords onto this canvas (the ghost
     /// mapping for the mouse and tooltip). Identity when active.
     func ghostPoint(_ p: CGPoint) -> CGPoint {
-        CGPoint(x: bounds.midX + ghostScale * (p.x - ghostActiveCenter.x),
-                y: bounds.midY + ghostScale * (p.y - ghostActiveCenter.y))
+        ArrangerGeometry.ghostPoint(p, ghostScale: ghostScale, activeCenter: ghostActiveCenter,
+                                    destCenter: CGPoint(x: bounds.midX, y: bounds.midY))
     }
 
     /// Round to the nearest whole *device* pixel — a fractional origin smears content
     /// across pixel boundaries.
     func pixelSnap(_ v: CGFloat) -> CGFloat {
-        let b = window?.backingScaleFactor ?? 2
-        return (v * b).rounded() / b
+        ArrangerGeometry.pixelSnap(v, backingScale: window?.backingScaleFactor ?? 2)
     }
 
     /// Position the footer under this canvas's own bar, font scaled with it (native text
@@ -296,9 +284,9 @@ extension Arranger {
             ? hostID
             : displays.first(where: { $0.id == hostID })?.mirrorMaster ?? hostID
         guard let planeRect = plane[planeID],
-              let pp = VirtualMouse.planePoint(cursor: cursor,
-                                               displayBounds: CGDisplayBounds(hostID),
-                                               planeRect: planeRect) else { return nil }
+              let pp = ArrangerGeometry.planePoint(cursor: cursor,
+                                                   displayBounds: CGDisplayBounds(hostID),
+                                                   planeRect: planeRect) else { return nil }
         return t.viewPoint(pp)
     }
 

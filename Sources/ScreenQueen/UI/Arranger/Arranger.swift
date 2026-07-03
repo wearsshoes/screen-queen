@@ -171,10 +171,8 @@ final class Arranger: NSView {
     /// whose measured size is already final — only the centre needs mapping.
     func chromeViewRect(finalSize size: CGSize, centreOffsetInches off: CGPoint,
                         in t: Transform) -> CGRect {
-        let centre = CGPoint(x: bounds.midX + off.x * t.scale,
-                             y: bounds.midY + off.y * t.scale)
-        return CGRect(x: centre.x - size.width / 2, y: centre.y - size.height / 2,
-                      width: size.width, height: size.height)
+        ArrangerGeometry.chromeViewRect(finalSize: size, centreOffsetInches: off,
+                                        bounds: bounds, scale: t.scale)
     }
 
     /// The granny panel's rect — its centre-relative state through `chromeViewRect`.
@@ -314,32 +312,9 @@ final class Arranger: NSView {
 
     // MARK: - View transform (fit the physical plane into the window)
 
-    struct Transform {
-        let scale: CGFloat            // view px per inch
-        let offset: CGPoint
-        let unionOrigin: CGPoint
-        let viewHeight: CGFloat       // for the single plane→view y-flip
-
-        // The physical plane is y-down (top-left origin, from `CGDisplayBounds`); the view
-        // is y-up. Flip y exactly here — the one gate — so no consumer flips downstream.
-        private func flipY(_ y: CGFloat) -> CGFloat { viewHeight - y }
-
-        func viewRect(_ r: CGRect) -> CGRect {
-            let x = offset.x + (r.minX - unionOrigin.x) * scale
-            let yDown = offset.y + (r.minY - unionOrigin.y) * scale
-            let h = r.height * scale
-            return CGRect(x: x, y: flipY(yDown + h), width: r.width * scale, height: h)
-        }
-        func viewPoint(_ g: CGPoint) -> CGPoint {
-            CGPoint(x: offset.x + (g.x - unionOrigin.x) * scale,
-                    y: flipY(offset.y + (g.y - unionOrigin.y) * scale))
-        }
-        /// Inverse of `viewPoint` (`flipY` is its own inverse, so the round-trip is exact).
-        func planePoint(_ v: CGPoint) -> CGPoint {
-            CGPoint(x: (v.x - offset.x) / scale + unionOrigin.x,
-                    y: (flipY(v.y) - offset.y) / scale + unionOrigin.y)
-        }
-    }
+    /// The plane↔view transform and the fit that chooses it live in `ArrangerGeometry`
+    /// (framework-free, tested); this canvas supplies its own bounds/padding.
+    typealias Transform = ArrangerGeometry.Transform
 
     /// The y-flip gate for content drawn in *this screen's own point space* (y-down)
     /// against the real window bounds (y-up) — the point-space counterpart of
@@ -347,32 +322,6 @@ final class Arranger: NSView {
     func pointYToView(_ y: CGFloat) -> CGFloat { bounds.height - y }
 
     func transform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
-        let values = Array(rects.values)
-        guard let first = values.first else { return nil }
-        let union = values.dropFirst().reduce(first) { $0.union($1) }
-        guard union.width > 0, union.height > 0 else { return nil }
-
-        // Center the whole arrangement at the view midpoint — the same layout on every
-        // screen, rather than pivoting each canvas around its own tile.
-        let focus = CGPoint(x: union.midX, y: union.midY)
-
-        let availW = bounds.width - outerPadding * 2, availH = bounds.height - outerPadding * 2
-
-        // Target zoom: three of the physically-largest display fit across the view,
-        // matching axes, so a landscape screen isn't over-shrunk by its height.
-        let largestW = rects.values.map(\.width).max() ?? union.width
-        let largestH = rects.values.map(\.height).max() ?? union.height
-        let targetScale = min(availW / (3 * max(largestW, 0.0001)),
-                              availH / (3 * max(largestH, 0.0001)))
-
-        // But never overflow: cap so the union fits with padding.
-        let reachX = max(focus.x - union.minX, union.maxX - focus.x)
-        let reachY = max(focus.y - union.minY, union.maxY - focus.y)
-        let fitScale = min(availW / 2 / max(reachX, 0.0001), availH / 2 / max(reachY, 0.0001))
-        let scale = min(targetScale, fitScale)
-
-        let offset = CGPoint(x: bounds.midX - (focus.x - union.minX) * scale,
-                             y: bounds.midY - (focus.y - union.minY) * scale)
-        return Transform(scale: scale, offset: offset, unionOrigin: union.origin, viewHeight: bounds.height)
+        ArrangerGeometry.fit(rects, in: bounds, padding: outerPadding)
     }
 }
