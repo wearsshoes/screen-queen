@@ -23,7 +23,7 @@ struct SchematicCanvasView: View {
                 guard let canvas else { return }
                 let p = CGPoint(x: g.location.x, y: canvas.bounds.height - g.location.y)
                 if canvas.mouseGestureActive { canvas.mouseMoved(to: p) }
-                else { canvas.mouseBegan(at: p) }
+                else { canvas.mouseBegan(at: p, option: NSEvent.modifierFlags.contains(.option)) }
             }
             .onEnded { g in
                 guard let canvas else { return }
@@ -40,5 +40,12 @@ final class SchematicCanvasHost: NSHostingView<SchematicCanvasView> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func menu(for event: NSEvent) -> NSMenu? {
         rootView.canvas?.menu(for: event)
+    }
+    /// Key this screen's arranger on click, before the gesture fires — the AppKit
+    /// half of the click that the framework-free mouseBegan no longer does.
+    override func mouseDown(with event: NSEvent) {
+        window?.makeKeyAndOrderFront(nil)
+        if let canvas = rootView.canvas { window?.makeFirstResponder(canvas) }
+        super.mouseDown(with: event)
     }
 }

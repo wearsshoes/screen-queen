@@ -21,9 +21,18 @@ final class ArrangerWindows {
             events?.onMouseSample = { [weak self] in self?.mouseDidMove() }
             // Keyboard rides monitors, not the responder chain: route to the key
             // window's canvas — the same window AppKit would have dispatched to.
-            events?.onArrangerKeyDown = { [weak self] e in self?.keyCanvas()?.handleKeyDown(e) ?? false }
-            events?.onArrangerKeyUp = { [weak self] e in self?.keyCanvas()?.handleKeyUp(e) ?? false }
-            events?.onArrangerFlagsChanged = { [weak self] e in self?.keyCanvas()?.handleFlagsChanged(e) }
+            // NSEvent is decoded HERE; the handlers speak KeyInput/ModifierKeys.
+            events?.onArrangerKeyDown = { [weak self] e in
+                self?.keyCanvas()?.handleKeyDown(Self.keyInput(e)) ?? false
+            }
+            events?.onArrangerKeyUp = { [weak self] e in
+                self?.keyCanvas()?.handleKeyUp(Self.keyInput(e)) ?? false
+            }
+            events?.onArrangerFlagsChanged = { [weak self] e in
+                let f = e.modifierFlags
+                self?.keyCanvas()?.handleFlagsChanged(
+                    ModifierKeys(cmd: f.contains(.command), shift: f.contains(.shift)))
+            }
         }
     }
 
@@ -313,6 +322,13 @@ final class ArrangerWindows {
         window.makeFirstResponder(canvas)
         canvases.append(canvas)
         return window
+    }
+
+    fileprivate static func keyInput(_ e: NSEvent) -> KeyInput {
+        let f = e.modifierFlags
+        return KeyInput(code: e.keyCode, chars: e.charactersIgnoringModifiers,
+                        cmd: f.contains(.command), shift: f.contains(.shift),
+                        isRepeat: e.isARepeat)
     }
 
     private func screenMap() -> [CGDirectDisplayID: NSScreen] {

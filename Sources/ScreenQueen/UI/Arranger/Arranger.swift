@@ -263,6 +263,17 @@ final class Arranger: NSView {
     /// began from moved with this).
     var mouseGestureActive = false
 
+    /// Shift state fed by handleFlagsChanged — the nudge timer's fast-rate flag
+    /// (kept here so Arranger+Input never reads NSEvent).
+    var shiftHeld = false
+
+    /// Commit any dangling keyboard manipulation when focus moves away.
+    override func resignFirstResponder() -> Bool {
+        if moveTimer != nil { stopMoveTimer(); commitPlane() }
+        if alignPending { alignPending = false; commitPlane() }
+        return super.resignFirstResponder()
+    }
+
     /// Called by the state after a mutation: place the overlay subviews and feed the
     /// effect layers (`draw(_:)` never mutates the view tree or layers), then repaint.
     func refresh() {

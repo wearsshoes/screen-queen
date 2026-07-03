@@ -1,8 +1,26 @@
-import AppKit
+import CoreGraphics
+import Foundation
+
+/// A key event, decoded at the routing boundary (ArrangerWindows) so this file never
+/// touches NSEvent — the handlers speak plain values.
+struct KeyInput {
+    var code: UInt16
+    var chars: String?
+    var cmd: Bool
+    var shift: Bool
+    var isRepeat: Bool
+}
+
+/// The modifier state at a flags change, same decode boundary.
+struct ModifierKeys {
+    var cmd: Bool
+    var shift: Bool
+}
 
 /// Interaction: mouse dragging and keyboard nudge/align/selection. All mutate the shared
 /// `state` and broadcast a redraw. (Resolution/mode handling lives in
-/// Arranger+Resolution; the context menu in Arranger+Menu.)
+/// Arranger+Resolution; the context menu in Arranger+Menu.) Framework-free: events
+/// arrive pre-decoded (KeyInput/ModifierKeys, gesture points, the option flag).
 extension Arranger {
 
     // MARK: - Mouse / dragging
@@ -21,11 +39,10 @@ extension Arranger {
     }
 
     /// Gesture began (the SwiftUI DragGesture's first change — a plain click included).
-    /// `p` is in this view's y-up coordinates.
-    func mouseBegan(at p: CGPoint) {
+    /// `p` is in this view's y-up coordinates; window keying happens in the schematic
+    /// host's mouseDown, before the gesture fires.
+    func mouseBegan(at p: CGPoint, option: Bool) {
         mouseGestureActive = true
-        window?.makeKeyAndOrderFront(nil)   // focus this screen's arranger
-        window?.makeFirstResponder(self)
         // Mirror-column buttons, hit-tested against the same pure layout the draw uses.
         if let hit = mirrorColumnHit(at: p) {
             switch hit {
@@ -45,7 +62,7 @@ extension Arranger {
         draggedID = d.id
         selectedID = d.id
         // Option-drag mirrors: dropping onto another tile mirrors this display onto it.
-        optionMirrorDrag = NSEvent.modifierFlags.contains(.option) && planeDisplays.count > 1
+        optionMirrorDrag = option && planeDisplays.count > 1
         state.draggingDisplayID = d.id   // brighten the grabbed display's screen from click
         state.beginDragLock()            // freeze unmoved displays' point positions for the drag
         dragStartMouse = p
@@ -114,41 +131,38 @@ extension Arranger {
 
     /// Returns true to consume; false lets dispatch continue (the bar's
     /// .keyboardShortcut equivalents, text fields elsewhere).
-    func handleKeyDown(_ event: NSEvent) -> Bool {
-        let flags = event.modifierFlags
-        let cmd = flags.contains(.command), shift = flags.contains(.shift)
-
+    func handleKeyDown(_ key: KeyInput) -> Bool {
         // Escape / Return / ⌘Return = Done (commit & exit).
-        if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 {
+        if key.code == 53 || key.code == 36 || key.code == 76 {
             commander?.dismissArranger(); return true
         }
 
-        if cmd, let ch = event.charactersIgnoringModifiers, "+=-_0".contains(ch) {
-            if !event.isARepeat {
-                if shift { handleGlobalResolutionKey(ch) } else { handleResolutionKey(ch) }
+        if key.cmd, let ch = key.chars, "+=-_0".contains(ch) {
+            if !key.isRepeat {
+                if key.shift { handleGlobalResolutionKey(ch) } else { handleResolutionKey(ch) }
             }
             return true
         }
-        guard let dir = direction(event) else { return false }
+        guard let dir = direction(key) else { return false }
 
-        if cmd && shift {
-            guard !event.isARepeat else { return true }
-            guard selectedID != nil else { NSSound.beep(); return true }
+        if key.cmd && key.shift {
+            guard !key.isRepeat else { return true }
+            guard selectedID != nil else { Chime.beep(); return true }
             stepAlignment(dir)
             alignPending = true
             emitPreview()
-        } else if cmd {
+        } else if key.cmd {
             moveSelection(dir)
         } else {
-            guard selectedID != nil else { NSSound.beep(); return true }
+            guard selectedID != nil else { Chime.beep(); return true }
             beginContinuousMoveIfNeeded()
             heldDirections.insert(dir)
         }
         return true
     }
 
-    func handleKeyUp(_ event: NSEvent) -> Bool {
-        guard let dir = direction(event) else { return false }
+    func handleKeyUp(_ key: KeyInput) -> Bool {
+        guard let dir = direction(key) else { return false }
         if heldDirections.remove(dir) != nil, heldDirections.isEmpty {
             stopMoveTimer()
             commitPlane()
@@ -157,36 +171,30 @@ extension Arranger {
     }
 
     /// Observes modifier changes (never consumes them).
-    func handleFlagsChanged(_ event: NSEvent) {
-        let f = event.modifierFlags
+    func handleFlagsChanged(_ mods: ModifierKeys) {
+        shiftHeld = mods.shift   // the nudge timer reads this for its fast rate
         // Ghost the ⌘⇧ alignment destinations on every display while ⌘⇧ is held.
-        let ghosts = f.contains(.command) && f.contains(.shift) && selectedID != nil && !zoomPending
+        let ghosts = mods.cmd && mods.shift && selectedID != nil && !zoomPending
         if ghosts != showAlignGhosts { showAlignGhosts = ghosts; emitPreview() }
-        if alignPending, !(f.contains(.command) && f.contains(.shift)) {
+        if alignPending, !(mods.cmd && mods.shift) {
             alignPending = false
             emitPreview()
             commitPlane()
         }
-        if zoomPending, !f.contains(.command) {
+        if zoomPending, !mods.cmd {
             commitPendingResolution()
         }
     }
 
-    override func resignFirstResponder() -> Bool {
-        if moveTimer != nil { stopMoveTimer(); commitPlane() }
-        if alignPending { alignPending = false; commitPlane() }
-        return super.resignFirstResponder()
-    }
-
-    private func direction(_ e: NSEvent) -> MoveDirection? {
-        switch e.keyCode {
+    private func direction(_ key: KeyInput) -> MoveDirection? {
+        switch key.code {
         case 123: return .left
         case 124: return .right
         case 125: return .down
         case 126: return .up
         default: break
         }
-        switch e.charactersIgnoringModifiers?.lowercased() {
+        switch key.chars?.lowercased() {
         case "w": return .up
         case "a": return .left
         case "s": return .down
@@ -202,19 +210,19 @@ extension Arranger {
         state.pushUndo()   // snapshot before a nudge run
         nudgeAccum = plane[id]?.origin ?? .zero
         activeV = nil; activeH = nil
-        lastTick = CACurrentMediaTime()
+        lastTick = ProcessInfo.processInfo.systemUptime
         moveTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
             self?.moveTick()
         }
     }
 
-    private func stopMoveTimer() { moveTimer?.invalidate(); moveTimer = nil }
+    func stopMoveTimer() { moveTimer?.invalidate(); moveTimer = nil }
 
     private func moveTick() {
         guard let id = selectedID, !heldDirections.isEmpty,
               let sel = displays.first(where: { $0.id == id }) else { stopMoveTimer(); return }
-        let now = CACurrentMediaTime(), dt = CGFloat(now - lastTick); lastTick = now
-        let rate: CGFloat = NSEvent.modifierFlags.contains(.shift) ? 6.0 : 1.5 // inches / sec
+        let now = ProcessInfo.processInfo.systemUptime, dt = CGFloat(now - lastTick); lastTick = now
+        let rate: CGFloat = shiftHeld ? 6.0 : 1.5 // inches / sec (shift fed by flagsChanged)
         var dx: CGFloat = 0, dy: CGFloat = 0
         if heldDirections.contains(.left) { dx -= 1 }
         if heldDirections.contains(.right) { dx += 1 }

@@ -182,6 +182,13 @@ enum DisplayManager {
 
     // MARK: - Helpers
 
+    /// Whether `id` is a notched display (its screen reserves a top safe area) — the
+    /// live NSScreen query, housed here so callers stay AppKit-free.
+    @MainActor
+    static func isNotched(_ id: CGDirectDisplayID) -> Bool {
+        (NSScreen.screen(for: id)?.safeAreaInsets.top ?? 0) > 0
+    }
+
     /// Map CGDirectDisplayID → localized display name via NSScreen.
     @MainActor
     private static func screenNamesByDisplayID() -> [CGDirectDisplayID: String] {

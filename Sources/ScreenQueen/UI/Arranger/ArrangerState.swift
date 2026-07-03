@@ -1,4 +1,5 @@
-import AppKit
+import CoreGraphics
+import Foundation
 
 /// The editing state shared by every per-screen `Arranger`: the physical plane plus
 /// selection/preview state and app callbacks. A mutation on any canvas writes here and
@@ -280,12 +281,6 @@ final class ArrangerState {
 
     /// The would-be main implied by an in-progress menu-bar drag (nil when not dragging).
     var pendingMainID: CGDirectDisplayID?
-
-    /// Colors keyed by seam (unordered display pair) — via the shared `SeamColorBook` so
-    /// the arranger and the always-on seam lights agree.
-    func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] {
-        SeamColorBook.shared.colors(for: bars.map { ($0.aID, $0.bID) })
-    }
 
     func commit() {
         guard !plane.isEmpty else { return }

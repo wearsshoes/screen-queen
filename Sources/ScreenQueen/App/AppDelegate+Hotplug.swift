@@ -1,4 +1,4 @@
-import AppKit
+import CoreGraphics
 
 /// Hotplug/profile handling: when the connected display *set* changes, apply the best
 /// saved profile (or dock/select a newcomer, or re-pin survivors); when it hasn't,

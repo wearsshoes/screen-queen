@@ -1,4 +1,5 @@
-import AppKit
+import CoreGraphics
+import Foundation
 
 /// Resolution / display-mode *interaction*: the ⌘± single-display steps, the ⌘⇧± global
 /// proportional zoom, and previewing/committing pending modes. The pure ladder math (which
@@ -10,7 +11,7 @@ extension Arranger {
     /// size is unchanged, so the plane and alignment are untouched), apply the mode
     /// when ⌘ is released.
     func handleResolutionKey(_ ch: String) {
-        guard let id = selectedID, let display = displays.first(where: { $0.id == id }) else { NSSound.beep(); return }
+        guard let id = selectedID, let display = displays.first(where: { $0.id == id }) else { Chime.beep(); return }
         let modes = sortedModes(for: display)
         guard !modes.isEmpty else { return }
         let idx = currentModeIndex(for: display, in: modes)
@@ -87,10 +88,10 @@ extension Arranger {
 
         // If nothing moved, don't let the unclamped level drift — you'd have to unwind
         // that phantom travel before anything moves again.
-        guard !targets.isEmpty else { NSSound.beep(); return }
+        guard !targets.isEmpty else { Chime.beep(); return }
         guard anyMoved || ch == "0" else {
             globalZoomLevel = previousLevel
-            NSSound.beep()
+            Chime.beep()
             return
         }
 
@@ -144,9 +145,9 @@ extension Arranger {
         commander?.setResolutions(modes, origins)
     }
 
-    /// Whether `d` is a notched built-in display (its screen reserves a top safe area) —
-    /// a live `NSScreen` query, kept in the UI layer so `ResolutionLadder` stays pure.
+    /// Whether `d` is a notched built-in display — the live screen query lives in
+    /// DisplayManager so this file stays AppKit-free; `ResolutionLadder` stays pure.
     private func isNotched(_ d: DisplaySnapshot) -> Bool {
-        (NSScreen.screen(for: d.id)?.safeAreaInsets.top ?? 0) > 0
+        DisplayManager.isNotched(d.id)
     }
 }

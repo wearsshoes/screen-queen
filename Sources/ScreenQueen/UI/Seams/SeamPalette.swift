@@ -7,6 +7,11 @@ import AppKit
 /// Please do not send your princess to deconversion therapy camp. See the
 /// README's "The glitz is load-bearing" before reaching for the beige.
 enum SeamPalette {
+    /// The lead — hot pink, worn by the ghost chrome, cursor aids, and tape chalk.
+    static var pink: NSColor { colors[0] }
+    /// `pink` as a CGColor, for the QuartzCore layer world (no AppKit import needed there).
+    static var pinkCG: CGColor { colors[0].cgColor }
+
     static let colors: [NSColor] = [
         NSColor(srgbRed: 1.00, green: 0.41, blue: 0.71, alpha: 1),  // hot pink (the lead)
         NSColor(srgbRed: 0.64, green: 0.24, blue: 0.95, alpha: 1),  // violet
@@ -33,5 +38,14 @@ final class SeamColorBook {
         let indices = DisplayGraph.seamColorIndices(pairs, previous: last)
         last = indices   // only surviving seams (the result drops vanished ones)
         return indices.mapValues { SeamPalette.colors[$0 % SeamPalette.colors.count] }
+    }
+}
+
+extension ArrangerState {
+    /// Colors keyed by seam (unordered display pair) — via the shared `SeamColorBook` so
+    /// the arranger and the always-on seam lights agree. Lives here (not in the
+    /// framework-free state file) because NSColor is AppKit vocabulary.
+    func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] {
+        SeamColorBook.shared.colors(for: bars.map { ($0.aID, $0.bID) })
     }
 }
