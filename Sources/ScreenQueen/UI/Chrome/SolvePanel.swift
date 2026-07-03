@@ -7,6 +7,30 @@ struct SolvePanelContent {
     var rects: [(id: CGDirectDisplayID, rect: CGRect, ambiguous: Bool)] = []
     var seams: [(a: CGDirectDisplayID, b: CGDirectDisplayID, vertical: Bool, color: Color)] = []
     var ghost = false
+
+    init() {}
+
+    /// The *actual* origins the seam detection uses (the locked solve during a drag),
+    /// so the panel shows the truth. Everything comes from state — no Stage involved;
+    /// the refresh path feeds this to the host.
+    @MainActor init(state: ArrangerState) {
+        let seamColor = state.seamColors(state.currentBars())
+        let origins = state.pointOrigins()
+        let trace = SchematicLayout.solveTrace(rects: state.plane, displays: state.sizedDisplays())
+        let ambiguousIDs = Set(trace.pointRects.filter(\.ambiguous).map(\.id))
+        for d in state.sizedDisplays() {
+            guard let o = origins[d.id] else { continue }
+            rects.append((d.id, CGRect(origin: o, size: d.bounds.size), ambiguousIDs.contains(d.id)))
+        }
+        for i in 0..<rects.count {
+            for j in (i + 1)..<rects.count {
+                guard let s = SchematicLayout.seam(rects[i].rect, rects[j].rect) else { continue }
+                let key = DisplayGraph.SeamKey(rects[i].id, rects[j].id)
+                seams.append((rects[i].id, rects[j].id, s.vertical,
+                              Color(nsColor: seamColor[key] ?? .systemPink)))
+            }
+        }
+    }
 }
 
 /// "What she sees", drawn in a SwiftUI `Canvas` — the dry run for the big schematic

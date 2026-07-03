@@ -352,7 +352,7 @@ final class Stage: NSView {
         if let rect = panelViewRect(), solvePanel.frame != rect {
             solvePanel.frame = rect
         }
-        updateSolvePanel()
+        solvePanel.update(SolvePanelContent(state: state))
         layoutLabelCards()
         layoutMirrorColumn()
         updateSeamEffects()

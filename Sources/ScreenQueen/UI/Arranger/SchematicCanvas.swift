@@ -9,7 +9,7 @@ import SwiftUI
 /// gesture, Stage, and view space are all the same y-down coordinates.
 struct SchematicCanvasView: View {
     weak var stage: Stage?
-    /// Bumped by `repaintSchematic()` — the Stage closure re-runs when inputs change.
+    /// Bumped by `repaintSchematic()` — the Canvas closure re-runs when inputs change.
     var generation: Int
 
     var body: some View {
@@ -43,5 +43,73 @@ final class SchematicCanvasHost: NSHostingView<SchematicCanvasView> {
         window?.makeKeyAndOrderFront(nil)
         if let stage = rootView.stage { window?.makeFirstResponder(stage) }
         super.mouseDown(with: event)
+    }
+}
+
+// MARK: - The render pass
+
+/// `drawSchematic(in:size:)` orchestrates the schematic in paint order. The subjects
+/// live in their own files — the minimap (Minimap/Stage+Tiles, +TileSeams,
+/// +TileMarkers) and the on-glass halves (Chrome/EdgeSeams, EdgeMarkers).
+extension Stage {
+
+    func drawSchematic(in ctx: GraphicsContext, size: CGSize) {
+        // The backdrop wash. If this screen's own tile is being dragged (from any
+        // stage), brighten it — a real-world "you're dragging me" cue.
+        let beingDragged = centerID != nil && state.draggingDisplayID == centerID
+        let wash: Color = beingDragged
+            ? Color(nsColor: NSColor.systemPink.blended(withFraction: 0.2, of: .black) ?? .systemPink).opacity(0.75)
+            : Color.black.opacity(0.55)
+        ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(wash))
+
+        let rects = currentRects()
+        guard let t = drawTransform(rects) else {
+            ctx.draw(Text(Copy.emptyState).font(.system(size: 14))
+                .foregroundStyle(.secondary),
+                     at: CGPoint(x: size.width / 2, y: size.height / 2))
+            return
+        }
+        let bars = currentBars()
+        let seamColor = seamColors(bars)   // color per seam; both its bars share it
+        if showAlignGhosts { drawAlignGhosts(ctx, t: t) }   // under the tiles
+        // Selection halo before the tiles, so it reads under the lifted tile.
+        if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(ctx, t.viewRect(r)) }
+        for d in displays where rects[d.id] != nil { drawTile(ctx, for: d, in: t.viewRect(rects[d.id]!)) }
+        // Predicted Dock strip. With the live feed on the tiles already show the real
+        // Dock, so only surface it when informative (Dock would move / mid menu-bar drag).
+        if let dockID = predictedDockDisplay(), let r = rects[dockID] {
+            let dockWouldMove = dockID != state.currentDockDisplay()
+            let showDock = !state.feedEnabled || dockWouldMove || draggingMenuBar != nil
+            if showDock {
+                drawDockIndicator(ctx, in: t.viewRect(r), edge: DockPredictor.edge())
+            }
+        }
+        // Seam glows, painted from the same edge sets `updateSeamEffects` feeds to the
+        // emitter/glow layers (on the refresh path — draw registers nothing).
+        for e in miniBarEdges(bars, t: t, seamColor: seamColor) { drawBehindGlow(ctx, e) }
+        let markers = activeMarkers(rects)
+        for d in displays where rects[d.id] != nil { drawAnchors(ctx, for: d, in: t.viewRect(rects[d.id]!), active: markers[d.id]) }
+        for e in edgeBarEdges(bars, seamColor: seamColor) { drawBehindGlow(ctx, e) }
+        drawScreenMarkers(ctx, markers)           // alignment notches/arrows at this screen's real edges
+        if let p = draggingMenuBar {
+            // The strip follows the cursor; highlight the tile it would land on.
+            if let over = display(at: p), !over.isMain, let r = rects[over.id] {
+                let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
+                ctx.fill(Path(roundedRect: vr, cornerRadius: tileCornerRadius),
+                         with: .color(.white.opacity(0.25)))
+            }
+            drawMenuBar(ctx, in: NSRect(x: p.x - 40, y: p.y - 8, width: 80, height: 16))
+        }
+        // Option-mirror drag: highlight the tile the dragged display would mirror onto.
+        if let p = mirrorDragPoint, let over = display(at: p), over.id != draggedID, let r = rects[over.id] {
+            let vr = t.viewRect(r).insetBy(dx: 1.5, dy: 1.5)
+            let pink = Color.pink
+            let path = Path(roundedRect: vr, cornerRadius: tileCornerRadius)
+            ctx.fill(path, with: .color(pink.opacity(0.35)))
+            ctx.stroke(path, with: .color(pink), lineWidth: 2)
+            ctx.draw(Text(Copy.mirrorDropHint).font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white),
+                     at: CGPoint(x: vr.midX, y: vr.midY))
+        }
     }
 }
