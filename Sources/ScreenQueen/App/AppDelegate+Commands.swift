@@ -173,7 +173,7 @@ extension AppDelegate: DisplayCommanding {
         // trusted and measured screens, and the seam glow below keeps showing the
         // user how to get their cursor from one to the other.
         calibrationController.begin(target: target, reference: reference)
-        focusPolicy.begin()   // arrow keys nudge the tape on whichever screen you mouse to
+        events.beginFocusFollowing()   // arrow keys nudge the tape on whichever screen you mouse to
     }
 
     func resetCalibration(_ id: CGDirectDisplayID) {

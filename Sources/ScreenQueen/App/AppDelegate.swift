@@ -27,17 +27,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Internal (not private): the command executor lives in AppDelegate+Commands.swift.
     let arranger = ArrangerWindows()
     let calibrationController = CalibrationController()
-    let focusPolicy = FocusPolicy()
+    /// The one owner of event monitors and cursor polling (hotkey, ghost-mouse feed,
+    /// focus-follows-cursor).
+    let events = EventPlumbing()
 
     var isLiveDragging = false
     /// Snapshot captured when the arranger was opened, for "Reset".
     var baselineOrigins: [CGDirectDisplayID: CGPoint] = [:]
     var baselineModes: [CGDirectDisplayID: CGDisplayMode] = [:]
-
-    private var hotkeyMonitors: [Any] = []
-    /// Debounce for the ⌘⌥F1 toggle: the same press can hit both the local and global
-    /// monitors (or auto-repeat), which double-toggled. Ignore repeats within a short window.
-    private var lastHotkeyToggle: TimeInterval = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Snappy tooltips (the buttons are icon-only; their tooltips carry the copy, so
@@ -48,7 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PrefsMigration.migrateIfNeeded()   // carry over profiles/calibration from the old bundle id
         setupMenuBar()
         setupArranger()
-        setupHotkey()
+        events.onHotkeyToggle = { [weak self] in self?.toggleArranger() }
+        events.installHotkey()
 
         let context = Unmanaged.passUnretained(self).toOpaque()
         CGDisplayRegisterReconfigurationCallback(displayReconfigCallback, context)
@@ -81,40 +79,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupWindow.show()
     }
 
-    /// ⌘⌥ + Brightness-Down (the F1 key on Mac keyboards) toggles the arranger from
-    /// anywhere. That key is a *system-defined* media event, not a plain keyDown. A
-    /// local monitor catches it while the arranger is focused, a global one otherwise.
-    private func setupHotkey() {
-        let handler: (NSEvent) -> Bool = { [weak self] event in
-            guard event.type == .systemDefined, event.subtype.rawValue == 8 else { return false }
-            let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
-            guard mods == [.command, .option] else { return false }
-            // data1: high 16 bits = key code, low bits = state; 0x0A = brightness-down.
-            let keyCode = (event.data1 & 0xFFFF0000) >> 16
-            let keyDown = (event.data1 & 0xFF00) >> 8 == 0x0A
-            guard keyCode == NX_KEYTYPE_BRIGHTNESS_DOWN, keyDown else { return false }
-            // When the arranger is open and our app is active, the *same* press can reach
-            // both the local and global monitors (and the key can auto-repeat), which
-            // toggled twice and appeared to "not close". Collapse bursts to one toggle.
-            guard let self else { return true }
-            let now = ProcessInfo.processInfo.systemUptime
-            guard now - self.lastHotkeyToggle > 0.25 else { return true }
-            self.lastHotkeyToggle = now
-            self.toggleArranger()
-            return true
-        }
-        if let g = NSEvent.addGlobalMonitorForEvents(matching: .systemDefined, handler: { _ = handler($0) }) {
-            hotkeyMonitors.append(g)
-        }
-        if let l = NSEvent.addLocalMonitorForEvents(matching: .systemDefined, handler: { handler($0) ? nil : $0 }) {
-            hotkeyMonitors.append(l)
-        }
-    }
-
     func applicationWillTerminate(_ notification: Notification) {
         let context = Unmanaged.passUnretained(self).toOpaque()
         CGDisplayRemoveReconfigurationCallback(displayReconfigCallback, context)
-        hotkeyMonitors.forEach { NSEvent.removeMonitor($0) }
+        events.teardown()
     }
 
     // MARK: - Setup
@@ -208,12 +176,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.changed = { [weak self] in self?.isLiveDragging = true; priorChanged?() }
         calibrationController.onComplete = { [weak self] in self?.refreshAfterCalibration() }
 
-        // Focus follows the cursor across screens (calibration panels first, arranger
-        // canvases otherwise) — the policy owns all cursor-screen tracking.
-        focusPolicy.isCalibrationActive = { [weak self] in self?.calibrationController.isActive ?? false }
-        focusPolicy.focusCalibration = { [weak self] screen in self?.calibrationController.focusPanel(on: screen) }
-        focusPolicy.isArrangerVisible = { [weak self] in self?.arranger.isVisible ?? false }
-        focusPolicy.focusArranger = { [weak self] screen in self?.arranger.focusWindow(on: screen) }
+        // The arranger drives (and consumes) the ghost-mouse feed through the shared
+        // plumbing; focus follows the cursor across screens (calibration panels first,
+        // arranger canvases otherwise).
+        arranger.events = events
+        events.isCalibrationActive = { [weak self] in self?.calibrationController.isActive ?? false }
+        events.focusCalibration = { [weak self] screen in self?.calibrationController.focusPanel(on: screen) }
+        events.isArrangerVisible = { [weak self] in self?.arranger.isVisible ?? false }
+        events.focusArranger = { [weak self] screen in self?.arranger.focusWindow(on: screen) }
     }
 
     /// A calibration edit changes only *physical* size — the point layout is
@@ -273,6 +243,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CGDisplayCopyDisplayMode(d.id).map { (d.id, $0) }
         }, uniquingKeysWith: { a, _ in a })
         arranger.show(displays: displays)
-        focusPolicy.begin()
+        events.beginFocusFollowing()
     }
 }

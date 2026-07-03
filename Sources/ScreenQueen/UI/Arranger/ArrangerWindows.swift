@@ -14,8 +14,11 @@ final class ArrangerWindows {
 
     private let capture = ScreenCaptureManager()
 
-    /// Mouse-move monitors driving the ghost mouse; installed while visible.
-    private var mouseMonitors: [Any] = []
+    /// The shared event plumbing (set by the AppDelegate): mouse monitors + the
+    /// slider-drag timer live there; this class consumes cursor samples.
+    weak var events: EventPlumbing? {
+        didSet { events?.onMouseSample = { [weak self] in self?.mouseDidMove() } }
+    }
     /// The display the cursor is on. The chrome is re-rendered only when this changes;
     /// the ghost mouse moves every event.
     private var activeDisplayID: CGDirectDisplayID?
@@ -31,7 +34,7 @@ final class ArrangerWindows {
             self?.canvases.forEach { $0.refresh() }
             self?.rerenderChrome()
         }
-        state.onSliderDragChanged = { [weak self] dragging in self?.trackSliderDrag(dragging) }
+        state.onSliderDragChanged = { [weak self] dragging in self?.events?.setSliderDragging(dragging) }
         state.capture = capture
         capture.onFrame = { [weak self] in self?.canvases.forEach { $0.needsDisplay = true } }
         state.onToggleFeed = { [weak self] on in self?.setFeed(on) }
@@ -104,7 +107,7 @@ final class ArrangerWindows {
         let busy = (SystemLoad.systemCPUUsage() ?? 0) > 0.5
         let bigCast = NSScreen.screens.count >= Self.bigCastThreshold
         setFeed(!busy && !bigCast)
-        installMouseMonitors()
+        if VirtualMouse.ghostMouseEnabled { events?.startMouseMonitors() }
         activeDisplayID = nil
         mouseDidMove()   // seed the active screen + render the ghost
         if state.feedEnabled { scheduleFeedLoadCheck() }
@@ -143,8 +146,7 @@ final class ArrangerWindows {
     func hide() {
         capture.stop()
         cancelFeedWatchdog()
-        mouseMonitors.forEach { NSEvent.removeMonitor($0) }
-        mouseMonitors.removeAll()
+        events?.stopMouseMonitors()
         activeDisplayID = nil
         windows.values.forEach { $0.orderOut(nil) }
         windows.removeAll()
@@ -153,40 +155,12 @@ final class ArrangerWindows {
 
     // MARK: - Ghost mouse feed (see VirtualMouse.swift)
 
-    /// Follow the real mouse while visible: a global monitor for other apps' screens, a
-    /// local one for our own overlays.
-    private func installMouseMonitors() {
-        guard VirtualMouse.ghostMouseEnabled, mouseMonitors.isEmpty else { return }
-        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged,
-                                           .rightMouseDragged, .otherMouseDragged]
-        if let g = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
-            self?.mouseDidMove()
-        }) { mouseMonitors.append(g) }
-        if let l = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
-            self?.mouseDidMove()
-            return event
-        }) { mouseMonitors.append(l) }
-    }
-
     /// Quartz/CG global point (y-down, top-left of primary) → Cocoa global (y-up),
     /// flipped about the primary display's height.
     private func cocoaGlobal(fromCG p: CGPoint) -> CGPoint {
         let primaryHeight = NSScreen.screens.first { $0.frame.origin == .zero }?.frame.height
             ?? NSScreen.main?.frame.height ?? p.y
         return CGPoint(x: p.x, y: primaryHeight - p.y)
-    }
-
-    /// A slider drag runs a modal tracking loop that starves the mouse monitors (and the
-    /// value-preview only notifies on detent changes), so drive the ghost aids from a
-    /// timer while held — in `.common` mode so it ticks during `.eventTracking`.
-    private var sliderDragTimer: Timer?
-
-    private func trackSliderDrag(_ dragging: Bool) {
-        sliderDragTimer?.invalidate(); sliderDragTimer = nil
-        guard dragging else { return }
-        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.mouseDidMove() }
-        RunLoop.main.add(t, forMode: .common)
-        sliderDragTimer = t
     }
 
     /// One cursor sample: reproject the chrome only when the active screen changed;
