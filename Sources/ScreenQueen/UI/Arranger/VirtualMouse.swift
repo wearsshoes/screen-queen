@@ -15,12 +15,6 @@ enum VirtualMouse {
 
     /// The one ghost tint — hot pink from the seam palette.
     static var pink: NSColor { SeamPalette.colors[0] }
-
-    /// The minimap scale (view px per plane inch) at which chrome renders at natural
-    /// size. Bar, ghost mouse, and granny viewer all scale by `transform.scale / this`
-    /// (`chromeTileScale`) — the one knob for their absolute size.
-    static let referenceMinimapScale: CGFloat = 40
-
 }
 
 /// A chrome element that wears the ghost tint *in its own look* (pink glass, pink

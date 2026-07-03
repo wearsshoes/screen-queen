@@ -1,6 +1,14 @@
 import QuartzCore
 import SwiftUI
 
+/// Chrome sizing constants.
+enum ChromeMetrics {
+    /// The minimap scale (view px per plane inch) at which chrome renders at natural
+    /// size. Bar, ghost mouse, and granny viewer all scale by `transform.scale / this`
+    /// (`chromeTileScale`) — the one knob for their absolute size.
+    static let referenceMinimapScale: CGFloat = 40
+}
+
 /// The per-canvas chrome pass: render the bar/footer/ghost-arrow sizing at this
 /// canvas's own tile scale, in normal or ghost dress. Born inside the ghost feature
 /// (one set of chrome per canvas, restyled pink when inactive — see VirtualMouse.swift
@@ -48,7 +56,7 @@ extension Arranger {
     /// Sizes the chrome in proportion to this canvas's minimap tiles: the minimap scale
     /// over a reference, so bigger tiles → bigger bar.
     func chromeTileScale(_ t: Transform) -> CGFloat {
-        t.scale / VirtualMouse.referenceMinimapScale
+        t.scale / ChromeMetrics.referenceMinimapScale
     }
 
     /// The current tile scale, computing the transform itself; 1 if it isn't ready.
