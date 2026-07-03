@@ -237,6 +237,14 @@ final class ArrangerState {
     /// Effective point size (live during a zoom preview).
     func pointSize(_ d: DisplaySnapshot) -> CGSize { pendingSize[d.id] ?? d.bounds.size }
 
+    /// Points per physical inch at the effective point size — the density readout the
+    /// label cards and mirror cards show. nil when the physical size is unknown.
+    func effectivePPI(_ d: DisplaySnapshot) -> Double? {
+        let sz = pointSize(d)
+        guard d.diagonalInches > 0, sz.width > 0 else { return nil }
+        return Double(sz.width) / (Double(d.physicalSizeMM.width) / 25.4)
+    }
+
     /// Plane displays with the effective point size applied. Mirrored slaves excluded.
     func sizedDisplays() -> [DisplaySnapshot] {
         planeDisplays.map { $0.with(bounds: CGRect(origin: $0.bounds.origin, size: pointSize($0))) }

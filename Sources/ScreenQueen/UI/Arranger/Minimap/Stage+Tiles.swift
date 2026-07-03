@@ -242,9 +242,7 @@ extension Stage {
         let pending = state.pendingMode(for: display.id)
         let pixelW = pending?.pixelWidth ?? Int(display.pixelSize.width)
 
-        // Effective PPI (points per physical inch, from the live/previewed point size).
-        let effPPI = display.diagonalInches > 0 && sz.width > 0
-            ? Double(sz.width) / (Double(display.physicalSizeMM.width) / 25.4) : nil
+        let effPPI = state.effectivePPI(display)
 
         // True-size preview: the faithful on-tile font scale is `viewScale / ppi`, so
         // sliding the resolution grows/shrinks the text just as macOS will. A constant

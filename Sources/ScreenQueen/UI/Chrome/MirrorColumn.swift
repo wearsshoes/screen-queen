@@ -125,8 +125,7 @@ extension Stage {
         for d in mirrored {
             let sz = pointSize(d)
             let aspect = sz.height > 0 ? sz.width / sz.height : 16.0 / 9
-            let effPPI = d.diagonalInches > 0 && sz.width > 0
-                ? Double(sz.width) / (Double(d.physicalSizeMM.width) / 25.4) : nil
+            let effPPI = state.effectivePPI(d)
             let diag = d.diagonalInches > 0 ? String(format: "%.0f″ · ", d.diagonalInches) : ""
             let detail = effPPI.map { diag + String(format: "%.0f ppi", $0) }
                 ?? (diag.isEmpty ? nil : String(diag.dropLast(3)))
