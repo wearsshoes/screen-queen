@@ -246,13 +246,11 @@ final class Tape {
 
     /// Handle a key press (already routed here by the host). True = consumed.
     func handleKey(code: UInt16, shift: Bool) -> Bool {
-        let step: CGFloat = shift ? 10 : 1
-        switch code {
-        case 124, 126: nudge(step)     // → / ↑
-        case 123, 125: nudge(-step)    // ← / ↓
-        case 36, 76: onCommit?()       // ⏎ / keypad enter
-        case 53: onCancel?()           // ⎋
-        default: return false
+        switch TapeKey.decode(code: code, shift: shift) {
+        case .nudge(let delta): nudge(delta)
+        case .commit: onCommit?()
+        case .cancel: onCancel?()
+        case nil: return false
         }
         return true
     }
@@ -563,6 +561,22 @@ final class Tape {
         let gap: CGFloat = 14
         let y = centerSide > 0 ? Self.thickness + gap : -gap - size.height
         str.draw(at: CGPoint(x: length / 2 - size.width / 2, y: y))
+    }
+}
+
+/// The calibration keyboard, decoded once — the tape hosts and the scene view
+/// route the same keys (⇧ = ×10).
+enum TapeKey {
+    case nudge(CGFloat), commit, cancel
+    static func decode(code: UInt16, shift: Bool) -> TapeKey? {
+        let step: CGFloat = shift ? 10 : 1
+        switch code {
+        case 124, 126: return .nudge(step)    // → / ↑
+        case 123, 125: return .nudge(-step)   // ← / ↓
+        case 36, 76: return .commit           // ⏎ / keypad enter
+        case 53: return .cancel               // ⎋
+        default: return nil
+        }
     }
 }
 

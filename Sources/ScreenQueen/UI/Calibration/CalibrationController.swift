@@ -144,16 +144,20 @@ final class CalibrationController {
                          f0 * Double(refPerpFull) / refPerpPitch / k)
 
         // Both tapes wear the same look; the unit printed on the blade — "inches"
-        // vs her "inches" — is what tells them apart. Reference tapes (trusted
-        // screen): pure measuring affordances, no controls.
-        let refTape = Tape(length: CGFloat(refMeasure * refPrimaryPitch), anchor: refPlace,
-                           pointsPerInch: CGFloat(refPrimaryPitch), unitLabel: Copy.matchUnitReference,
-                           brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
-                           palette: .honest)
-        let refPerpTape = Tape(length: CGFloat(refMeasure * k * refPerpPitch), anchor: refPerpPlace,
-                               pointsPerInch: CGFloat(refPerpPitch), unitLabel: Copy.matchUnitReference,
-                               brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
-                               palette: .honest)
+        // vs her "inches" — is what tells them apart.
+        func tape(length: CGFloat, anchor: BarPlacement, pitch: Double, trusted: Bool) -> Tape {
+            Tape(length: length, anchor: anchor, pointsPerInch: CGFloat(pitch),
+                 unitLabel: trusted ? Copy.matchUnitReference : Copy.matchUnitTarget,
+                 brand: trusted ? Copy.matchTapeBrandReference : Copy.matchTapeBrandTarget,
+                 finePrint: trusted ? Copy.matchTapeFinePrintReference : Copy.matchTapeFinePrintTarget,
+                 palette: trusted ? .honest : .vanity)
+        }
+
+        // Reference tapes (trusted screen): pure measuring affordances, no controls.
+        let refTape = tape(length: CGFloat(refMeasure * refPrimaryPitch), anchor: refPlace,
+                           pitch: refPrimaryPitch, trusted: true)
+        let refPerpTape = tape(length: CGFloat(refMeasure * k * refPerpPitch), anchor: refPerpPlace,
+                               pitch: refPerpPitch, trusted: true)
         refTape.onResize = { [weak self, weak refPerpTape] len in
             guard let self else { return }
             self.refMeasure = Double(len) / refPrimaryPitch
@@ -171,14 +175,10 @@ final class CalibrationController {
         // display *claims* over EDID — even when a previous calibration knows
         // better — so when the two sides physically match, hers reads a different
         // number than the honest one. The lie, printed on the tape.
-        let calTape = Tape(length: CGFloat(f0) * targetFull, anchor: targetPlace,
-                           pointsPerInch: CGFloat(targetPrimaryPitch), unitLabel: Copy.matchUnitTarget,
-                           brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
-                           palette: .vanity)
-        let calPerpTape = Tape(length: CGFloat(f0) * targetPerpFull, anchor: targetPerpPlace,
-                               pointsPerInch: CGFloat(targetPerpPitch), unitLabel: Copy.matchUnitTarget,
-                               brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
-                               palette: .vanity)
+        let calTape = tape(length: CGFloat(f0) * targetFull, anchor: targetPlace,
+                           pitch: targetPrimaryPitch, trusted: false)
+        let calPerpTape = tape(length: CGFloat(f0) * targetPerpFull, anchor: targetPerpPlace,
+                               pitch: targetPerpPitch, trusted: false)
         calTape.onResize = { [weak self, weak calPerpTape] len in
             guard let self else { return }
             self.targetMeasure = Double(len) / targetPrimaryPitch
@@ -202,7 +202,7 @@ final class CalibrationController {
         // ⏎ / ⎋ work from any tape, not just via the scene's key routing.
         for tape in [refTape, refPerpTape, calTape, calPerpTape] {
             tape.onCommit = { [weak self] in self?.save() }
-            tape.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
+            tape.onCancel = { [weak self] in self?.finish() }
         }
 
         // Cast the two involved screens; each member's scene holds its tapes and
@@ -241,7 +241,7 @@ final class CalibrationController {
         let sceneView = CalibrationSceneView(frame: CGRect(origin: .zero, size: window.frame.size))
         sceneView.onNudge = { [weak self] delta in self?.targetTape?.nudge(delta) }
         sceneView.onCommit = { [weak self] in self?.save() }
-        sceneView.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
+        sceneView.onCancel = { [weak self] in self?.finish() }
         for tape in scene.tapes {
             let host = TapeHost(tape: tape)
             host.frame = sceneView.bounds
@@ -280,6 +280,12 @@ final class CalibrationController {
         targetHost?.externallyActive = !(key.firstResponder is TapeHost)
     }
 
+    /// Strike the set and tell the owner — the one exit for cancel paths and `save`.
+    private func finish() {
+        cancel()
+        onComplete?()
+    }
+
     func cancel() {
         keyObservers.forEach { NotificationCenter.default.removeObserver($0) }
         keyObservers.removeAll()
@@ -302,7 +308,7 @@ final class CalibrationController {
             lastMeasuredInches: (target?.physicalSizeIsCalibrated ?? false) ? (target?.diagonalInches ?? 0) : 0,
             inferredInches: diag,
             save: { [weak self] in self?.save() },
-            cancel: { [weak self] in self?.cancel(); self?.onComplete?() })
+            cancel: { [weak self] in self?.finish() })
     }
 
     private func updateReadout() {
@@ -311,17 +317,17 @@ final class CalibrationController {
     }
 
     private func save() {
-        guard let target, let size = inferredSizeInches() else { cancel(); onComplete?(); return }
-        CalibrationStore.setOverride(CGSize(width: size.width * 25.4, height: size.height * 25.4),
-                                     for: target.fingerprint)
-        cancel()
-        onComplete?()
+        if let target, let size = inferredSizeInches() {
+            CalibrationStore.setOverride(CGSize(width: size.width * 25.4, height: size.height * 25.4),
+                                         for: target.fingerprint)
+        }
+        finish()
     }
 }
 
 /// The calibration window's content view: hosts the tapes and the panel island,
-/// and routes window-level keys — arrows nudge the liar's tape from either
-/// screen (⇧ = ×10), ⏎ saves, ⎋ cancels.
+/// and routes window-level keys (see `TapeKey`) — arrows nudge the liar's tape
+/// from either screen, ⏎ saves, ⎋ cancels.
 private final class CalibrationSceneView: NSView {
     var onNudge: ((CGFloat) -> Void)?
     var onCommit: (() -> Void)?
@@ -330,13 +336,11 @@ private final class CalibrationSceneView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
-        switch event.keyCode {
-        case 124, 126: onNudge?(step)     // → / ↑
-        case 123, 125: onNudge?(-step)    // ← / ↓
-        case 36, 76: onCommit?()          // ⏎ / keypad enter
-        case 53: onCancel?()              // ⎋
-        default: super.keyDown(with: event)
+        switch TapeKey.decode(code: event.keyCode, shift: event.modifierFlags.contains(.shift)) {
+        case .nudge(let delta): onNudge?(delta)
+        case .commit: onCommit?()
+        case .cancel: onCancel?()
+        case nil: super.keyDown(with: event)
         }
     }
 }
