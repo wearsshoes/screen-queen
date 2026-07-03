@@ -25,9 +25,10 @@ final class Arranger: NSView {
     var barHost: NSHostingView<ButtonBarView>?
     /// The chromeTileScale the bar last rendered at (set by renderChrome's pass).
     var barScale: CGFloat = 1
-    /// Each bar control's frame in the bar's own top-left space, reported by the
-    /// SwiftUI side — the ghost tooltip's hit-test targets.
-    var barControlFrames: [BarControl: CGRect] = [:]
+    /// The bar control under the real cursor, reported by the bar island's `.onHover`
+    /// (SwiftUI owns the hit-testing) — the active canvas's value drives every
+    /// canvas's ghost tooltip.
+    var hoveredBarControl: BarControl?
 
     /// The selected display's sorted modes, cached while the slider drives them.
     var sliderModes: [DisplayMode] = []

@@ -43,9 +43,8 @@ struct BarActions {
 struct ButtonBarView: View {
     var model: BarModel
     var actions = BarActions()
-    /// Reports each control's frame in the bar's own (top-left) coordinate space, for
-    /// the ghost-mouse tooltip hit-testing.
-    var onControlFrame: (BarControl, CGRect) -> Void = { _, _ in }
+    /// Reports hover per control (SwiftUI owns the hit-testing), for the ghost tooltip.
+    var onControlHover: (BarControl, Bool) -> Void = { _, _ in }
 
     private var k: CGFloat { model.scale }
     private var pink: Color { ChromeMetrics.ghostPink }
@@ -60,7 +59,6 @@ struct ButtonBarView: View {
                 hudBar
             }
         }
-        .coordinateSpace(name: "arrangerBar")
     }
 
     // MARK: - macOS 26: separate glass capsules that merge when close
@@ -110,7 +108,7 @@ struct ButtonBarView: View {
         .modifier(OptionalShortcut(shortcut: shortcut))
         .glassEffect(prominent ? .regular.tint(doneTint).interactive() : .regular.interactive(),
                      in: Circle())
-        .reportFrame(id, to: onControlFrame)
+        .reportHover(id, to: onControlHover)
     }
 
     /// The glass pill hosting the resolution slider, flanked by "A" / "a" end glyphs
@@ -168,7 +166,7 @@ struct ButtonBarView: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .modifier(OptionalShortcut(shortcut: shortcut))
-        .reportFrame(id, to: onControlFrame)
+        .reportHover(id, to: onControlHover)
     }
 
     // MARK: - Shared pieces
@@ -203,7 +201,7 @@ struct ButtonBarView: View {
                   fill: model.isGhost ? pink : Color.accentColor, k: k,
                   onChanged: actions.sliderChanged, onEnded: actions.sliderEnded)
             .frame(minWidth: 60 * k, idealWidth: 144 * k, maxWidth: 144 * k)
-            .reportFrame(.slider, to: onControlFrame)
+            .reportHover(.slider, to: onControlHover)
     }
 
     private var scopeButton: some View {
@@ -215,7 +213,7 @@ struct ButtonBarView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .reportFrame(.scope, to: onControlFrame)
+        .reportHover(.scope, to: onControlHover)
     }
 
     /// Ghost mode tints only the *icon* — a washed capsule read as a solid pink blob.
@@ -298,14 +296,10 @@ private struct OptionalShortcut: ViewModifier {
 }
 
 private extension View {
-    /// Report this control's frame in the bar's coordinate space whenever it changes.
-    func reportFrame(_ control: BarControl,
-                     to report: @escaping (BarControl, CGRect) -> Void) -> some View {
-        onGeometryChange(for: CGRect.self) { proxy in
-            proxy.frame(in: .named("arrangerBar"))
-        } action: { frame in
-            report(control, frame)
-        }
+    /// Report this control's hover state, tagged with its identity.
+    func reportHover(_ control: BarControl,
+                     to report: @escaping (BarControl, Bool) -> Void) -> some View {
+        onHover { report(control, $0) }
     }
 }
 
@@ -337,8 +331,10 @@ extension Arranger {
     }
 
     private func makeBarView() -> ButtonBarView {
-        ButtonBarView(model: barModel(), actions: barActions()) { [weak self] control, frame in
-            self?.barControlFrames[control] = frame
+        ButtonBarView(model: barModel(), actions: barActions()) { [weak self] control, hovering in
+            guard let self else { return }
+            if hovering { self.hoveredBarControl = control }
+            else if self.hoveredBarControl == control { self.hoveredBarControl = nil }
         }
     }
 

@@ -35,17 +35,13 @@ final class TooltipHost: NSHostingView<TooltipBubbleView> {
 
 extension Arranger {
 
-    /// The tooltip text for the bar control at `activePoint` (active canvas's coords),
-    /// or nil. Called on the active canvas to decide what every canvas shows. Hit rects
-    /// come from the SwiftUI side (`barControlFrames`, bar-local top-left space).
-    func hoveredTooltip(at activePoint: CGPoint) -> String? {
-        guard let host = barHost else { return nil }
-        var p = host.convert(activePoint, from: self)
-        if !host.isFlipped { p.y = host.bounds.height - p.y }
-        for (control, frame) in barControlFrames where frame.contains(p) {
-            if barControlEnabled(control) { return tooltipText(for: control) }
-        }
-        return nil
+    /// The tooltip text for the hovered bar control (`hoveredBarControl`, reported by
+    /// the bar island's `.onHover`), or nil. Read on the active canvas — the one under
+    /// the real cursor, so the only one whose hover fires — to decide what every
+    /// canvas shows.
+    func hoveredTooltip() -> String? {
+        guard let control = hoveredBarControl, barControlEnabled(control) else { return nil }
+        return tooltipText(for: control)
     }
 
     /// Show/hide this canvas's tooltip bubble at the ghost-mapped cursor (below-and-right,

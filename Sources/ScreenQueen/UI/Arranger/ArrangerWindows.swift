@@ -198,9 +198,8 @@ final class ArrangerWindows {
         let activeID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
             ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
         let active = activeID.flatMap { id in canvases.first { $0.centerID == id } }
-        // The cursor in the active canvas's view coords, derived from the *same* CGEvent
-        // sample — not `NSEvent.mouseLocation`, which a slider's modal tracking loop
-        // clamps to the track (making the ghost cursor jump).
+        // The cursor in the active canvas's view coords, derived from the same CGEvent
+        // sample as `cursor` so the ghost and beacon can't disagree about where it is.
         var cursorActivePoint: CGPoint?
         if let activeID, let window = windows[activeID] {
             let up = cocoaGlobal(fromCG: cursor)
@@ -219,7 +218,7 @@ final class ArrangerWindows {
             for canvas in canvases { canvas.renderChrome(active: canvas === active ? nil : active) }
         }
         // The hovered control's tooltip trails the (ghost) cursor on every canvas.
-        let tip = active.flatMap { a in cursorActivePoint.flatMap { a.hoveredTooltip(at: $0) } }
+        let tip = active.flatMap { $0.hoveredTooltip() }
         for canvas in canvases {
             canvas.updateGhostArrow(cursorActivePoint: cursorActivePoint, isActive: canvas === active)
             canvas.updatePlaneMarker(cursor: cursor, hostID: activeID)
