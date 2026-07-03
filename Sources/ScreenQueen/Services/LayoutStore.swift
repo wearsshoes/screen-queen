@@ -10,7 +10,7 @@ import Foundation
 /// are all present (a superset of the connected set is fine — extra displays are
 /// left as-is).
 enum LayoutStore {
-    private static let key = "layoutProfiles"
+    private static let table = DefaultsTable<Profile>(key: "layoutProfiles")
 
     /// One display's saved state.
     struct Entry: Codable, Equatable {
@@ -28,20 +28,6 @@ enum LayoutStore {
     /// A profile: fingerprint → entry, for one display set.
     typealias Profile = [String: Entry]
 
-    // MARK: - Persistence
-
-    private static func all() -> [String: Profile] {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let decoded = try? JSONDecoder().decode([String: Profile].self, from: data) else { return [:] }
-        return decoded
-    }
-
-    private static func save(_ profiles: [String: Profile]) {
-        if let data = try? JSONEncoder().encode(profiles) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
-    }
-
     /// Canonical key for a set of fingerprints (order-independent).
     private static func setKey(_ fingerprints: [String]) -> String {
         fingerprints.sorted().joined(separator: "|")
@@ -50,7 +36,7 @@ enum LayoutStore {
     // MARK: - API
 
     /// Every saved profile, keyed by its set key — for the debug view.
-    static func allProfiles() -> [String: Profile] { all() }
+    static func allProfiles() -> [String: Profile] { table.all() }
 
     /// Build a profile capturing the current layout of `displays`.
     static func profile(from displays: [DisplaySnapshot]) -> Profile {
@@ -69,22 +55,18 @@ enum LayoutStore {
     /// Save `profile` for its display set.
     static func store(_ profile: Profile) {
         guard !profile.isEmpty else { return }
-        var profiles = all()
-        profiles[setKey(Array(profile.keys))] = profile
-        save(profiles)
+        table[setKey(Array(profile.keys))] = profile
     }
 
     /// Forget every saved layout profile.
-    static func clearAll() {
-        UserDefaults.standard.removeObject(forKey: key)
-    }
+    static func clearAll() { table.clearAll() }
 
     /// The best saved profile for the currently-present `fingerprints`: the one with
     /// the most displays whose fingerprints are all present (superset match). nil if
     /// none applies.
     static func bestMatch(for fingerprints: [String]) -> Profile? {
         let present = Set(fingerprints)
-        return all().values
+        return table.all().values
             .filter { Set($0.keys).isSubset(of: present) }
             .max { $0.count < $1.count }
     }

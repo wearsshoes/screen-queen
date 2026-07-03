@@ -41,7 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `register` supplies a default without persisting anything. 666 on purpose.
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 666])
         ScriptFont.register()   // the marquee typeface — not doing this in San Francisco
-        PrefsMigration.migrateIfNeeded()   // carry over profiles/calibration from the old bundle id
         setupMenuBar()
         setupArranger()
         events.onHotkeyToggle = { [weak self] in self?.toggleArranger() }

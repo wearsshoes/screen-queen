@@ -6,33 +6,24 @@ import Foundation
 /// fingerprint so a calibration sticks to that physical monitor across
 /// reconnects, and persisted in UserDefaults.
 enum CalibrationStore {
-    private static let key = "physicalSizeOverridesMM"
-
-    /// fingerprint -> [widthMM, heightMM]
-    private static func all() -> [String: [Double]] {
-        UserDefaults.standard.dictionary(forKey: key) as? [String: [Double]] ?? [:]
-    }
+    private static let table = DefaultsTable<CGSize>(key: "physicalSizeOverridesMM")
 
     /// All stored calibrations (fingerprint → physical size in mm) — for the debug view.
     static func allOverrides() -> [String: CGSize] {
-        all().compactMapValues { $0.count == 2 && $0[0] > 0 ? CGSize(width: $0[0], height: $0[1]) : nil }
+        table.all().filter { $0.value.width > 0 }
     }
 
     static func override(for fingerprint: String) -> CGSize? {
-        guard let v = all()[fingerprint], v.count == 2, v[0] > 0 else { return nil }
-        return CGSize(width: v[0], height: v[1])
+        guard let size = table[fingerprint], size.width > 0 else { return nil }
+        return size
     }
 
     static func setOverride(_ size: CGSize, for fingerprint: String) {
-        var dict = all()
-        dict[fingerprint] = [Double(size.width), Double(size.height)]
-        UserDefaults.standard.set(dict, forKey: key)
+        table[fingerprint] = size
     }
 
     static func clearOverride(for fingerprint: String) {
-        var dict = all()
-        dict[fingerprint] = nil
-        UserDefaults.standard.set(dict, forKey: key)
+        table[fingerprint] = nil
     }
 
     /// Convert a diagonal measurement (inches) into physical width/height in mm,
