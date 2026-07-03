@@ -6,9 +6,7 @@ import AppKit
 /// the physical plane.
 extension Arranger {
 
-    /// The right-hand mirror column: one compact card per mirrored display, showing its
-    /// name, resolution, and which display it mirrors — no zoom slider — plus a small
-    /// un-mirror button that returns it to the plane.
+    /// One compact card per mirrored display, plus an un-mirror button.
     func drawMirrorColumn() {
         unmirrorButtonRects.removeAll()
         airplaySettingsButtonRect = nil
@@ -19,8 +17,7 @@ extension Arranger {
         let pad: CGFloat = 18
         let cardW = colW - pad * 2       // fixed width; height follows each screen's aspect
         let gap: CGFloat = 16
-        // The column stacks top-down. In this y-up view "down" means *decreasing* y, so we
-        // track `y` as the top edge of the next element and subtract each element's height.
+        // Stacks top-down: `y` is the next element's top edge (view y-up, so subtract).
         var y = bounds.height - outerPadding
 
         let hAttrs: [NSAttributedString.Key: Any] = [
@@ -35,8 +32,7 @@ extension Arranger {
         }
 
         for d in mirrored {
-            // The card is a scaled rectangle of the real screen: fixed width, height from
-            // its aspect ratio (clamped so a very wide screen's card still fits the text).
+            // Height from the screen's aspect, clamped so the text still fits.
             let sz0 = pointSize(d)
             let aspect = sz0.height > 0 ? sz0.width / sz0.height : 16.0 / 9
             let cardH = min(max(cardW / max(aspect, 0.1), 120), 260)
@@ -46,7 +42,6 @@ extension Arranger {
             NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
 
             let inner = card.insetBy(dx: 18, dy: 16)
-            // Lines stack top-down: start at the card's top and drop by each line's height.
             var ty = inner.maxY
             func line(_ s: String, _ font: NSFont, _ color: NSColor, glow: NSColor? = nil) {
                 var a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
@@ -65,8 +60,6 @@ extension Arranger {
             let nameGlow = NSColor.systemPink.blended(withFraction: 0.55, of: .white) ?? .white
             line(d.nickname, DragFont.script(size: 30), .systemPink, glow: nameGlow)
             line(d.name, .systemFont(ofSize: 10), NSColor.white.withAlphaComponent(0.5))
-            // The mirrored display's own stats — resolution (HiDPI-tagged), diagonal, PPI —
-            // like a plane tile, so the card isn't only "what it mirrors".
             let sz = pointSize(d)
             let pixelW = Int(d.pixelSize.width)
             let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
@@ -102,10 +95,9 @@ extension Arranger {
         }
     }
 
-    /// A read-only card for a macOS-managed AirPlay *visual* session — including the
-    /// "Window or App" mode that has no `CGDirectDisplay`, which is why it lives here
-    /// rather than as a plane tile. We can detect it (via `AirPlayMonitor`) but can't
-    /// cancel it through public API, so the action hands off to system settings.
+    /// A read-only card for a macOS-managed AirPlay *visual* session — it can have no
+    /// `CGDirectDisplay` ("Window or App" mode), hence a card and not a plane tile. We
+    /// can detect it but not cancel it, so the action hands off to system settings.
     private func drawAirPlayCard(
         _ session: AirPlaySession, colX: CGFloat, pad: CGFloat, cardW: CGFloat,
         y: inout CGFloat, hAttrs: [NSAttributedString.Key: Any]
@@ -120,7 +112,6 @@ extension Arranger {
         NSBezierPath(roundedRect: card, xRadius: 12, yRadius: 12).fill()
 
         let inner = card.insetBy(dx: 18, dy: 16)
-        // Lines stack top-down: start at the card's top and drop by each line's height.
         var ty = inner.maxY
         func line(_ s: String, _ font: NSFont, _ color: NSColor) {
             let a: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
@@ -133,8 +124,7 @@ extension Arranger {
             ty -= 5
         }
 
-        // Device name, with the AirPlay glyph inline before it (sized to the 20pt title
-        // and drawn as a template so it takes the label color).
+        // Device name, with the AirPlay glyph inline before it.
         let nameFont = NSFont.boldSystemFont(ofSize: 20)
         let name = (session.receiverName ?? Copy.unknownAirPlayReceiver) as NSString
         let nameAttrs: [NSAttributedString.Key: Any] = [.font: nameFont, .foregroundColor: NSColor.labelColor]
@@ -158,9 +148,8 @@ extension Arranger {
         line(Copy.airplayFinePrint,
              .systemFont(ofSize: 13), .secondaryLabelColor)
 
-        // Hands off to the Control Center **Screen Mirroring** menu — the live control
-        // for an AirPlay session (Display Settings doesn't know about it), and the only
-        // way to change or end one we can see but can't cancel ourselves.
+        // Hands off to Control Center's Screen Mirroring menu (Display Settings doesn't
+        // know about AirPlay sessions).
         let btn = NSRect(x: inner.minX, y: ty - 6 - 28, width: 168, height: 28)
         NSColor(white: 0.4, alpha: 0.9).setFill()
         NSBezierPath(roundedRect: btn, xRadius: 6, yRadius: 6).fill()

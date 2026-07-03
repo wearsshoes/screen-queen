@@ -7,19 +7,13 @@ extension Arranger {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        // Each per-screen window owns its own dim backdrop. While another screen's tile
-        // is being dragged, *this* screen brightens if it's the one being moved — a
-        // real-world "you're dragging me" cue on the physical monitor: a brighter *and*
-        // more opaque wash than the usual translucent dim.
+        // The backdrop wash. If this screen's own tile is being dragged (from any
+        // canvas), brighten it — a real-world "you're dragging me" cue.
         let beingDragged = centerID != nil && state.draggingDisplayID == centerID
         if beingDragged {
-            // Wash the whole screen in the system accent (darkened a touch so tiles/bars
-            // still read on top) — the same accent used for the selected tile.
             (NSColor.systemPink.blended(withFraction: 0.2, of: .black) ?? .systemPink)
                 .withAlphaComponent(0.75).setFill()
         } else {
-            // A behind-window blur sits under this wash; keep it fairly dark for a moody,
-            // focused backdrop.
             NSColor.black.withAlphaComponent(0.55).setFill()
         }
         bounds.fill()
@@ -36,15 +30,11 @@ extension Arranger {
         // so the shadow reads under it (the tile lifts off the plane, macOS-style).
         if let sel = selectedID, let r = rects[sel] { drawSelectedShadow(t.viewRect(r)) }
         for d in displays where rects[d.id] != nil { drawTile(for: d, in: t.viewRect(rects[d.id]!), scale: t.scale) }
-        // Hide info cards for displays not drawn this pass (removed, or now in the mirror
-        // column) so a stale frosted card doesn't linger.
+        // Hide info cards for displays not drawn this pass so a stale card doesn't linger.
         let drawn = Set(displays.filter { rects[$0.id] != nil }.map(\.id))
         for (id, card) in labelCards where !drawn.contains(id) { card.isHidden = true }
-        // Predicted Dock: a strip hugging the Dock edge of the screen it'll land on.
-        // With the live feed on, the tiles already show the real desktop (Dock included),
-        // so only surface the indicator when it's informative: the Dock would move, or a
-        // menu-bar drag is underway (grabbing it signals intent to move main, so show it
-        // immediately). With the feed off, always show it.
+        // Predicted Dock strip. With the live feed on the tiles already show the real
+        // Dock, so only surface it when informative (Dock would move / mid menu-bar drag).
         if let dockID = predictedDockDisplay(), let r = rects[dockID] {
             let dockWouldMove = dockID != state.currentDockDisplay()
             let showDock = !state.feedEnabled || dockWouldMove || draggingMenuBar != nil
@@ -52,9 +42,7 @@ extension Arranger {
                 drawDockIndicator(in: t.viewRect(r), edge: DockPredictor.edge())
             }
         }
-        // Seam particle emitters and the front-glow overlay are repositioned each draw
-        // (both live on layers that composite over this view's drawn content). Wrap the bar
-        // passes, which register the current edges for both.
+        // The bar passes register the current seam edges with both layer overlays.
         seamEmitters.begin()
         seamGlow.begin()
         drawReferenceBars(bars, t: t, seamColor: seamColor)
@@ -89,16 +77,13 @@ extension Arranger {
         }
     }
 
-    /// Reference bars at each seam, in the seam's color: the reference window shown on
-    /// each side at its own physical size (which differs by density — the size jump a
-    /// window makes crossing the seam). Drawn D-shaped and flush to the seam line,
-    /// echoing the on-glass edge bars: each bar rounds on the side facing its own
-    /// display's center and sits flat against the seam.
+    /// Reference bars at each seam: the reference window shown on each side at its own
+    /// physical size (the size jump a window makes crossing the seam). D-shaped, flush
+    /// to the seam, rounding toward the owning display's center.
     private func drawReferenceBars(_ bars: [SeamBar], t: Transform, seamColor: [DisplayGraph.SeamKey: NSColor]) {
-        let thickness: CGFloat = 5, gap: CGFloat = 2   // hug the seam, small breathing gap
-        // Ends clear the tile's rounded corners, but a fixed trim would swamp a short
-        // bar and floor it to a constant stub — so cap the trim at 1/3 of the bar and
-        // keep only a hairline floor, so length stays proportional to the true overlap.
+        let thickness: CGFloat = 5, gap: CGFloat = 2
+        // Trim the ends clear of the rounded corners, capped at 1/3 so a short bar's
+        // length stays proportional to the true overlap.
         func barLen(_ inches: CGFloat) -> CGFloat {
             let full = inches * t.scale
             return max(1.5, full - min(8, full / 3))
@@ -110,33 +95,28 @@ extension Arranger {
             if bar.isVertical {
                 let cA = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongA))
                 let cB = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongB))
-                // a = left display: bar's right edge at the seam, rounds toward a's center (left).
+                // a = left display: its bar hugs the seam and rounds toward its center.
                 drawBar(NSRect(x: cA.x - gap - thickness, y: cA.y - lenA / 2, width: thickness, height: lenA), roundedOn: .minX, color: color)
                 drawBar(NSRect(x: cB.x + gap, y: cB.y - lenB / 2, width: thickness, height: lenB), roundedOn: .maxX, color: color)
             } else {
                 let cA = t.viewPoint(CGPoint(x: bar.physAlongA, y: bar.physLine))
                 let cB = t.viewPoint(CGPoint(x: bar.physAlongB, y: bar.physLine))
-                // a = top display (center above the seam, i.e. larger y): its bar sits above
-                // the seam line and rounds on its top edge (.maxY, facing a's center); b
-                // (below) sits under the seam and rounds .minY.
+                // a = top display: its bar sits above the seam and rounds toward its center.
                 drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y + gap, width: lenA, height: thickness), roundedOn: .maxY, color: color)
                 drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y - gap - thickness, width: lenB, height: thickness), roundedOn: .minY, color: color)
             }
         }
     }
 
-    /// This screen's density relative to the 109 pt/in panels the sparkle look was tuned on.
-    /// Sparkles are set in points, so multiplying their scale by this keeps the shimmer the
-    /// same *physical* size on every screen (denser panel → more points for the same inches).
+    /// This screen's density relative to the 109 pt/in panels the sparkle look was tuned
+    /// on — keeps the shimmer the same *physical* size on every screen.
     private var screenDensityScale: CGFloat {
         let ppi = displays.first { $0.id == centerID }?.pointsPerInch
         return CGFloat(ppi ?? 109) / 109
     }
 
-    /// A D-shaped mini-map bar rendered as *two* glows around the sparkles: a wide soft
-    /// glow behind them (painted here, under the emitter layer) that bleeds deep toward the
-    /// display center, and a tight bright glow in *front* of them (on an overlay layer above
-    /// the emitters). Sparkles drift off the inward edge toward the center and fade out.
+    /// A D-shaped mini-map bar: a wide soft glow behind the sparkles (painted here) and
+    /// a tight bright glow in front (overlay layer). Sparkles drift inward and fade.
     private func drawBar(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
         drawBehindGlow(rect, roundedOn: inward, color: color)
         let eid = barID(rect, inward)
@@ -145,15 +125,12 @@ extension Arranger {
         seamGlow.add(rect: rect, inward: overlayEdge(inward), color: color, id: "mini-\(eid)")
     }
 
-    /// The wide, soft glow *behind* the sparkles: seam color opaque at the flat (outward)
-    /// edge, fading to transparent well past the inward edge (toward the display center) —
-    /// it reaches ~2× the bar depth into the tile so the color bleeds rather than sits as a
-    /// slab. Clipped to a D-shape extended to that reach so the bleed isn't capped at the
-    /// thin bar.
+    /// The wide, soft glow behind the sparkles: opaque at the seam edge, fading to clear
+    /// ~2× the bar depth into the tile, clipped to a D-shape extended to that reach.
     private func drawBehindGlow(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
         let depth = (inward == .minX || inward == .maxX) ? rect.width : rect.height
-        let reach = depth * behindGlowReach          // how far past the inward edge the glow bleeds
-        // Grow the rect inward by (reach - depth) so its inward edge lands at the glow's end.
+        let reach = depth * behindGlowReach
+        // Grow the rect inward so its inward edge lands at the glow's end.
         let ext: NSRect
         switch inward {
         case .minX: ext = NSRect(x: rect.maxX - reach, y: rect.minY, width: reach, height: rect.height)
@@ -165,7 +142,7 @@ extension Arranger {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         dPath(ext, roundedOn: inward).addClip()
-        // Gradient from the seam (outward) edge → the extended inward edge: opaque → clear.
+        // Gradient from the seam edge → the extended inward edge: opaque → clear.
         let (start, end): (CGPoint, CGPoint)
         switch inward {
         case .minX: start = CGPoint(x: ext.maxX, y: ext.midY); end = CGPoint(x: ext.minX, y: ext.midY)
@@ -173,16 +150,12 @@ extension Arranger {
         case .minY: start = CGPoint(x: ext.midX, y: ext.maxY); end = CGPoint(x: ext.midX, y: ext.minY)
         case .maxY: start = CGPoint(x: ext.midX, y: ext.minY); end = CGPoint(x: ext.midX, y: ext.maxY)
         }
-        // Slightly softened at the seam so the front glow reads as the brighter core.
         let gradient = NSGradient(colors: [color.withAlphaComponent(0.7), color.withAlphaComponent(0)],
                                   atLocations: [0, 1], colorSpace: .sRGB)
-        // Composite the glow in its own transparency layer so the end feathers below
-        // erase only *the glow*, not the canvas painted beneath it.
+        // Own transparency layer, so the destination-out end feathers below erase only
+        // the glow, not the canvas painted beneath it.
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
         gradient?.draw(from: start, to: end, options: [])
-        // Feather the two ends along the seam — inside the bar's true bounds, so the
-        // extent stays exact — with destination-out ramps that melt the slab's square
-        // cuts. Point-capped so long bars keep tight, readable ends.
         let vertical = inward == .minX || inward == .maxX
         let alongLen = vertical ? ext.height : ext.width
         let ramp = min(22, alongLen * 0.3)
@@ -225,67 +198,49 @@ extension Arranger {
         }
     }
 
-    /// A stable per-edge id so an emitter persists across frames (quantized so sub-pixel
-    /// jitter doesn't reseed a new emitter each draw).
+    /// A stable per-edge id (quantized so sub-pixel jitter doesn't reseed the emitter).
     private func barID(_ r: NSRect, _ inward: RectEdge) -> String {
         "\(Int(r.minX / 3))-\(Int(r.minY / 3))-\(inward)"
     }
 
-    /// Full-screen reference bars hugging *this* screen's real edges (in its own
-    /// point coordinates), in the seam's color — the on-glass depiction of how big a
-    /// window is as it crosses the seam. Drawn only on the window that sits on the
-    /// participating screen; the matching bar on the other screen shares the color.
+    /// Full-screen reference bars hugging *this* screen's real edges, in the seam's
+    /// color — the on-glass depiction of a window's size jump crossing the seam.
     private func drawEdgeBars(_ bars: [SeamBar], seamColor: [DisplayGraph.SeamKey: NSColor]) {
         guard let me = centerID else { return }
-        // Constant *physical* thickness on every screen: these bars live in this screen's
-        // point space, so a fixed point thickness would look thinner on a denser panel.
-        // Convert a target physical thickness to points via this screen's density.
+        // Constant *physical* thickness: convert inches → points via this screen's density.
         let thicknessInches: CGFloat = 0.08
         let ppi = displays.first { $0.id == me }?.pointsPerInch
         let thickness: CGFloat = ppi.map { thicknessInches * CGFloat($0) } ?? 9
-        // The bars' `localAlong`/`windowPoints` are in the display's *previewed* point
-        // space (from `sizedDisplays`), but these edge bars are drawn against the real
-        // window `bounds`. During a resolution preview those differ, so scale the along-
-        // axis position/length from previewed points onto the real bounds — otherwise the
-        // edge-bar spacing drifts while the zoom slider moves (the mini-map bars, which
-        // live in previewed space throughout, stay correct).
+        // Bar offsets/lengths are in *previewed* point space but drawn against the real
+        // window bounds — scale them across, or spacing drifts during a zoom preview.
         let previewed = displays.first { $0.id == me }.map { pointSize($0) }
         for bar in bars where bar.aID == me || bar.bID == me {
             let weAreA = (bar.aID == me)
             let facing = seamColor[DisplayGraph.SeamKey(bar.aID, bar.bID)] ?? .systemGray
-            // Map previewed-point offsets onto the real window bounds along the seam axis.
             let axisPreview = bar.isVertical ? (previewed?.height ?? bounds.height)
                                              : (previewed?.width ?? bounds.width)
             let axisReal = bar.isVertical ? bounds.height : bounds.width
             let s = axisPreview > 0 ? axisReal / axisPreview : 1
             let along = (weAreA ? bar.localAlongA : bar.localAlongB) * s
-            // Small end margin, but capped so a short crossing region shrinks
-            // proportionally instead of vanishing into the fixed margin.
+            // End margin capped so a short crossing region shrinks proportionally.
             let len = max(1.5, bar.windowPoints * s - min(12, bar.windowPoints * s / 3))
             let rect: NSRect
-            // `inward` is the side facing the screen center (rounded); the opposite,
-            // outward side sits flat against the screen edge.
+            // `inward` = the side facing the screen center (rounded); outward sits flat.
             let inward: RectEdge
             if bar.isVertical {
                 let x = weAreA ? bounds.width - thickness : 0    // a = left display
-                // `along` is a point offset down from the screen's *top* (macOS point space is
-                // y-down); the view is y-up. Pass it through the same single y-flip gate the
-                // mini-map uses so the bar lands at the real seam — no bespoke flip here.
+                // `along` is y-down from the screen top; flip through the one point-space gate.
                 let yCenter = pointYToView(along)
                 rect = NSRect(x: x, y: yCenter - len / 2, width: thickness, height: len)
-                inward = weAreA ? .minX : .maxX                  // a hugs the right edge → rounds left
+                inward = weAreA ? .minX : .maxX
             } else {
-                // `a` is above the seam, so the seam is at its bottom edge (y 0); "inward"
-                // (toward center) rounds upward = .maxY.
-                let y = weAreA ? 0 : bounds.height - thickness
+                let y = weAreA ? 0 : bounds.height - thickness   // a = above the seam
                 rect = NSRect(x: along - len / 2, y: y, width: len, height: thickness)
                 inward = weAreA ? .maxY : .minY
             }
             drawBehindGlow(rect, roundedOn: inward, color: facing)
             let eid = barID(rect, inward)
-            // Edge bars are full-screen scale → larger particles than the mini-map bars, with
-            // a deeper drift (travel only — size/spacing stay put). Scaled by the screen's
-            // density so the shimmer is the same physical size everywhere.
+            // Full-screen scale → larger particles, deeper drift than the mini-map bars.
             seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: facing,
                              id: "edge-\(eid)", sizeScale: 2 * screenDensityScale, travelBoost: 3)
             seamGlow.add(rect: rect, inward: overlayEdge(inward), color: facing, id: "edge-\(eid)")
@@ -294,16 +249,13 @@ extension Arranger {
 
     private enum RectEdge { case minX, maxX, minY, maxY }
 
-    /// A rounded rect with only the two corners on the `inward` edge rounded (the
-    /// outward edge and its corners stay square). `appendArc(from:to:radius:)` rounds
-    /// each traversed corner; feeding radius 0 at the outward corners keeps them flat.
+    /// A rect with only the two corners on the `inward` edge rounded (radius 0 keeps the
+    /// outward corners square).
     private func dPath(_ r: NSRect, roundedOn inward: RectEdge) -> NSBezierPath {
-        let cr = min(r.width, r.height) * 0.45   // corner radius on the inward side
-        // Corners in order (bl, br, tr, tl) with the radius to use at each.
+        let cr = min(r.width, r.height) * 0.45
         let bl = CGPoint(x: r.minX, y: r.minY), br = CGPoint(x: r.maxX, y: r.minY)
         let tr = CGPoint(x: r.maxX, y: r.maxY), tl = CGPoint(x: r.minX, y: r.maxY)
         func rad(_ c: RectEdge...) -> CGFloat { c.contains(inward) ? cr : 0 }
-        // Radius per corner: a corner is rounded iff it lies on the inward edge.
         let rBL = rad(.minX, .minY), rBR = rad(.maxX, .minY)
         let rTR = rad(.maxX, .maxY), rTL = rad(.minX, .maxY)
 
@@ -317,21 +269,18 @@ extension Arranger {
         return p
     }
 
-    /// A pink glow halo behind the selected tile — how you tell which screen the cursor
-    /// (the active window) is on. It's drawn *before* the tile, so the tile covers the fill
-    /// and only the blur bleeds out all around; the seam glitter/glow, drawn later on top,
-    /// is untouched. Two passes — a wide soft outer bloom and a tight bright inner ring —
-    /// give it presence without an offset "drop shadow" look.
+    /// A pink glow halo behind the selected tile, drawn *before* it so only the blur
+    /// bleeds out (seam glitter, drawn later, is untouched). Two passes: wide soft
+    /// bloom, then a tight bright ring.
     private func drawSelectedShadow(_ tileRect: NSRect) {
         let path = NSBezierPath(roundedRect: tileRect.insetBy(dx: 1.5, dy: 1.5),
                                 xRadius: tileCornerRadius, yRadius: tileCornerRadius)
-        // (blur radius, glow alpha) — outer bloom first, then a brighter tight halo.
         for (blur, alpha) in [(30.0, 0.55), (12.0, 0.95)] as [(CGFloat, CGFloat)] {
             NSGraphicsContext.saveGraphicsState()
             let glow = NSShadow()
             glow.shadowColor = NSColor.systemPink.withAlphaComponent(alpha)
             glow.shadowBlurRadius = blur
-            glow.shadowOffset = .zero          // even glow all around, not a drop shadow
+            glow.shadowOffset = .zero          // even glow, not a drop shadow
             glow.set()
             NSColor.black.setFill()
             path.fill()
@@ -339,12 +288,8 @@ extension Arranger {
         }
     }
 
-    /// A mini Dock hugging the predicted Dock edge of a tile: three app squircles, a
-    /// divider line, and a fourth squircle (Trash) — the macOS Dock in miniature, so
-    /// it's clear which screen the Dock lands on. Laid out along the Dock's axis.
-    /// Depth (perpendicular to the Dock axis) a bottom Dock strip occupies within a
-    /// tile — icon + tray + edge margin — so the resolution slider can sit above it.
-    /// Mirrors the geometry in `drawDockIndicator`.
+    /// Depth a bottom Dock strip occupies within a tile (mirrors `drawDockIndicator`'s
+    /// geometry), so other chrome can clear it.
     func dockStripDepth(in tile: NSRect) -> CGFloat {
         let inset = tile.insetBy(dx: 1.5, dy: 1.5)
         let icon = min(max(inset.height * 0.10, 7), 15)
@@ -353,14 +298,15 @@ extension Arranger {
         return margin + icon + tray * 2 + 4   // + a little breathing room
     }
 
+    /// The macOS Dock in miniature (3 squircles · divider · Trash) hugging the predicted
+    /// Dock edge of a tile.
     private func drawDockIndicator(in tile: NSRect, edge: DockPredictor.Edge) {
         let inset = tile.insetBy(dx: 1.5, dy: 1.5)
-        let horizontal = (edge == .bottom)            // bottom Dock runs left↔right
-        // Icon size from the short dimension; the run centers along the long one.
+        let horizontal = (edge == .bottom)
         let icon = min(max((horizontal ? inset.height : inset.width) * 0.10, 7), 15)
-        let gap = icon * 0.28                          // tight spacing between icons
-        let preDivider = icon * 0.22                    // tight gap on the divider's left
-        let postDivider = icon * 0.34                   // a smidge more on the right
+        let gap = icon * 0.28
+        let preDivider = icon * 0.22
+        let postDivider = icon * 0.34
         let tray = icon * 0.34                          // dark tray padding around the icons
         let margin = icon * 0.5                         // clearance from the screen edge
         let r = icon * 0.28                             // squircle corner radius
@@ -409,9 +355,7 @@ extension Arranger {
     }
 
     private func drawTile(for display: DisplaySnapshot, in rect: NSRect, scale: CGFloat) {
-        // Monitors are neutral now — color lives on the seams (the bars), not the tiles.
-        // A light gray reads as a "screen" against the darker backdrop; the selected tile
-        // takes a light wash of the *system accent* and lifts via `drawSelectedShadow`.
+        // Tiles stay neutral — color lives on the seams; selection gets the accent wash.
         let selected = display.id == selectedID
         let color = selected
             ? NSColor.systemPink.blended(withFraction: 0.75, of: .white) ?? .white
@@ -422,21 +366,15 @@ extension Arranger {
         color.setStroke(); path.lineWidth = 1.5; path.stroke()
         drawWallpaper(for: display, in: inset, selected: selected)
         drawBoxing(for: display, in: inset, color: color)
-        // Centered name/resolution/ppi, with the pinned resolution slider on the selected tile.
         drawLabel(for: display, in: inset, selected: selected, viewScale: scale, tileColor: color)
         // The main display carries a menu-bar strip (drag it to another tile to move main).
         if display.isMain, draggingMenuBar == nil { drawMenuBar(in: menuBarRect(inTile: inset)) }
     }
 
-    /// Fill the tile with what's actually on that screen: a live capture frame (the real
-    /// desktop + windows, minus Screen Queen's own overlay) when available, else the static
-    /// wallpaper. Clipped to the rounded tile and scaled to cover. A mirrored slave shows
-    /// its master's content. Dimmed slightly so labels/bars stay legible on top.
+    /// Fill the tile with what's on that screen: a live capture frame when the feed is
+    /// on, else the static wallpaper. A mirrored slave shows its master's content.
     private func drawWallpaper(for display: DisplaySnapshot, in tile: NSRect, selected: Bool) {
         let sourceID = display.mirrorMaster ?? display.id
-        // Prefer the live capture (only when the feed is enabled); fall back to the static
-        // wallpaper. Both are reduced to a CGImage and drawn through one orientation-
-        // correct primitive.
         let live = state.feedEnabled ? state.capture?.frames[sourceID] : nil
         let image = live ?? wallpaper(for: display)?.asCGImage
         guard let image else { return }
@@ -446,8 +384,7 @@ extension Arranger {
         NSBezierPath(roundedRect: tile, xRadius: tileCornerRadius, yRadius: tileCornerRadius).addClip()
         drawImageAspectFill(image, in: tile, alpha: selected ? 1.0 : 0.95)
 
-        // A very faint scrim so seam bars/anchors keep contrast against busy content
-        // (the info block has its own plate now, so this can be light).
+        // A faint scrim so seam bars/anchors keep contrast against busy content.
         NSColor.black.withAlphaComponent(selected ? 0.06 : 0.12).setFill()
         tile.fill()
     }
@@ -458,10 +395,8 @@ extension Arranger {
         let iw = CGFloat(image.width), ih = CGFloat(image.height)
         let scale = max(rect.width / iw, rect.height / ih)
         let w = iw * scale, h = ih * scale
-        // Snap the image's destination to whole device pixels so it lands on the pixel grid
-        // rather than straddling it — the tile rect comes from the (fractional) view
-        // transform, and a sub-pixel origin softens the whole image, most visibly the live
-        // desktop feed. (Cover-crop already bleeds past the tile, so a ≤1px nudge is free.)
+        // Pixel-snap the destination: a sub-pixel origin softens the whole image, and the
+        // cover-crop already bleeds past the tile so a ≤1px nudge is free.
         let dst = NSRect(x: pixelSnap(rect.midX - w / 2), y: pixelSnap(rect.midY - h / 2),
                          width: pixelSnap(w), height: pixelSnap(h))
 
@@ -490,29 +425,25 @@ extension Arranger {
         return image
     }
 
-    /// If the current (or previewed) mode's aspect ratio doesn't match the panel's
-    /// physical shape, the image is letter-/pillar-boxed. Draw the actual image area as
-    /// an inset rectangle and hatch the black-bar regions so it's obvious.
+    /// When the (previewed) mode's aspect doesn't match the panel's, outline the actual
+    /// image area and hatch the letter-/pillar-box bars.
     private func drawBoxing(for display: DisplaySnapshot, in tile: NSRect, color: NSColor) {
-        // Image aspect from the current or pending pixel resolution.
         let pending = state.pendingMode(for: display.id)
         let imgW = Double(pending?.pixelWidth ?? Int(display.pixelSize.width))
         let imgH = Double(pending?.pixelHeight ?? Int(display.pixelSize.height))
-        // Compare the image aspect against the panel's native pixel aspect.
         guard imgW > 0, imgH > 0, let panAspect = nativeAspect(display.id) else { return }
         let imgAspect = imgW / imgH
         guard abs(imgAspect - panAspect) / panAspect > 0.02 else { return }   // fills the panel
 
-        // The image rect: the largest tile-centered rect with the image's aspect.
+        // The largest tile-centered rect with the image's aspect.
         var img = tile.insetBy(dx: 2, dy: 2)
-        if imgAspect > panAspect {                 // wider than panel → letterbox (bars top/bottom)
+        if imgAspect > panAspect {                 // wider than panel → letterbox
             let h = img.width / CGFloat(imgAspect)
             img = NSRect(x: img.minX, y: img.midY - h / 2, width: img.width, height: h)
-        } else {                                   // narrower → pillarbox (bars left/right)
+        } else {                                   // narrower → pillarbox
             let w = img.height * CGFloat(imgAspect)
             img = NSRect(x: img.midX - w / 2, y: img.minY, width: w, height: img.height)
         }
-        // Outline the image area; hatch the boxed (black-bar) regions with diagonal lines.
         NSColor.black.withAlphaComponent(0.35).setStroke()
         let outline = NSBezierPath(rect: img); outline.lineWidth = 1; outline.stroke()
         hatch(tile.insetBy(dx: 2, dy: 2), excluding: img, color: NSColor.black.withAlphaComponent(0.3))
@@ -563,16 +494,10 @@ extension Arranger {
         let effPPI = display.diagonalInches > 0 && sz.width > 0
             ? Double(sz.width) / (Double(display.physicalSizeMM.width) / 25.4) : nil
 
-        // The label is a *true-size preview* of UI at the selected resolution: a base
-        // font of N points occupies (N / pointsPerInch) inches on the real panel, which
-        // maps into the mini-map as `× viewScale` (view px per inch). So the faithful
-        // on-tile font scale is `viewScale / pointsPerInch` — sliding the resolution
-        // grows/shrinks the text just as macOS will (lower res → fewer ppi → bigger), and
-        // the same real element reads the same physical size across every tile. At real
-        // mini-map zooms that's a few px (UI text really is tiny at this scale), so a
-        // constant gain `k` lifts it to a legible range *without distorting the ratios*
-        // between screens; a floor catches the dense/zoomed-out extremes.
-        let previewGain: CGFloat = 5.25   // 1.5× the base legibility gain
+        // True-size preview: the faithful on-tile font scale is `viewScale / ppi`, so
+        // sliding the resolution grows/shrinks the text just as macOS will. A constant
+        // gain lifts it to legible without distorting the ratios between screens.
+        let previewGain: CGFloat = 5.25
         let previewScale = effPPI.map { viewScale / CGFloat($0) * previewGain } ?? (rect.height / 100)
         let fontScale = max(0.525, previewScale)
         func f(_ size: CGFloat, bold: Bool = false, italic: Bool = false) -> NSFont {
@@ -580,18 +505,14 @@ extension Arranger {
             return italic ? NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask) : base
         }
 
-        // The label sits on a dark plate now (so the drag name's glow reads as a glow),
-        // so the rest of the text is light-on-dark; selected tiles lift it toward the
-        // accent instead of toward black.
+        // Light-on-dark text; selected tiles lift it toward the accent.
         let accent = NSColor.systemPink
         let primary = selected ? (accent.blended(withFraction: 0.3, of: .white) ?? accent) : .white
         let secondary = selected ? (accent.blended(withFraction: 0.5, of: .white) ?? accent) : NSColor.white.withAlphaComponent(0.7)
         let tertiary = secondary.withAlphaComponent(0.72)
 
-        // The text lines (drag name, government name, resolution, diagonal·ppi). These
-        // *scale* with the tile to preview resolution, so they must not shove the slider
-        // around. She goes by her drag name (hot-pink script); the EDID/System-name string
-        // is the fine print underneath — work names go in baby letters.
+        // Drag name (hot-pink script), government name (fine print — work names go in
+        // baby letters), resolution, diagonal·ppi.
         var lines: [(String, NSFont, NSColor)] = []
         lines.append((display.nickname, DragFont.script(size: (26 * fontScale).rounded()), .systemPink))
         lines.append((display.name, f(10), tertiary))
@@ -604,9 +525,7 @@ extension Arranger {
             lines.append((diag + Copy.calibratePrompt, f(13), secondary))
         }
 
-        // The card holds only the lines that fit the tile width; oversized lines are
-        // dropped (same as before). The card is a real backdrop-blur subview (`LabelCard`),
-        // sized to the widest fitting line and positioned centred in the tile.
+        // Only the lines that fit the tile width; the card sizes to the widest.
         let gap: CGFloat = 3
         let visible = lines.filter { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).width <= rect.width - 8 }
         let sizes = visible.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]) }
@@ -617,9 +536,8 @@ extension Arranger {
         let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(max(0, visible.count - 1))
         let padX: CGFloat = 11, padY: CGFloat = 6
         let boxW = min(widest + padX * 2, rect.width - 4)
-        // Snap the card to whole device pixels so its coordinate origin is grid-aligned —
-        // the card is positioned off the (fractional) view transform, and the text snap
-        // inside the card is only meaningful if the card's own frame sits on the grid.
+        // Pixel-snap the card's frame — the text snap inside it is only meaningful if
+        // the card's own origin sits on the grid.
         let box = NSRect(x: pixelSnap(rect.midX - boxW / 2), y: pixelSnap(rect.midY - total / 2 - padY),
                          width: pixelSnap(boxW), height: pixelSnap(total + padY * 2))
 
@@ -629,8 +547,6 @@ extension Arranger {
         card.update(LabelCard.Content(
             lines: visible.map { LabelCard.Line(text: $0.0, font: $0.1, color: $0.2) },
             selected: selected, gap: gap))
-        // The resolution slider now lives in the bottom control cluster (between Undo and
-        // Done), acting on the selected display — no longer drawn on the tile.
     }
 
     /// The frosted info card for `id`, created on demand and added above the drawn tiles.
@@ -835,10 +751,8 @@ extension Arranger {
         return CGVector(dx: v.dx / len, dy: v.dy / len)
     }
 
-    /// Feed the "what she sees" panel the current point solve (rendering lives in
-    /// `SolvePanel`). Uses the *actual* origins the seam detection uses (the locked solve
-    /// during a drag), so the panel shows the truth; ambiguity flags come from the trace,
-    /// and each seam carries its own palette color so panel and schematic read as one.
+    /// Feed the "what she sees" panel the *actual* origins the seam detection uses (the
+    /// locked solve during a drag), so the panel shows the truth.
     private func updateSolvePanel(seamColor: [DisplayGraph.SeamKey: NSColor]) {
         let origins = state.pointOrigins()
         let trace = SchematicLayout.solveTrace(rects: state.plane, displays: state.sizedDisplays())

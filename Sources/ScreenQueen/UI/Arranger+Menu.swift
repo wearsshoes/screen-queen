@@ -12,8 +12,7 @@ extension Arranger {
         menu.addItem(withTitle: d.nickname, action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(resolutionMenuItem(for: d))
-        // The built-in display's EDID physical size is authoritative, so it's not
-        // calibratable — offer no size overrides for it.
+        // The built-in's EDID physical size is authoritative — no size overrides for it.
         if !d.isBuiltin {
             menu.addItem(.separator())
             let calItem = NSMenuItem(title: Copy.menuInputSize, action: #selector(calibrateFromMenu(_:)), keyEquivalent: "")
@@ -43,9 +42,6 @@ extension Arranger {
             if let current, ModeCatalog.sameMode(current, mode.cgMode) { mi.state = .on }
             submenu.addItem(mi)
         }
-        // "Show the Full Wardrobe" (reveal the built-in's extended set and every display's
-        // off-native-aspect modes) now lives in the menubar-icon menu — one global toggle,
-        // not per-tile.
         item.submenu = submenu
         return item
     }

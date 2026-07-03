@@ -1,15 +1,9 @@
 import AppKit
 
 /// "What she sees": a small floating panel showing the live reconstructed *point*
-/// arrangement — the actual solve `seamBars` uses. Each display's point rect is outlined
-/// (red = its dock resolved through an ambiguous >1-preimage inverse) and each detected
-/// point-space seam is drawn in that seam's palette color, over the outlines, so panel and
-/// schematic read as one system.
-///
-/// It's a subview on its own layer, lifted *above* the seam sparkle emitters and the front
-/// glow (see the zPosition in `Arranger.solvePanel`), so the map can never obscure its own
-/// readout. It floats: drag it by the title bar. The body is click-through, so it never
-/// blocks tiles it happens to sit over.
+/// arrangement — the actual solve `seamBars` uses. Point rects are outlined (red =
+/// resolved through an ambiguous >1-preimage inverse); seams draw in their palette
+/// color. Draggable; on its own layer above the seam layers.
 final class SolvePanel: NSView {
 
     struct Content {
@@ -20,15 +14,12 @@ final class SolvePanel: NSView {
     private var content = Content()
     private let titleBarHeight: CGFloat = 16
 
-    /// Ghost mode (inactive display): the plate and its outlines redraw in pink so the
-    /// granny view reads as the active screen's ghost, matching the rest of the chrome.
+    /// Ghost mode (inactive display): plate and outlines redraw in pink.
     private var ghost = false
 
-    /// Dragging reports the desired frame origin here instead of moving the panel
-    /// itself — the canvas converts it to a centre-relative inch offset in shared state
-    /// (`ArrangerState.solvePanelCenterOffsetInches`), so the panel sits at the same
-    /// centre-relative spot (scaled with the minimap) on every canvas; all reposition on
-    /// the resulting notify.
+    /// Dragging reports the desired origin here instead of moving the panel itself —
+    /// the canvas stores it as a centre-relative inch offset in shared state, and every
+    /// canvas repositions on the resulting notify.
     var onMoved: ((CGPoint) -> Void)?
 
     func update(_ content: Content) {
@@ -43,8 +34,7 @@ final class SolvePanel: NSView {
         NSRect(x: 0, y: bounds.height - titleBarHeight, width: bounds.width, height: titleBarHeight)
     }
 
-    /// The whole panel is the drag handle — grab it anywhere to move it. (It still floats
-    /// over the schematic; drop it somewhere out of the way if it covers a tile.)
+    /// The whole panel is the drag handle.
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, let sup = superview else { return nil }
         return bounds.contains(convert(point, from: sup)) ? self : nil
@@ -61,8 +51,6 @@ final class SolvePanel: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let off = dragOffset, let sup = superview else { return }
         let p = sup.convert(event.locationInWindow, from: nil)
-        // Follow the cursor; the shared-state applier clamps (against the *smallest*
-        // screen, so the shared position is legal everywhere).
         onMoved?(CGPoint(x: p.x - off.x, y: p.y - off.y))
     }
 
@@ -71,10 +59,8 @@ final class SolvePanel: NSView {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        // Foreground for outlines/labels/text: white normally, pink in ghost mode.
         let ink = ghost ? VirtualMouse.pink : NSColor.white
-        // Chrome: dark rounded plate with a slightly lighter title strip (the drag
-        // handle). Ghosting tints the plate itself toward pink.
+        // Dark rounded plate with a lighter title strip; ghosting tints it toward pink.
         let plate = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
         (ghost ? VirtualMouse.pink.blended(withFraction: 0.55, of: .black) ?? .black : .black)
             .withAlphaComponent(0.6).setFill()

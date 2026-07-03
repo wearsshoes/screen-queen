@@ -1,22 +1,18 @@
 import AppKit
 
-/// The top-of-screen countdown banner — the non-modal descendant of the old
-/// "Keep this arrangement?" alert. It never steals focus and never blocks: it just
-/// sits under the menu bar on *every* screen counting down, because the whole point
-/// is surviving the case where some (or all) screens went dark. One row per live
-/// countdown (`ArrangerState.countdowns`): the whole-cast resolution revert, and the
-/// big-cast feed guard.
+/// The top-of-screen countdown banner — the non-modal descendant of the old "Keep this
+/// arrangement?" alert. It never steals focus and sits under the menu bar on *every*
+/// screen, because the whole point is surviving the case where some screens went dark.
+/// One row per live countdown (`ArrangerState.countdowns`).
 final class CountdownBanner: NSVisualEffectView {
 
-    /// Wired by the canvas to `state.resolveCountdown` so a click on any screen's
-    /// banner clears them all. `keep` = bless the new state; `!keep` = act right now.
+    /// Wired to `state.resolveCountdown`: `keep` = bless the new state; `!keep` = act now.
     var onResolve: ((ArrangerState.CountdownKind, _ keep: Bool) -> Void)?
 
     /// A row button's role, for projecting its ghost image (see VirtualMouse.swift).
     enum Role { case keep, act }
 
-    /// The frame (in this banner's coords) of a live row's button, or nil when that
-    /// countdown isn't showing — a source rect the ghost projects.
+    /// The frame (banner coords) of a live row's button, or nil when it isn't showing.
     func buttonRect(kind: ArrangerState.CountdownKind, role: Role) -> CGRect? {
         guard let row = rows[kind], !row.isHidden else { return nil }
         let button = role == .keep ? row.keepButton : row.actButton
@@ -127,8 +123,7 @@ final class CountdownBanner: NSVisualEffectView {
 extension Arranger {
 
     /// Reflect `state.countdowns` in this canvas's banner. Built lazily on the first
-    /// countdown (most sessions never see one); called from `refresh()` so every tick
-    /// and every resolution reaches every screen.
+    /// countdown (most sessions never see one); called from `refresh()`.
     func syncBanner() {
         if banner == nil {
             guard !state.countdowns.isEmpty else { return }

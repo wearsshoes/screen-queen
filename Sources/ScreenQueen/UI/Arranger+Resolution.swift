@@ -28,17 +28,12 @@ extension Arranger {
         zoomPending = true
     }
 
-    /// Global (⌘⇧ +/−/0) resolution zoom, keeping displays roughly proportional in PPI.
-    ///
-    /// A single continuous, *unclamped* `globalZoomLevel` scales every display's starting
-    /// PPI; each display snaps to the achievable mode nearest `startPPI × level`, clamped
-    /// to its own range. Because the level is unclamped, a display that hits its max stays
-    /// pinned while the level keeps rising (others pass it), then rejoins proportionally
-    /// as the level falls back — the "descend alone until ratios match" behaviour. The
-    /// whole ⌘⇧-held run commits as one revertable step (one undo).
+    /// Global (⌘⇧ +/−/0) resolution zoom: an *unclamped* level scales every display's
+    /// starting PPI, each snapping to its nearest achievable mode — so a maxed-out
+    /// display stays pinned while the level rises and rejoins proportionally as it
+    /// falls. The whole run commits as one undo.
     func handleGlobalResolutionKey(_ ch: String) {
-        // A fresh run (no zoom in progress): capture each display's starting PPI and reset
-        // the level. `0` also resets the run and targets each display's default.
+        // Fresh run: capture starting PPIs and reset the level.
         if !zoomPending {
             globalZoomLevel = 1
             globalZoomStartPPI.removeAll()
@@ -90,8 +85,8 @@ extension Arranger {
             targets.append((d.id, mode))
         }
 
-        // Every display is pinned at an extreme — don't let the unclamped level drift, or
-        // you'd have to unwind that phantom travel before anything moves again.
+        // If nothing moved, don't let the unclamped level drift — you'd have to unwind
+        // that phantom travel before anything moves again.
         guard !targets.isEmpty else { NSSound.beep(); return }
         guard anyMoved || ch == "0" else {
             globalZoomLevel = previousLevel

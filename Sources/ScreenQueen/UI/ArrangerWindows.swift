@@ -1,8 +1,8 @@
 import AppKit
 
 /// One full-screen borderless arranger window per display, all sharing a single
-/// `ArrangerState`. Each window's canvas centers on its own screen's tile; a
-/// mutation on any of them broadcasts through the state so all repaint.
+/// `ArrangerState`. Each window's canvas centers on its own screen's tile; a mutation
+/// on any of them broadcasts through the state so all repaint.
 @MainActor
 final class ArrangerWindows {
 
@@ -14,15 +14,14 @@ final class ArrangerWindows {
 
     private let capture = ScreenCaptureManager()
 
-    /// Mouse-move monitors driving the ghost mouse (see VirtualMouse.swift); installed
-    /// while visible, empty otherwise.
+    /// Mouse-move monitors driving the ghost mouse; installed while visible.
     private var mouseMonitors: [Any] = []
-    /// The display the cursor is on (the "active" screen the ghost mirrors). The chrome
-    /// projection is recomputed only when this changes; the ghost mouse, every move.
+    /// The display the cursor is on. The chrome is re-rendered only when this changes;
+    /// the ghost mouse moves every event.
     private var activeDisplayID: CGDirectDisplayID?
 
-    /// At this many screens the live feed is a production number: it defaults off, and
-    /// switching it on arms the feed-guard countdown + watchdog.
+    /// At this many screens the live feed defaults off, and switching it on arms the
+    /// feed-guard countdown + watchdog.
     static let bigCastThreshold = 4
     /// Off-main insurance for the feed guard — see `armFeedGuardIfBigCast`.
     private var feedWatchdog: DispatchWorkItem?
@@ -30,23 +29,19 @@ final class ArrangerWindows {
     init() {
         state.changed = { [weak self] in
             self?.canvases.forEach { $0.refresh() }
-            self?.rerenderChrome()   // a layout/panel change moves the projection
+            self?.rerenderChrome()
         }
         state.onSliderDragChanged = { [weak self] dragging in self?.trackSliderDrag(dragging) }
         state.capture = capture
-        // A new frame from any display just repaints the tiles (coalesced by AppKit).
         capture.onFrame = { [weak self] in self?.canvases.forEach { $0.needsDisplay = true } }
         state.onToggleFeed = { [weak self] on in self?.setFeed(on) }
-        // However a feed-guard countdown ends (keep, cut-now, expiry), the watchdog
-        // stands down with it.
         state.onCountdownResolved = { [weak self] kind in
             if kind == .feedGuard { self?.cancelFeedWatchdog() }
         }
     }
 
-    /// Re-render (restyle + re-project) the chrome from the current, possibly moved,
-    /// layout for the current active screen. Deferred a runloop turn so button-bar
-    /// autolayout has settled into real frames.
+    /// Re-render every canvas's chrome, deferred a runloop turn so button-bar autolayout
+    /// has settled into real frames.
     private func rerenderChrome() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -57,7 +52,7 @@ final class ArrangerWindows {
         }
     }
 
-    /// Turn the live per-display feed on or off (from the toggle button).
+    /// Turn the live per-display feed on or off.
     private func setFeed(_ on: Bool) {
         state.feedEnabled = on
         if on {
@@ -71,12 +66,10 @@ final class ArrangerWindows {
         canvases.forEach { $0.refresh() }
     }
 
-    /// Going live on `bigCastThreshold`+ screens arms an auto-off: the feed cuts
-    /// itself after the countdown unless the user says keep (the banner, Arranger+
-    /// Banner.swift). Belt: if the capture load wedges the main thread, that Timer
-    /// never fires — so a detached watchdog can still stop the streams directly
-    /// (`SCStream.stopCapture` is safe off-main) a grace period later, then settle
-    /// the UI state once the main thread breathes again.
+    /// Going live on `bigCastThreshold`+ screens arms an auto-off unless the user says
+    /// keep. Belt: if the capture load wedges the main thread that Timer never fires, so
+    /// a detached watchdog stops the streams directly (`SCStream.stopCapture` is safe
+    /// off-main) a grace period later.
     private func armFeedGuardIfBigCast() {
         guard NSScreen.screens.count >= Self.bigCastThreshold else { return }
         let seconds = 12
@@ -98,35 +91,28 @@ final class ArrangerWindows {
         feedWatchdog = nil
     }
 
-    /// Show an arranger on every screen (rebuilding to match the current screen set),
-    /// and refresh the shared plane from the OS.
+    /// Show an arranger on every screen and refresh the shared plane from the OS.
     func show(displays: [DisplaySnapshot]) {
         state.update(with: displays)
         rebuild()
         canvases.forEach { $0.refresh() }
         NSApp.activate(ignoringOtherApps: true)
-        // Activating alone doesn't make a borderless overlay key, so on hotkey-open the
-        // arranger takes no keyboard focus until clicked. Make the main display's window
-        // key so shortcuts (arrows, ⌘Z, ⌘Delete, Return) work immediately.
+        // Activating alone doesn't make a borderless overlay key; make the main
+        // display's window key so shortcuts work immediately on hotkey-open.
         makeMainWindowKey()
-        // Default the live feed on unless the machine is already busy (>50% CPU) — a
-        // heavy box shouldn't get a surprise capture load — or the cast is big (4+
-        // screens: that much cross-streaming can bog the whole show down). The user
-        // can toggle it with the leftmost button; on a big cast that arms the feed
-        // guard. Our overlays exist now, so capture can exclude them.
+        // Default the feed on unless the machine is already busy or the cast is big.
         let busy = (ScreenCaptureManager.systemCPUUsage() ?? 0) > 0.5
         let bigCast = NSScreen.screens.count >= Self.bigCastThreshold
         setFeed(!busy && !bigCast)
         installMouseMonitors()
         activeDisplayID = nil
-        mouseDidMove()   // seed the active screen + render the ghost + place the ghost mouse
-        if state.feedEnabled { scheduleFeedLoadCheck() }   // one follow-up, then never again
+        mouseDidMove()   // seed the active screen + render the ghost
+        if state.feedEnabled { scheduleFeedLoadCheck() }
     }
 
-    /// One follow-up CPU check ~½s after going live: the load reading at open predates
-    /// the streams, so this catches a feed that's actually chewing up the machine and
-    /// cuts it. Sampled off-main (the sample blocks ~120ms), acted on back on main. This
-    /// is deliberately a *single* check — no continuous repolling.
+    /// One follow-up CPU check ~½s after going live (the reading at open predates the
+    /// streams). Sampled off-main (the sample blocks ~120ms). Deliberately a *single*
+    /// check — no continuous repolling.
     private func scheduleFeedLoadCheck() {
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) { [weak self] in
             let pegged = (ScreenCaptureManager.systemCPUUsage() ?? 0) > 0.85
@@ -145,9 +131,8 @@ final class ArrangerWindows {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// Key the canvas on `screen` (focus-follows-cursor, driven by `FocusPolicy`).
-    /// Mirrors calibration's don't-steal semantics: no-op when not visible or when
-    /// any of our windows on that screen is already key.
+    /// Key the canvas on `screen` (focus-follows-cursor). No-op when not visible or a
+    /// window on that screen is already key (don't-steal semantics).
     func focusWindow(on screen: NSScreen) {
         guard isVisible else { return }
         let window = windows.values.first { $0.screen?.frame == screen.frame }
@@ -168,8 +153,8 @@ final class ArrangerWindows {
 
     // MARK: - Ghost mouse feed (see VirtualMouse.swift)
 
-    /// Follow the real mouse while visible. A global monitor covers moves over other
-    /// apps' screens; a local one covers our own overlays.
+    /// Follow the real mouse while visible: a global monitor for other apps' screens, a
+    /// local one for our own overlays.
     private func installMouseMonitors() {
         guard VirtualMouse.ghostMouseEnabled, mouseMonitors.isEmpty else { return }
         let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged,
@@ -183,21 +168,17 @@ final class ArrangerWindows {
         }) { mouseMonitors.append(l) }
     }
 
-    /// Convert a global point from Quartz/CG coordinates (y-down, origin at the top-left
-    /// of the primary display) to Cocoa global coordinates (y-up, origin at its
-    /// bottom-left). The flip is about the primary display's height — the screen whose
-    /// frame origin is (0, 0).
+    /// Quartz/CG global point (y-down, top-left of primary) → Cocoa global (y-up),
+    /// flipped about the primary display's height.
     private func cocoaGlobal(fromCG p: CGPoint) -> CGPoint {
         let primaryHeight = NSScreen.screens.first { $0.frame.origin == .zero }?.frame.height
             ?? NSScreen.main?.frame.height ?? p.y
         return CGPoint(x: p.x, y: primaryHeight - p.y)
     }
 
-    /// A slider drag runs a modal tracking loop that starves the mouse monitors, and the
-    /// resolution preview only notifies when the *value* changes (crossing a detent) — so
-    /// between detents, and while moving the mouse without changing the value (vertically,
-    /// or pinned at an end), the ghost aids froze. Drive them from a timer while the slider
-    /// is held. It's added in `.common` mode so it ticks during the `.eventTracking` loop.
+    /// A slider drag runs a modal tracking loop that starves the mouse monitors (and the
+    /// value-preview only notifies on detent changes), so drive the ghost aids from a
+    /// timer while held — in `.common` mode so it ticks during `.eventTracking`.
     private var sliderDragTimer: Timer?
 
     private func trackSliderDrag(_ dragging: Bool) {
@@ -208,37 +189,34 @@ final class ArrangerWindows {
         sliderDragTimer = t
     }
 
-    /// One cursor sample: reproject the chrome only when the active screen changed,
-    /// and always move the ghost mouse (both ride the same per-canvas affine).
+    /// One cursor sample: reproject the chrome only when the active screen changed;
+    /// always move the ghost mouse / beacon / tooltip.
     private func mouseDidMove() {
         guard isVisible else { return }
         let cursor = CGEvent(source: nil)?.location ?? .zero
         let activeID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
             ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
         let active = activeID.flatMap { id in canvases.first { $0.centerID == id } }
-        // The cursor in the active canvas's own view coords (y-up). Derive it from the
-        // *same* `CGEvent` sample as `activeID` — not `NSEvent.mouseLocation`, which during
-        // a slider's modal tracking loop reports where the slider clamped the mouse (x
-        // pinned to the track, y stale), making the ghost cursor jump.
+        // The cursor in the active canvas's view coords, derived from the *same* CGEvent
+        // sample — not `NSEvent.mouseLocation`, which a slider's modal tracking loop
+        // clamps to the track (making the ghost cursor jump).
         var cursorActivePoint: CGPoint?
         if let activeID, let window = windows[activeID] {
-            let up = cocoaGlobal(fromCG: cursor)   // CG (y-down, top-left) → Cocoa (y-up)
+            let up = cocoaGlobal(fromCG: cursor)
             cursorActivePoint = CGPoint(x: up.x - window.frame.minX, y: up.y - window.frame.minY)
         }
         if activeID != activeDisplayID {
             activeDisplayID = activeID
-            // The selected tile follows the cursor's screen: moving to another screen
-            // re-selects it, overriding any manual pick (a click still selects *within*
-            // a screen, but crossing screens wins). Only for a real plane display.
+            // The selected tile follows the cursor's screen (crossing screens overrides a
+            // manual pick; a click still selects within a screen).
             if let activeID, state.plane[activeID] != nil, state.selectedID != activeID {
                 state.selectedID = activeID
                 state.activeV = nil; state.activeH = nil   // drop stale alignment anchors
-                state.notify()   // repaint the highlight + resync the slider everywhere
+                state.notify()
             }
             for canvas in canvases { canvas.renderChrome(active: canvas === active ? nil : active) }
         }
-        // Which bar control (if any) the cursor hovers on the active screen — its fun
-        // tooltip then trails the (ghost) cursor on *every* canvas.
+        // The hovered control's tooltip trails the (ghost) cursor on every canvas.
         let tip = active.flatMap { a in cursorActivePoint.flatMap { a.hoveredTooltip(at: $0) } }
         for canvas in canvases {
             canvas.updateGhostArrow(cursorActivePoint: cursorActivePoint, isActive: canvas === active)
@@ -248,8 +226,7 @@ final class ArrangerWindows {
     }
 
     /// Re-interpret the OS layout into the shared plane and repaint (external change).
-    /// `force` re-reads the plane even when it already matches (e.g. after Reset, which
-    /// must discard any equivalent-but-edited plane).
+    /// `force` re-reads the plane even when it already matches (e.g. after Reset).
     func refresh(displays: [DisplaySnapshot], force: Bool = false) {
         guard isVisible else { return }
         state.update(with: displays, force: force)
@@ -258,9 +235,7 @@ final class ArrangerWindows {
         rerenderChrome()
     }
 
-    /// Refresh the unified chrome metrics (see `ArrangerState`): the largest Dock and
-    /// menu-bar claims anywhere, and the smallest screen extents, so every canvas
-    /// places its chrome at identical, everywhere-in-bounds anchor offsets.
+    /// Refresh the unified chrome metrics (see `ArrangerState`).
     private func updateChromeMetrics() {
         var dock: CGFloat = 0, menu: CGFloat = 0
         var minW = CGFloat(100_000), minH = CGFloat(100_000)
@@ -283,8 +258,7 @@ final class ArrangerWindows {
         for (id, screen) in screens {
             live.insert(id)
             // A borderless overlay doesn't reliably land when `setFrame`-d across a
-            // reconfig (it can end up off-screen), so recreate any window whose screen
-            // frame changed — the clean teardown+rebuild always lands correctly.
+            // reconfig — recreate any window whose screen frame changed.
             if let existing = windows[id], existing.frame != screen.frame {
                 existing.orderOut(nil)
                 canvases.removeAll { $0.centerID == id }
@@ -307,32 +281,24 @@ final class ArrangerWindows {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        // Sit just below the system menu bar so the arranger covers the desktop and
-        // app windows, but the menu bar — and our status-bar icon — stay visible and
-        // clickable on top. (The calibration panel / alerts sit above the arranger via
-        // the shielding level.)
+        // Just below the system menu bar, so the menu bar and our status icon stay
+        // clickable on top. (Calibration/alerts sit above via the shielding level.)
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) - 1)
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         window.isReleasedWhenClosed = false
 
-        // The backdrop softens the desktop/apps showing through the transparent overlay
-        // while the arranger is active. On macOS 26 use native Liquid Glass (clear
-        // style); older systems fall back to a behind-window .hudWindow blur. The canvas
-        // (with its own dim wash) sits on top.
+        // Backdrop: native Liquid Glass on macOS 26, behind-window blur below. The
+        // canvas (with its own dim wash) sits on top.
         let fullFrame = CGRect(origin: .zero, size: frame.size)
         let canvas = Arranger(state: state, frame: fullFrame)
         canvas.centerID = centerID
         canvas.autoresizingMask = [.width, .height]
-        // Re-render this canvas's chrome once its layout settles (first show / resize), so
-        // the tile-scaled bar isn't stuck at the pre-layout size.
         canvas.onLayout = { [weak self] in self?.rerenderChrome() }
 
         if #available(macOS 26.0, *) {
-            // `NSGlassEffectView` draws a light rim at its edges (the Liquid Glass border).
-            // On a full-screen overlay that reads as a white outline around the whole screen.
-            // Oversize the glass past the window bounds on every side so its rim falls outside
-            // the visible area (clipped), and keep the canvas at the true full frame on top so
-            // its own layout/bounds stay correct.
+            // `NSGlassEffectView` draws a light rim at its edges, which reads as a white
+            // outline around the whole screen — oversize the glass past the window bounds
+            // so the rim falls outside the visible area.
             let bleed: CGFloat = 24
             let host = NSView(frame: fullFrame)
             host.autoresizingMask = [.width, .height]
