@@ -1,4 +1,4 @@
-import AppKit
+import SwiftUI
 
 /// A small debug window: the displays seen so far (with fingerprints) and the saved
 /// layout profiles, plus a button to reset the saved profiles.
@@ -6,11 +6,11 @@ import AppKit
 final class DebugWindow {
 
     private var window: NSWindow?
-    private var textView: NSTextView?
 
     func show() {
         if window == nil { build() }
-        refresh()
+        // Fresh controller per show = fresh dump, matching the old refresh-on-show.
+        window?.contentViewController = NSHostingController(rootView: DebugView())
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -24,52 +24,38 @@ final class DebugWindow {
         // The arranger sits at the shielding level; lift the debug window above it so it
         // isn't hidden behind the overlay.
         w.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) + 1)
-
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        let tv = NSTextView()
-        tv.isEditable = false
-        tv.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        tv.textContainerInset = NSSize(width: 10, height: 10)
-        scroll.documentView = tv
-        self.textView = tv
-
-        let reset = NSButton(title: "Reset Saved Layouts", target: self, action: #selector(resetTapped))
-        reset.bezelStyle = .rounded
-        reset.translatesAutoresizingMaskIntoConstraints = false
-
-        let refreshButton = NSButton(title: "Refresh", target: self, action: #selector(refreshTapped))
-        refreshButton.bezelStyle = .rounded
-        refreshButton.translatesAutoresizingMaskIntoConstraints = false
-
-        let container = NSView()
-        container.addSubview(scroll)
-        container.addSubview(reset)
-        container.addSubview(refreshButton)
-        NSLayoutConstraint.activate([
-            scroll.topAnchor.constraint(equalTo: container.topAnchor),
-            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: reset.topAnchor, constant: -8),
-            reset.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            reset.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
-            refreshButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            refreshButton.centerYAnchor.constraint(equalTo: reset.centerYAnchor),
-        ])
-        w.contentView = container
+        w.setContentSize(NSSize(width: 560, height: 460))
         w.center()
         window = w
     }
+}
 
-    @objc private func resetTapped() {
-        LayoutStore.clearAll()
-        refresh()
+struct DebugView: View {
+    @State private var dump = DebugView.makeDump()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                Text(dump)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            HStack {
+                Button("Refresh") { dump = Self.makeDump() }
+                Spacer()
+                Button("Reset Saved Layouts") {
+                    LayoutStore.clearAll()
+                    dump = Self.makeDump()
+                }
+            }
+            .padding(12)
+        }
+        .frame(minWidth: 560, minHeight: 460)
     }
 
-    @objc private func refreshTapped() { refresh() }
-
-    private func refresh() {
+    private static func makeDump() -> String {
         var s = "CONNECTED DISPLAYS\n\n"
         for d in DisplayManager.snapshot() {
             s += "• \(d.name)  “\(d.nickname)”\(d.isMain ? "  [main]" : "")\(d.isBuiltin ? "  [builtin]" : "")\n"
@@ -103,7 +89,6 @@ final class DebugWindow {
                         fp, nick, size.width, size.height,
                         (Double(size.width) * Double(size.width) + Double(size.height) * Double(size.height)).squareRoot() / 25.4)
         }
-
-        textView?.string = s
+        return s
     }
 }
