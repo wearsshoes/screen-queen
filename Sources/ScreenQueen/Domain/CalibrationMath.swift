@@ -88,4 +88,106 @@ enum CalibrationMath {
         let scale = refMeasure / targetMeasure
         return CGSize(width: claimed.width * scale, height: claimed.height * scale)
     }
+
+    // MARK: - The session plan (everything `begin` stages, computed purely)
+
+    /// One tape's staging: starting length (points), the edge it hugs, and the pitch
+    /// its ribbon is ruled at.
+    struct TapeSpec {
+        let length: CGFloat
+        let anchor: BarPlacement
+        let pitch: Double
+    }
+
+    /// The staged math for a match-calibration session: which edge each of the four
+    /// tapes hugs, its starting length and ruling pitch, the aspect link `k`, and the
+    /// starting measures. Pure — the controller only builds tapes from it.
+    struct SessionPlan {
+        let refPrimary: TapeSpec, refPerp: TapeSpec
+        let targetPrimary: TapeSpec, targetPerp: TapeSpec
+        /// Perp:primary physical ratio (the SUSPECT's claimed aspect) — identical on
+        /// both screens, so matching either same-axis pair implies the same scale.
+        let k: Double
+        let refMeasure: Double          // trusted screen's starting measure, true inches
+        let targetMeasure: Double       // target's starting measure, her claimed inches
+        let targetClaimedSize: CGSize   // her EDID story, in inches
+        let targetFull: CGFloat         // the target's primary edge extent (points)
+        let targetPerpFull: CGFloat
+    }
+
+    static func sessionPlan(reference: DisplaySnapshot, target: DisplaySnapshot,
+                            refScreenSize: CGSize, targetScreenSize: CGSize,
+                            refPPT: Double) -> SessionPlan {
+        // The seam picks each screen's *edge* facing the other display; it doesn't
+        // cap the tape, which spans that full edge. Without a seam (non-adjacent),
+        // fall back to the perpendicular-edge convention for the primary too.
+        let seam = SchematicLayout.seam(reference.bounds, target.bounds)
+        let refIsA = seam.map { referenceIsA($0, reference.bounds) } ?? true
+        let refEdge = seam.map { seamEdge($0, selfIsA: refIsA) }
+            ?? deskEdge(isBuiltin: reference.isBuiltin)
+        let targetEdge = seam.map { seamEdge($0, selfIsA: !refIsA) }
+            ?? deskEdge(isBuiltin: target.isBuiltin)
+
+        // Two tapes per screen: the seam-facing edge, plus a perpendicular one —
+        // the bottom by convention, except a laptop panel uses its top (the laptop
+        // is on the desk; its top edge is the one near the monitor's bottom). Each
+        // pair is an independent axis measurement.
+        let (refPlace, refFull) = fullEdgePlacement(refEdge, screenSize: refScreenSize)
+        let (refPerpPlace, refPerpFull) = fullEdgePlacement(
+            perpendicularEdge(to: refEdge, isBuiltin: reference.isBuiltin), screenSize: refScreenSize)
+        let (targetPlace, targetFull) = fullEdgePlacement(targetEdge, screenSize: targetScreenSize)
+        let (targetPerpPlace, targetPerpFull) = fullEdgePlacement(
+            perpendicularEdge(to: targetEdge, isBuiltin: target.isBuiltin), screenSize: targetScreenSize)
+
+        // Per-axis pitches: the trusted screen's true points-per-inch, and the
+        // pitch the target *claims* over EDID — shape trusted, scale on trial.
+        // When she won't even claim a size, assume the trusted pitch.
+        let refPitch = axisPitches(bounds: reference.bounds, sizeMM: reference.physicalSizeMM)
+            ?? (x: refPPT, y: refPPT)
+        let targetPitch: (x: Double, y: Double)
+        let targetClaimedSize: CGSize
+        if let claimed = axisPitches(bounds: target.bounds, sizeMM: target.edidSizeMM) {
+            targetPitch = claimed
+            targetClaimedSize = CGSize(width: Double(target.edidSizeMM.width) / 25.4,
+                                       height: Double(target.edidSizeMM.height) / 25.4)
+        } else {
+            targetPitch = (x: refPPT, y: refPPT)
+            targetClaimedSize = CGSize(width: Double(target.bounds.width) / refPPT,
+                                       height: Double(target.bounds.height) / refPPT)
+        }
+        let primaryVertical = targetPlace.lengthIsVertical
+        func pitch(_ p: (x: Double, y: Double), vertical: Bool) -> Double { vertical ? p.y : p.x }
+        let refPrimaryPitch = pitch(refPitch, vertical: primaryVertical)
+        let refPerpPitch = pitch(refPitch, vertical: !primaryVertical)
+        let targetPrimaryPitch = pitch(targetPitch, vertical: primaryVertical)
+        let targetPerpPitch = pitch(targetPitch, vertical: !primaryVertical)
+
+        // Both screens link their pair at the SUSPECT's claimed aspect: the ratio
+        // between perpendicular and primary physical lengths is `k` on both
+        // sides, so matching either same-axis pair implies the same scale.
+        let k = primaryVertical
+            ? Double(targetClaimedSize.width) / Double(targetClaimedSize.height)
+            : Double(targetClaimedSize.height) / Double(targetClaimedSize.width)
+
+        // The suspect's tapes start at 90% of her own edges (her claimed aspect,
+        // out of her corners). The trusted pair starts at 90% too, shrunk if the
+        // k-linked perpendicular tape wouldn't fit its own edge.
+        let f0 = 0.9
+        let targetMeasure = f0 * Double(targetFull) / targetPrimaryPitch
+        let refMeasure = min(f0 * Double(refFull) / refPrimaryPitch,
+                             f0 * Double(refPerpFull) / refPerpPitch / k)
+
+        return SessionPlan(
+            refPrimary: TapeSpec(length: CGFloat(refMeasure * refPrimaryPitch),
+                                 anchor: refPlace, pitch: refPrimaryPitch),
+            refPerp: TapeSpec(length: CGFloat(refMeasure * k * refPerpPitch),
+                              anchor: refPerpPlace, pitch: refPerpPitch),
+            targetPrimary: TapeSpec(length: CGFloat(f0) * targetFull,
+                                    anchor: targetPlace, pitch: targetPrimaryPitch),
+            targetPerp: TapeSpec(length: CGFloat(f0) * targetPerpFull,
+                                 anchor: targetPerpPlace, pitch: targetPerpPitch),
+            k: k, refMeasure: refMeasure, targetMeasure: targetMeasure,
+            targetClaimedSize: targetClaimedSize,
+            targetFull: targetFull, targetPerpFull: targetPerpFull)
+    }
 }

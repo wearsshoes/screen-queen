@@ -56,14 +56,11 @@ final class CalibrationController {
     private weak var targetHost: TapeHost?   // for the key → tip-glow sync
     private var keyObservers: [NSObjectProtocol] = []   // key-window moves → tape glow
 
-    private var refPPT: Double = 0             // trusted reference PPI (fallback pitch)
     // One implicit physical measurement per screen — every tape on a screen shows
     // this same length in its own axis's pitch, so there is never a question of
     // which tape the user meant to commit.
     private var refMeasure: Double = 0         // trusted screen, true inches
     private var targetMeasure: Double = 0      // target screen, her claimed inches
-    private var refPitch: (x: Double, y: Double) = (0, 0)
-    private var targetPitch: (x: Double, y: Double) = (0, 0)
     private var targetClaimedSize: CGSize = .zero   // her EDID story, in inches
 
     /// Called after a save or cancel so the owner can refresh.
@@ -83,70 +80,21 @@ final class CalibrationController {
         }
         cancel()
         self.target = target
-        self.refPPT = refPPT
 
-        // The seam picks each screen's *edge* facing the other display; it no longer
-        // caps the tape, which spans that full edge. Without a seam (non-adjacent),
-        // fall back to the perpendicular-edge convention for the primary too.
-        let seam = SchematicLayout.seam(reference.bounds, target.bounds)
-        let refIsA = seam.map { CalibrationMath.referenceIsA($0, reference.bounds) } ?? true
-        let refEdge = seam.map { CalibrationMath.seamEdge($0, selfIsA: refIsA) }
-            ?? CalibrationMath.deskEdge(isBuiltin: reference.isBuiltin)
-        let targetEdge = seam.map { CalibrationMath.seamEdge($0, selfIsA: !refIsA) }
-            ?? CalibrationMath.deskEdge(isBuiltin: target.isBuiltin)
-
-        // Two tapes per screen: the seam-facing edge, plus a perpendicular one —
-        // the bottom by convention, except a laptop panel uses its top (the laptop
-        // is on the desk; its top edge is the one near the monitor's bottom). Each
-        // pair is an independent axis measurement.
-        let (refPlace, refFull) = CalibrationMath.fullEdgePlacement(refEdge, screenSize: refScreen.frame.size)
-        let (refPerpPlace, refPerpFull) = CalibrationMath.fullEdgePlacement(
-            CalibrationMath.perpendicularEdge(to: refEdge, isBuiltin: reference.isBuiltin),
-            screenSize: refScreen.frame.size)
-        let (targetPlace, targetFull) = CalibrationMath.fullEdgePlacement(targetEdge, screenSize: targetScreen.frame.size)
-        let (targetPerpPlace, targetPerpFull) = CalibrationMath.fullEdgePlacement(
-            CalibrationMath.perpendicularEdge(to: targetEdge, isBuiltin: target.isBuiltin),
-            screenSize: targetScreen.frame.size)
-        // Per-axis pitches: the trusted screen's true points-per-inch, and the
-        // pitch the target *claims* over EDID — shape trusted, scale on trial.
-        // When she won't even claim a size, assume the trusted pitch.
-        refPitch = CalibrationMath.axisPitches(bounds: reference.bounds, sizeMM: reference.physicalSizeMM)
-            ?? (x: refPPT, y: refPPT)
-        if let claimed = CalibrationMath.axisPitches(bounds: target.bounds, sizeMM: target.edidSizeMM) {
-            targetPitch = claimed
-            targetClaimedSize = CGSize(width: Double(target.edidSizeMM.width) / 25.4,
-                                       height: Double(target.edidSizeMM.height) / 25.4)
-        } else {
-            targetPitch = (x: refPPT, y: refPPT)
-            targetClaimedSize = CGSize(width: Double(target.bounds.width) / refPPT,
-                                       height: Double(target.bounds.height) / refPPT)
-        }
-        let primaryVertical = targetPlace.lengthIsVertical
-        func pitch(_ p: (x: Double, y: Double), vertical: Bool) -> Double { vertical ? p.y : p.x }
-        let refPrimaryPitch = pitch(refPitch, vertical: primaryVertical)
-        let refPerpPitch = pitch(refPitch, vertical: !primaryVertical)
-        let targetPrimaryPitch = pitch(targetPitch, vertical: primaryVertical)
-        let targetPerpPitch = pitch(targetPitch, vertical: !primaryVertical)
-
-        // Both screens link their pair at the SUSPECT's claimed aspect: the ratio
-        // between perpendicular and primary physical lengths is `k` on both
-        // sides, so matching either same-axis pair implies the same scale.
-        let k = primaryVertical
-            ? Double(targetClaimedSize.width) / Double(targetClaimedSize.height)
-            : Double(targetClaimedSize.height) / Double(targetClaimedSize.width)
-
-        // The suspect's tapes start at 90% of her own edges (her claimed aspect,
-        // out of her corners). The trusted pair starts at 90% too, shrunk if the
-        // k-linked perpendicular tape wouldn't fit its own edge.
-        let f0 = 0.9
-        targetMeasure = f0 * Double(targetFull) / targetPrimaryPitch
-        refMeasure = min(f0 * Double(refFull) / refPrimaryPitch,
-                         f0 * Double(refPerpFull) / refPerpPitch / k)
+        // The staging math — edges, pitches, the aspect link `k`, starting lengths —
+        // is pure and tested; this controller only builds tapes from the plan.
+        let plan = CalibrationMath.sessionPlan(reference: reference, target: target,
+                                               refScreenSize: refScreen.frame.size,
+                                               targetScreenSize: targetScreen.frame.size,
+                                               refPPT: refPPT)
+        refMeasure = plan.refMeasure
+        targetMeasure = plan.targetMeasure
+        targetClaimedSize = plan.targetClaimedSize
 
         // Both tapes wear the same look; the unit printed on the blade — "inches"
         // vs her "inches" — is what tells them apart.
-        func tape(length: CGFloat, anchor: BarPlacement, pitch: Double, trusted: Bool) -> Tape {
-            Tape(length: length, anchor: anchor, pointsPerInch: CGFloat(pitch),
+        func tape(_ spec: CalibrationMath.TapeSpec, trusted: Bool) -> Tape {
+            Tape(length: spec.length, anchor: spec.anchor, pointsPerInch: CGFloat(spec.pitch),
                  unitLabel: trusted ? Copy.matchUnitReference : Copy.matchUnitTarget,
                  brand: trusted ? Copy.matchTapeBrandReference : Copy.matchTapeBrandTarget,
                  finePrint: trusted ? Copy.matchTapeFinePrintReference : Copy.matchTapeFinePrintTarget,
@@ -154,20 +102,18 @@ final class CalibrationController {
         }
 
         // Reference tapes (trusted screen): pure measuring affordances, no controls.
-        let refTape = tape(length: CGFloat(refMeasure * refPrimaryPitch), anchor: refPlace,
-                           pitch: refPrimaryPitch, trusted: true)
-        let refPerpTape = tape(length: CGFloat(refMeasure * k * refPerpPitch), anchor: refPerpPlace,
-                               pitch: refPerpPitch, trusted: true)
+        let refTape = tape(plan.refPrimary, trusted: true)
+        let refPerpTape = tape(plan.refPerp, trusted: true)
         refTape.onResize = { [weak self, weak refPerpTape] len in
             guard let self else { return }
-            self.refMeasure = Double(len) / refPrimaryPitch
-            refPerpTape?.setLength(CGFloat(self.refMeasure * k * refPerpPitch))
+            self.refMeasure = Double(len) / plan.refPrimary.pitch
+            refPerpTape?.setLength(CGFloat(self.refMeasure * plan.k * plan.refPerp.pitch))
             self.updateReadout()
         }
         refPerpTape.onResize = { [weak self, weak refTape] len in
             guard let self else { return }
-            self.refMeasure = Double(len) / refPerpPitch / k
-            refTape?.setLength(CGFloat(self.refMeasure * refPrimaryPitch))
+            self.refMeasure = Double(len) / plan.refPerp.pitch / plan.k
+            refTape?.setLength(CGFloat(self.refMeasure * plan.refPrimary.pitch))
             self.updateReadout()
         }
 
@@ -175,20 +121,18 @@ final class CalibrationController {
         // display *claims* over EDID — even when a previous calibration knows
         // better — so when the two sides physically match, hers reads a different
         // number than the honest one. The lie, printed on the tape.
-        let calTape = tape(length: CGFloat(f0) * targetFull, anchor: targetPlace,
-                           pitch: targetPrimaryPitch, trusted: false)
-        let calPerpTape = tape(length: CGFloat(f0) * targetPerpFull, anchor: targetPerpPlace,
-                               pitch: targetPerpPitch, trusted: false)
+        let calTape = tape(plan.targetPrimary, trusted: false)
+        let calPerpTape = tape(plan.targetPerp, trusted: false)
         calTape.onResize = { [weak self, weak calPerpTape] len in
             guard let self else { return }
-            self.targetMeasure = Double(len) / targetPrimaryPitch
-            calPerpTape?.setLength(len * targetPerpFull / targetFull)
+            self.targetMeasure = Double(len) / plan.targetPrimary.pitch
+            calPerpTape?.setLength(len * plan.targetPerpFull / plan.targetFull)
             self.updateReadout()
         }
         calPerpTape.onResize = { [weak self, weak calTape] len in
             guard let self else { return }
-            let primaryLen = len * targetFull / targetPerpFull
-            self.targetMeasure = Double(primaryLen) / targetPrimaryPitch
+            let primaryLen = len * plan.targetFull / plan.targetPerpFull
+            self.targetMeasure = Double(primaryLen) / plan.targetPrimary.pitch
             calTape?.setLength(primaryLen)
             self.updateReadout()
         }
@@ -210,9 +154,9 @@ final class CalibrationController {
         // one glance away).
         scenes = [
             reference.id: Scene(screen: refScreen, tapes: [refTape, refPerpTape],
-                                panelPlacement: refPlace),
+                                panelPlacement: plan.refPrimary.anchor),
             target.id: Scene(screen: targetScreen, tapes: [calTape, calPerpTape],
-                             panelPlacement: targetPlace),
+                             panelPlacement: plan.targetPrimary.anchor),
         ]
         ensemble.includes = { [ids = Set(scenes.keys)] id in ids.contains(id) }
         ensemble.rebuild()
