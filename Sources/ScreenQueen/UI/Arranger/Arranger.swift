@@ -7,10 +7,16 @@ import AppKit
 final class Arranger {
 
     let state = ArrangerState()
-    private var windows: [CGDirectDisplayID: NSWindow] = [:]
+    /// The window fleet — one overlay per screen, just below the system menu bar so
+    /// the menu bar and our status icon stay clickable on top. (Calibration/alerts
+    /// sit above via the shielding level.)
+    private let ensemble = Ensemble(
+        level: NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) - 1),
+        collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle])
+    private var windows: [CGDirectDisplayID: NSWindow] { ensemble.windows }
     private var stages: [Stage] = []
 
-    var isVisible: Bool { !windows.isEmpty }
+    var isVisible: Bool { ensemble.isVisible }
 
     private let capture = ScreenCaptureManager()
 
@@ -55,6 +61,8 @@ final class Arranger {
     private var feedWatchdog: DispatchWorkItem?
 
     init() {
+        ensemble.dress = { [weak self] id, window in self?.dress(window, centerID: id) }
+        ensemble.retire = { [weak self] id in self?.stages.removeAll { $0.centerID == id } }
         state.changed = { [weak self] in
             self?.stages.forEach { $0.refresh() }
             self?.rerenderChrome()
@@ -162,13 +170,9 @@ final class Arranger {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// Key the stage on `screen` (focus-follows-cursor). No-op when not visible or a
-    /// window on that screen is already key (don't-steal semantics).
+    /// Key the stage on `screen` (focus-follows-cursor).
     func focusWindow(on screen: NSScreen) {
-        guard isVisible else { return }
-        let window = windows.values.first { $0.screen?.frame == screen.frame }
-        guard let window, !window.isKeyWindow else { return }
-        window.makeKey()
+        ensemble.focusWindow(on: screen)
     }
 
     func hide() {
@@ -177,9 +181,7 @@ final class Arranger {
         events?.stopMouseMonitors()
         events?.stopKeyMonitors()
         activeDisplayID = nil
-        windows.values.forEach { $0.orderOut(nil) }
-        windows.removeAll()
-        stages.removeAll()
+        ensemble.dismiss()
     }
 
     // MARK: - Ghost mouse feed (see VirtualMouse.swift)
@@ -240,44 +242,14 @@ final class Arranger {
 
     private func rebuild() {
         updateChromeMetrics()
-        let screens = GlobalMap.screenMap()
-        var live: Set<CGDirectDisplayID> = []
-
-        for (id, screen) in screens {
-            live.insert(id)
-            // A borderless overlay doesn't reliably land when `setFrame`-d across a
-            // reconfig — recreate any window whose screen frame changed.
-            if let existing = windows[id], existing.frame != screen.frame {
-                existing.orderOut(nil)
-                stages.removeAll { $0.centerID == id }
-                windows[id] = nil
-            }
-            let window = windows[id] ?? makeWindow(centerID: id, frame: screen.frame)
-            windows[id] = window
-            window.orderFrontRegardless()
-        }
-        for (id, window) in windows where !live.contains(id) {
-            window.orderOut(nil)
-            windows[id] = nil
-            stages.removeAll { $0.centerID == id }
-        }
+        ensemble.rebuild()
     }
 
-    private func makeWindow(centerID: CGDirectDisplayID, frame: NSRect) -> NSWindow {
-        let window = KeyableBorderlessWindow(contentRect: frame, styleMask: .borderless,
-                                             backing: .buffered, defer: false)
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false
-        // Just below the system menu bar, so the menu bar and our status icon stay
-        // clickable on top. (Calibration/alerts sit above via the shielding level.)
-        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) - 1)
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-        window.isReleasedWhenClosed = false
-
+    /// Dress a fresh ensemble window: glass backdrop + this screen's stage.
+    private func dress(_ window: NSWindow, centerID: CGDirectDisplayID) {
         // Backdrop: native Liquid Glass on macOS 26, behind-window blur below. The
         // stage (with its own dim wash) sits on top.
-        let fullFrame = CGRect(origin: .zero, size: frame.size)
+        let fullFrame = CGRect(origin: .zero, size: window.frame.size)
         let stage = Stage(state: state, frame: fullFrame)
         stage.centerID = centerID
         stage.autoresizingMask = [.width, .height]
@@ -308,7 +280,6 @@ final class Arranger {
         }
         window.makeFirstResponder(stage)
         stages.append(stage)
-        return window
     }
 
     fileprivate static func keyInput(_ e: NSEvent) -> KeyInput {
