@@ -1,0 +1,200 @@
+import AppKit
+
+/// The seam system: mini-map reference bars and full-screen edge bars, with their
+/// shared glow / D-path / emitter plumbing. One seam's two depictions share color,
+/// glow rendering, and emitter registration, so they live in one file even though
+/// they straddle two coordinate spaces (map vs. on-glass).
+extension Arranger {
+
+    /// Reference bars at each seam: the reference window shown on each side at its own
+    /// physical size (the size jump a window makes crossing the seam). D-shaped, flush
+    /// to the seam, rounding toward the owning display's center.
+    func drawReferenceBars(_ bars: [SeamBar], t: Transform, seamColor: [DisplayGraph.SeamKey: NSColor]) {
+        let thickness: CGFloat = 5, gap: CGFloat = 2
+        // Trim the ends clear of the rounded corners, capped at 1/3 so a short bar's
+        // length stays proportional to the true overlap.
+        func barLen(_ inches: CGFloat) -> CGFloat {
+            let full = inches * t.scale
+            return max(1.5, full - min(8, full / 3))
+        }
+        for bar in bars {
+            let color = seamColor[DisplayGraph.SeamKey(bar.aID, bar.bID)] ?? .systemGray
+            let lenA = barLen(bar.physLenInchesA)
+            let lenB = barLen(bar.physLenInchesB)
+            if bar.isVertical {
+                let cA = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongA))
+                let cB = t.viewPoint(CGPoint(x: bar.physLine, y: bar.physAlongB))
+                // a = left display: its bar hugs the seam and rounds toward its center.
+                drawBar(NSRect(x: cA.x - gap - thickness, y: cA.y - lenA / 2, width: thickness, height: lenA), roundedOn: .minX, color: color)
+                drawBar(NSRect(x: cB.x + gap, y: cB.y - lenB / 2, width: thickness, height: lenB), roundedOn: .maxX, color: color)
+            } else {
+                let cA = t.viewPoint(CGPoint(x: bar.physAlongA, y: bar.physLine))
+                let cB = t.viewPoint(CGPoint(x: bar.physAlongB, y: bar.physLine))
+                // a = top display: its bar sits above the seam and rounds toward its center.
+                drawBar(NSRect(x: cA.x - lenA / 2, y: cA.y + gap, width: lenA, height: thickness), roundedOn: .maxY, color: color)
+                drawBar(NSRect(x: cB.x - lenB / 2, y: cB.y - gap - thickness, width: lenB, height: thickness), roundedOn: .minY, color: color)
+            }
+        }
+    }
+
+    /// Full-screen reference bars hugging *this* screen's real edges, in the seam's
+    /// color — the on-glass depiction of a window's size jump crossing the seam.
+    func drawEdgeBars(_ bars: [SeamBar], seamColor: [DisplayGraph.SeamKey: NSColor]) {
+        guard let me = centerID else { return }
+        // Constant *physical* thickness: convert inches → points via this screen's density.
+        let thicknessInches: CGFloat = 0.08
+        let ppi = displays.first { $0.id == me }?.pointsPerInch
+        let thickness: CGFloat = ppi.map { thicknessInches * CGFloat($0) } ?? 9
+        // Bar offsets/lengths are in *previewed* point space but drawn against the real
+        // window bounds — scale them across, or spacing drifts during a zoom preview.
+        let previewed = displays.first { $0.id == me }.map { pointSize($0) }
+        for bar in bars where bar.aID == me || bar.bID == me {
+            let weAreA = (bar.aID == me)
+            let facing = seamColor[DisplayGraph.SeamKey(bar.aID, bar.bID)] ?? .systemGray
+            let axisPreview = bar.isVertical ? (previewed?.height ?? bounds.height)
+                                             : (previewed?.width ?? bounds.width)
+            let axisReal = bar.isVertical ? bounds.height : bounds.width
+            let s = axisPreview > 0 ? axisReal / axisPreview : 1
+            let along = (weAreA ? bar.localAlongA : bar.localAlongB) * s
+            // End margin capped so a short crossing region shrinks proportionally.
+            let len = max(1.5, bar.windowPoints * s - min(12, bar.windowPoints * s / 3))
+            let rect: NSRect
+            // `inward` = the side facing the screen center (rounded); outward sits flat.
+            let inward: RectEdge
+            if bar.isVertical {
+                let x = weAreA ? bounds.width - thickness : 0    // a = left display
+                // `along` is y-down from the screen top; flip through the one point-space gate.
+                let yCenter = pointYToView(along)
+                rect = NSRect(x: x, y: yCenter - len / 2, width: thickness, height: len)
+                inward = weAreA ? .minX : .maxX
+            } else {
+                let y = weAreA ? 0 : bounds.height - thickness   // a = above the seam
+                rect = NSRect(x: along - len / 2, y: y, width: len, height: thickness)
+                inward = weAreA ? .maxY : .minY
+            }
+            drawBehindGlow(rect, roundedOn: inward, color: facing)
+            let eid = barID(rect, inward)
+            // Full-screen scale → larger particles, deeper drift than the mini-map bars.
+            seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: facing,
+                             id: "edge-\(eid)", sizeScale: 2 * screenDensityScale, travelBoost: 3)
+            seamGlow.add(rect: rect, inward: overlayEdge(inward), color: facing, id: "edge-\(eid)")
+        }
+    }
+
+    /// This screen's density relative to the 109 pt/in panels the sparkle look was tuned
+    /// on — keeps the shimmer the same *physical* size on every screen.
+    private var screenDensityScale: CGFloat {
+        let ppi = displays.first { $0.id == centerID }?.pointsPerInch
+        return CGFloat(ppi ?? 109) / 109
+    }
+
+    /// A D-shaped mini-map bar: a wide soft glow behind the sparkles (painted here) and
+    /// a tight bright glow in front (overlay layer). Sparkles drift inward and fade.
+    private func drawBar(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
+        drawBehindGlow(rect, roundedOn: inward, color: color)
+        let eid = barID(rect, inward)
+        seamEmitters.add(edgeOf: rect, direction: particleDirection(inward), color: color,
+                         id: "mini-\(eid)", sizeScale: screenDensityScale)
+        seamGlow.add(rect: rect, inward: overlayEdge(inward), color: color, id: "mini-\(eid)")
+    }
+
+    /// The wide, soft glow behind the sparkles: opaque at the seam edge, fading to clear
+    /// ~2× the bar depth into the tile, clipped to a D-shape extended to that reach.
+    private func drawBehindGlow(_ rect: NSRect, roundedOn inward: RectEdge, color: NSColor) {
+        let depth = (inward == .minX || inward == .maxX) ? rect.width : rect.height
+        let reach = depth * behindGlowReach
+        // Grow the rect inward so its inward edge lands at the glow's end.
+        let ext: NSRect
+        switch inward {
+        case .minX: ext = NSRect(x: rect.maxX - reach, y: rect.minY, width: reach, height: rect.height)
+        case .maxX: ext = NSRect(x: rect.minX, y: rect.minY, width: reach, height: rect.height)
+        case .minY: ext = NSRect(x: rect.minX, y: rect.maxY - reach, width: rect.width, height: reach)
+        case .maxY: ext = NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: reach)
+        }
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        dPath(ext, roundedOn: inward).addClip()
+        // Gradient from the seam edge → the extended inward edge: opaque → clear.
+        let (start, end): (CGPoint, CGPoint)
+        switch inward {
+        case .minX: start = CGPoint(x: ext.maxX, y: ext.midY); end = CGPoint(x: ext.minX, y: ext.midY)
+        case .maxX: start = CGPoint(x: ext.minX, y: ext.midY); end = CGPoint(x: ext.maxX, y: ext.midY)
+        case .minY: start = CGPoint(x: ext.midX, y: ext.maxY); end = CGPoint(x: ext.midX, y: ext.minY)
+        case .maxY: start = CGPoint(x: ext.midX, y: ext.minY); end = CGPoint(x: ext.midX, y: ext.maxY)
+        }
+        let gradient = NSGradient(colors: [color.withAlphaComponent(0.7), color.withAlphaComponent(0)],
+                                  atLocations: [0, 1], colorSpace: .sRGB)
+        // Own transparency layer, so the destination-out end feathers below erase only
+        // the glow, not the canvas painted beneath it.
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        gradient?.draw(from: start, to: end, options: [])
+        let vertical = inward == .minX || inward == .maxX
+        let alongLen = vertical ? ext.height : ext.width
+        let ramp = min(22, alongLen * 0.3)
+        if ramp > 1, let fade = NSGradient(colors: [.black, NSColor.black.withAlphaComponent(0)],
+                                           atLocations: [0, 1], colorSpace: .sRGB) {
+            ctx.setBlendMode(.destinationOut)
+            if vertical {
+                fade.draw(from: CGPoint(x: ext.midX, y: ext.minY), to: CGPoint(x: ext.midX, y: ext.minY + ramp), options: [])
+                fade.draw(from: CGPoint(x: ext.midX, y: ext.maxY), to: CGPoint(x: ext.midX, y: ext.maxY - ramp), options: [])
+            } else {
+                fade.draw(from: CGPoint(x: ext.minX, y: ext.midY), to: CGPoint(x: ext.minX + ramp, y: ext.midY), options: [])
+                fade.draw(from: CGPoint(x: ext.maxX, y: ext.midY), to: CGPoint(x: ext.maxX - ramp, y: ext.midY), options: [])
+            }
+            ctx.setBlendMode(.normal)
+        }
+        ctx.endTransparencyLayer()
+    }
+
+    /// The behind glow reaches this multiple of the bar depth toward the display center.
+    private var behindGlowReach: CGFloat { 2 }
+
+    /// Map a drawing `RectEdge` to the overlay glow's inward direction.
+    private func overlayEdge(_ inward: RectEdge) -> SeamGlow.Edge {
+        switch inward {
+        case .minX: return .minX
+        case .maxX: return .maxX
+        case .minY: return .minY
+        case .maxY: return .maxY
+        }
+    }
+
+    /// The direction particles drift: toward the display center = the `inward` edge. View is
+    /// y-up, so the `minY` edge faces the screen *bottom* (drift down) and `maxY` the top.
+    private func particleDirection(_ inward: RectEdge) -> SeamEmitters.Direction {
+        switch inward {
+        case .minX: return .left
+        case .maxX: return .right
+        case .minY: return .down
+        case .maxY: return .up
+        }
+    }
+
+    /// A stable per-edge id (quantized so sub-pixel jitter doesn't reseed the emitter).
+    private func barID(_ r: NSRect, _ inward: RectEdge) -> String {
+        "\(Int(r.minX / 3))-\(Int(r.minY / 3))-\(inward)"
+    }
+
+    private enum RectEdge { case minX, maxX, minY, maxY }
+
+    /// A rect with only the two corners on the `inward` edge rounded (radius 0 keeps the
+    /// outward corners square).
+    private func dPath(_ r: NSRect, roundedOn inward: RectEdge) -> NSBezierPath {
+        let cr = min(r.width, r.height) * 0.45
+        let bl = CGPoint(x: r.minX, y: r.minY), br = CGPoint(x: r.maxX, y: r.minY)
+        let tr = CGPoint(x: r.maxX, y: r.maxY), tl = CGPoint(x: r.minX, y: r.maxY)
+        func rad(_ c: RectEdge...) -> CGFloat { c.contains(inward) ? cr : 0 }
+        let rBL = rad(.minX, .minY), rBR = rad(.maxX, .minY)
+        let rTR = rad(.maxX, .maxY), rTL = rad(.minX, .maxY)
+
+        let p = NSBezierPath()
+        p.move(to: CGPoint(x: (bl.x + br.x) / 2, y: bl.y))     // start mid-bottom (away from a corner)
+        p.appendArc(from: br, to: tr, radius: rBR)
+        p.appendArc(from: tr, to: tl, radius: rTR)
+        p.appendArc(from: tl, to: bl, radius: rTL)
+        p.appendArc(from: bl, to: br, radius: rBL)
+        p.close()
+        return p
+    }
+}
