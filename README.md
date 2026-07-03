@@ -1,6 +1,6 @@
 # Screen Queen for macOS: pixel perfection 👑
 
-**A tiny macOS menu-bar app that arranges your displays by their true physical size. She cares about the inches. The *real* ones.**
+**Everyone please stand for the QUEEN: This glamorous macOS menu-bar app arranges your displays by their true physical size. She cares about the inches. The *real* ones.**
 
 <!-- TODO: hero GIF of the queen strutting onto every screen and a display getting dragged, snatched, and put in her place. Drop it at docs/werk.gif and uncomment:
 ![Screen Queen serving realness](docs/werk.gif) -->
@@ -9,19 +9,18 @@ Plug a 27" 4K monitor next to a 15" laptop and macOS's **Displays** settings arr
 like a straight man packed your suitcase. Your cursor face-plants into the wrong seam, and windows leap across the gap like
 they've seen a bug. It's giving ***disorganized***. It's giving ***unread group chat***.
 
-Screen Queen replaces that mess with an arranger that draws your monitors at their **real
-relative sizes**, aligns the seams where your cursor *actually* crosses, and predicts exactly
+Screen Queen replaces that mess with an arranger that draws your monitors at their **real relative sizes**,
+aligns the seams where your cursor ***actually*** crosses, and predicts exactly
 where the Dock is going to sashay off to. She does not tuck. She does not compromise.
 
 ## What she does
 
 - **Physical-size arrangement.** Displays are drawn to true scale, so the layout matches the
   monitors on your desk — not macOS's flat, padded, point-space *illusion* of them.
-- **Clear crossover areas.** If two screens share a connection, move your mouse through the glowy part and it'll show up on the other screen.
+- **Clear crossover areas.** If two screens share a connection, move your mouse through the
+  glowy part and it'll show up on the other screen.
 - **Always-on seam lights.** Flip **Keep the Seams Showing** in the 👑 menu and she leaves a
-  thin colored bar glowing at every seam, all the time — so you always know where your cursor's
-  about to cross, even with the arranger closed. Costs nothing while nothing's moving: she only
-  re-marks the seams when you plug, unplug, or rearrange. (Fullscreen apps stay pristine.)
+  thin colored bar glowing at every seam, all the time. (Fullscreen apps stay pristine.)
 - **Seam-aware alignment.** Snaps and aligns displays along the edge your cursor really
   crosses, accounting for differing pixel densities, because size *and* density matter and
   anyone who tells you otherwise is lying.
@@ -35,13 +34,9 @@ where the Dock is going to sashay off to. She does not tuck. She does not compro
   <kbd>⌘</kbd> ±, or zoom *the whole cast* together (<kbd>⌘⇧</kbd> ±) keeping everyone roughly
   proportional in density — all as a live preview that commits as a single undo. One tuck, one
   untuck.
-- **Physical-size calibration.** Monitors *lie* about their size over EDID — bold-faced, on a
-  Tuesday. Set the record straight by typing your screen's true diagonal, or bring out the
-  **measuring tape**: a seamstress's tape on each side of the seam — honest cream on the
-  trusted screen (real `inches`), a blush **EDID™ VANITY TAPE** on the suspect (ruled to
-  her *claimed* inches, so at a match her numbers read wrong on her own tape). Drag the
-  metal tips, sight across the gap on the chalk lines, arrow-key the last millimeter.
-  Receipts.
+- **Physical-size calibration.** Monitors *lie* about their size over EDID.
+  Set the record straight by typing the suspicious screen's true diagonal, or bring out the
+  **measuring tape**. Receipts.
 - **Dock prediction.** Shows exactly where the Dock is going to end up before it gets there, so
   it can't pull a disappearing act on the wrong monitor.
 - **Mirroring.** Option-drag one display onto another and they serve the *same* look on
@@ -78,7 +73,7 @@ scripts/dev.sh         # build + launch (add --watch to rebuild on change)
 scripts/package.sh     # assemble build/ScreenQueen.app (ad-hoc signed — full drag)
 ```
 
-## Using her (she loves it)
+## Using her (yes daddy)
 
 Summon the arranger with <kbd>⌘⌥F1</kbd> or the menu-bar icon.
 
@@ -93,9 +88,7 @@ Summon the arranger with <kbd>⌘⌥F1</kbd> or the menu-bar icon.
   full menu, no bottle service minimum.
 - **Drag the menu-bar strip** of a tile to crown that display the main. Long live the queen.
 - **Option-drag** a display onto another to mirror it.
-- **The "what she sees" card** (bottom-left) shows the raw macOS layout she's reading — a live
-  map of your displays in point-space with the seams she's found, each in its own color. Drag it
-  by its handle if it's in your light. It's the receipts, in real time.
+- **Granny Smith glasses** in the (bottom-left) shows the point-based layout macOS sees. Did I say it already? ***Receipts.***
 - <kbd>Esc</kbd> / <kbd>Return</kbd> and she takes her bow.
 
 ## How she works

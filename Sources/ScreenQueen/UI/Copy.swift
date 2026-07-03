@@ -22,19 +22,19 @@ enum Copy {
     /// at the right — don't bake it into the title.
     static let menuShowArranger = "Places, Everyone"
     /// The permissions/setup window (see `SetupWindow`).
-    static let menuSetup = "Backstage Pass…"
+    static let menuSetup = "Stage Pass"
     /// Toggle for the always-on seam lights (see `SeamLights`): a thin colored bar on
     /// each side of every seam, at all times, marking where the cursor crosses.
     static let menuSeamLights = "Keep the Seams Showing"
     /// Dev inspector window.
-    static let menuDebug = "Backstage…"
+    static let menuDebug = "Backstage… (debug info)"
     /// Quit item at the bottom of the menu.
     static let menuQuit = "And… Scene."
 
     // MARK: - "Backstage Pass" (the one-sitting permissions setup screen)
 
     /// Window title bar + headline (the headline renders in the script face).
-    static let setupTitle = "Backstage Pass"
+    static let setupTitle = "Stage Pass"
     /// One-line intro under the headline: why she's asking, all at once, up front.
     static let setupIntro = "Two keys run this house. Here's exactly what each one unlocks — consent is sexy."
     /// Accessibility row: name, why, and what she does NOT do.
@@ -73,7 +73,7 @@ enum Copy {
 
     /// Panel title: the live reconstructed *point* arrangement — macOS's coordinate story,
     /// as she reads it — with the seams she detects between the girls.
-    static let solvePanelTitle = "what she sees"
+    static let solvePanelTitle = "What Granny Smith sees"
     /// Appended to the title when any display's placement resolved through an ambiguous
     /// (multi-preimage) seam inverse — she's reading tea leaves on that one.
     static let solvePanelAmbiguous = " ⚠︎ ambiguous"
@@ -82,7 +82,8 @@ enum Copy {
 
     /// Reset button (⌘⌫): restore the layout captured when the arranger opened.
     static let resetTooltip = "Start over, bestie"
-    /// Undo button (⌘Z): steps back one plane edit, or fires a pending Revert.
+    /// Undo button (⌘Z): steps back one plane
+    /// edit, or fires a pending Revert.
     static let undoTooltip = "Take it back"
     /// Done button (⏎): commit and dismiss. She's the finale.
     static let doneTooltip = "Serve it"
