@@ -14,7 +14,7 @@ extension AppDelegate {
     /// select it so the user can place it.
     func handleProfiles(_ displays: [DisplaySnapshot]) {
         let set = Set(displays.map(\.fingerprint))
-        let baseSet = displays.map { "\($0.vendor)-\($0.model)-\($0.serial)" }
+        let baseSet = displays.map(\.baseFingerprint)
         let ids = Set(displays.map(\.id))
         let priorOrigins = lastOrigins
         let isLaunch = lastDisplayIDs.isEmpty
@@ -23,7 +23,7 @@ extension AppDelegate {
                                                 lastIDs: lastDisplayIDs)
         defer {
             lastDisplaySet = set; lastBaseSet = baseSet; lastDisplayIDs = ids
-            lastOrigins = Dictionary(displays.map { ($0.id, $0.bounds.origin) }, uniquingKeysWith: { a, _ in a })
+            lastOrigins = originMap(of: displays)
         }
 
         switch transition {

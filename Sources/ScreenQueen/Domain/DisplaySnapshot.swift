@@ -42,14 +42,13 @@ struct DisplaySnapshot: Identifiable, Equatable {
     }
 
     /// Diagonal of the physical size, in inches (0 if size unknown).
-    var diagonalInches: Double {
-        let w = Double(physicalSizeMM.width), h = Double(physicalSizeMM.height)
-        return (w * w + h * h).squareRoot() / 25.4
-    }
+    var diagonalInches: Double { Self.diagonalInches(physicalSizeMM) }
 
     /// Diagonal of the EDID claim, in inches (0 if she isn't even claiming).
-    var edidDiagonalInches: Double {
-        let w = Double(edidSizeMM.width), h = Double(edidSizeMM.height)
+    var edidDiagonalInches: Double { Self.diagonalInches(edidSizeMM) }
+
+    static func diagonalInches(_ mm: CGSize) -> Double {
+        let w = Double(mm.width), h = Double(mm.height)
         return (w * w + h * h).squareRoot() / 25.4
     }
 
@@ -82,36 +81,33 @@ struct DisplaySnapshot: Identifiable, Equatable {
 
     /// Physical pixels per inch, derived from EDID. `nil` when the physical
     /// size is missing/implausible.
-    var ppi: Double? {
-        guard physicalSizeMM.width > 1 else { return nil }
-        let inches = Double(physicalSizeMM.width) / 25.4
-        guard inches > 0 else { return nil }
-        return Double(pixelSize.width) / inches
-    }
+    var ppi: Double? { perPhysicalInch(pixelSize.width) }
 
     /// Effective *points* per physical inch — the density that actually governs
     /// how big a dragged window looks, since macOS preserves a window's point
     /// size across displays. Two screens with equal `pointsPerInch` show a
     /// dragged element at the same physical size. `nil` when EDID size is absent.
-    var pointsPerInch: Double? {
+    var pointsPerInch: Double? { perPhysicalInch(bounds.width) }
+
+    private func perPhysicalInch(_ extent: CGFloat) -> Double? {
         guard physicalSizeMM.width > 1 else { return nil }
-        let inches = Double(physicalSizeMM.width) / 25.4
-        guard inches > 0 else { return nil }
-        return Double(bounds.width) / inches
+        return Double(extent) / (Double(physicalSizeMM.width) / 25.4)
     }
+
+    /// vendor/model/serial — the identity shared by physically identical monitors
+    /// (calibration keys on this; `fingerprint` adds the per-connection suffix).
+    var baseFingerprint: String { "\(vendor)-\(model)-\(serial)" }
 
     /// Stable identity for a physical display across reconnects: vendor/model/serial,
     /// plus a per-connection topology suffix when two connected monitors would
     /// otherwise share it (see `Topology`).
     var fingerprint: String {
-        let base = "\(vendor)-\(model)-\(serial)"
-        return fingerprintSuffix.isEmpty ? base : "\(base)@\(fingerprintSuffix)"
+        fingerprintSuffix.isEmpty ? baseFingerprint : "\(baseFingerprint)@\(fingerprintSuffix)"
     }
 
     /// Her drag name: stable, deterministic from the fingerprint, forever the same monitor
     /// forever the same girl. The suffix reacts to what she actually is.
     var nickname: String {
-        let ppi = physicalSizeMM.width > 1 ? Double(pixelSize.width) / (Double(physicalSizeMM.width) / 25.4) : nil
         let aspect = bounds.height > 0 ? Double(bounds.width / bounds.height) : nil
         return Moniker.nickname(for: fingerprint, isBuiltin: isBuiltin, pixelsPerInch: ppi, aspectRatio: aspect)
     }

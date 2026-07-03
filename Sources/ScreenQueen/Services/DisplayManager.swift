@@ -99,8 +99,7 @@ enum DisplayManager {
         var seen: [String: Int] = [:]   // base v/m/s → count so far
         for i in snapshots.indices {
             let d = snapshots[i]
-            let base = "\(d.vendor)-\(d.model)-\(d.serial)"
-            let order = seen[base, default: 0]; seen[base] = order + 1
+            let order = seen[d.baseFingerprint, default: 0]; seen[d.baseFingerprint] = order + 1
             if let suffix = Topology.locationSuffix(product: Int(d.model), serial: Int(d.serial), orderAmongIdentical: order) {
                 snapshots[i].fingerprintSuffix = suffix
             }

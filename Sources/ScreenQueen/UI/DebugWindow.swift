@@ -56,8 +56,9 @@ struct DebugView: View {
     }
 
     private static func makeDump() -> String {
+        let snapshot = DisplayManager.snapshot()
         var s = "CONNECTED DISPLAYS\n\n"
-        for d in DisplayManager.snapshot() {
+        for d in snapshot {
             s += "• \(d.name)  “\(d.nickname)”\(d.isMain ? "  [main]" : "")\(d.isBuiltin ? "  [builtin]" : "")\n"
             s += "    fingerprint: \(d.fingerprint)\n"
             s += String(format: "    %.0f×%.0f pt · %.0f×%.0f px\n\n",
@@ -66,7 +67,7 @@ struct DebugView: View {
 
         let profiles = LayoutStore.allProfiles()
         // Suppress nicknames for the built-in (no external identity to moniker).
-        let builtinFP = DisplayManager.snapshot().first(where: \.isBuiltin)?.fingerprint
+        let builtinFP = snapshot.first(where: \.isBuiltin)?.fingerprint
 
         s += "SAVED PROFILES (\(profiles.count))\n\n"
         for (_, profile) in profiles.sorted(by: { $0.key < $1.key }) {
@@ -86,8 +87,7 @@ struct DebugView: View {
         for (fp, size) in cals.sorted(by: { $0.key < $1.key }) {
             let nick = fp == builtinFP ? "" : "  “\(Moniker.nickname(for: fp))”"
             s += String(format: "• %@%@  %.1f×%.1f mm  (%.1f″)\n",
-                        fp, nick, size.width, size.height,
-                        (Double(size.width) * Double(size.width) + Double(size.height) * Double(size.height)).squareRoot() / 25.4)
+                        fp, nick, size.width, size.height, DisplaySnapshot.diagonalInches(size))
         }
         return s
     }
