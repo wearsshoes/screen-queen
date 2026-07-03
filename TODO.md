@@ -31,9 +31,17 @@
   scale are model inputs now), ✅ tooltip bubble (click-through TooltipHost),
   ✅ solve panel (SolvePanelView — first SwiftUI Canvas/GraphicsContext piece,
   the dry run for the big one; y-down point space meant the old flip vanished),
-  ✅ the schematic itself (SchematicCanvas: draw(_:) → drawSchematic() inside
-  Canvas/withCGContext with one y-flip at the seam; needsDisplay funnels through
-  repaintSchematic(); subjects can go native GraphicsContext incrementally).
+  ✅ the schematic itself (SchematicCanvas; needsDisplay funnels through
+  repaintSchematic()), ✅ the FULL draw pass gone native GraphicsContext (July
+  2026): wash/message/drag overlays, markers, tiles (Image + clip + opacity,
+  even-odd hatch, .shadow-filter halo), mirror column (NSString measurement
+  kept, drawing native, inline-Text symbol baseline), and the behind-glows
+  (drawLayer + .destinationOut feathers). The legacyDraw shim is deleted —
+  no NSGraphicsContext.current anywhere in the render pass. Convention:
+  geometry computes y-up (Transform/hit-test space), flips at each subject's
+  draw boundary (yDown / yDownPoint / yDownDir).
+  ✅ input port phases 1+2 (keys via EventPlumbing monitors; mouse via the
+  schematic host's DragGesture; right-click forwards to menu(for:)).
   ✅ PORT COMPLETE for the render/chrome layer. Input verdict, REVISED
   (Rachel's challenge was right): input CAN leave the NSView responder chain
   without macOS 15 —
