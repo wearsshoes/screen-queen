@@ -73,7 +73,7 @@ enum HotplugMath {
     }
 
     static func edgeAdjacent(_ a: CGRect, _ b: CGRect) -> Bool {
-        let tol: CGFloat = 2
+        let tol = Tol.seam
         let xTouch = abs(a.maxX - b.minX) <= tol || abs(b.maxX - a.minX) <= tol
         let yTouch = abs(a.maxY - b.minY) <= tol || abs(b.maxY - a.minY) <= tol
         let yOv = min(a.maxY, b.maxY) - max(a.minY, b.minY) > tol

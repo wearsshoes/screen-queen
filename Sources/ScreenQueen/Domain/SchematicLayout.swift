@@ -9,6 +9,24 @@ enum Anchor: Equatable { case min, center, max }
 /// An active alignment: the two anchors that met, and whose seam they met on.
 typealias AnchorMarker = (selfA: Anchor, otherA: Anchor, otherID: CGDirectDisplayID)
 
+/// The geometry tolerances, named so the hierarchy stays visible in one place
+/// (join < exactEdge < seam). Plane inches and point space share a numeric scale,
+/// so each is meaningful in its caller's space.
+enum Tol {
+    /// Two edges count as adjacent / the same seam (BFS docking, seam detection,
+    /// hotplug adjacency, Dock walking) — absorbs the OS's own origin rounding.
+    static let seam: CGFloat = 2
+    /// A truly-exact shared edge (near-zero gap): the hard constraint that outranks
+    /// the queue parent at dock time, and the straddle pins' abutment test.
+    static let exactEdge: CGFloat = 0.5
+    /// A committed plane join (post-snap positions are exact; this only absorbs
+    /// float noise).
+    static let join: CGFloat = 0.1
+    /// How far a reconstructed point origin may drift from the OS's before the
+    /// plane re-interprets.
+    static let planeMatch: CGFloat = 1.5
+}
+
 /// A keyboard/arrow move direction (`SchematicSnapping` plans nudges per direction).
 enum MoveDirection {
     case up, down, left, right
@@ -62,7 +80,7 @@ enum SchematicLayout {
         let start = eff.first(where: { $0.isMain }) ?? eff[0]
         var out: [CGDirectDisplayID: CGRect] = [start.id: CGRect(origin: .zero, size: physSize(start))]
         var queue = [start.id]
-        let tol: CGFloat = 2
+        let tol = Tol.seam
 
         while !queue.isEmpty {
             let parent = byID[queue.removeFirst()]!
@@ -202,7 +220,7 @@ enum SchematicLayout {
         }
         var origins: [CGDirectDisplayID: CGPoint] = [start.id: .zero]
         var queue = [start.id]
-        let tol: CGFloat = 2
+        let tol = Tol.seam
 
         while !queue.isEmpty {
             let parentID = queue.removeFirst()
@@ -287,7 +305,7 @@ enum SchematicLayout {
         guard origins.count == displays.count - 1 else {
             return toPoints(rects: rects, displays: displays)
         }
-        let tol: CGFloat = 2
+        let tol = Tol.seam
         // Place the dragged display against the frozen neighbors. `preferredParentID` is any
         // placed neighbor; `dockOrigin` picks the best exact-edge one on its own.
         let anyPlaced = origins.keys.first ?? dragged
@@ -370,7 +388,7 @@ enum SchematicLayout {
         // Exact-edge neighbors (gap ≈ 0) are hard constraints. Rank by unambiguous inverse
         // (fewest preimages — the stationary neighbor, not the moved one), then tightest gap,
         // then lowest id (frame-stable).
-        let exactTol: CGFloat = 0.5
+        let exactTol = Tol.exactEdge
         typealias Cand = (origin: CGPoint, gap: CGFloat, preimages: Int, vertical: Bool)
         var exact: [(id: CGDirectDisplayID, c: Cand)] = []
         for nid in origins.keys.sorted() {
@@ -459,7 +477,7 @@ enum SchematicLayout {
             for a in side { for b in side where b != a {
                 guard let ar = rects[a], let br = rects[b], let ao = origins[a], let bo = origins[b],
                       let an = byID[a] else { continue }
-                guard abs(ar.maxX - br.minX) <= 0.5 else { continue }     // a|b abut, a on the left
+                guard abs(ar.maxX - br.minX) <= Tol.exactEdge else { continue }     // a|b abut, a on the left
                 let jPhys = (ar.maxX + br.minX) / 2
                 guard jPhys > cr.minX, jPhys < cr.maxX else { continue }  // junction inside the child
                 let jPoint = ao.x + an.bounds.width
@@ -483,7 +501,7 @@ enum SchematicLayout {
             for a in side { for b in side where b != a {
                 guard let ar = rects[a], let br = rects[b], let ao = origins[a], let bo = origins[b],
                       let an = byID[a] else { continue }
-                guard abs(ar.maxY - br.minY) <= 0.5 else { continue }     // a stacked above b (y-down)
+                guard abs(ar.maxY - br.minY) <= Tol.exactEdge else { continue }     // a stacked above b (y-down)
                 let jPhys = (ar.maxY + br.minY) / 2
                 guard jPhys > cr.minY, jPhys < cr.maxY else { continue }
                 let jPoint = ao.y + an.bounds.height
@@ -518,7 +536,7 @@ enum SchematicLayout {
         var origins: [CGDirectDisplayID: CGPoint] = [start.id: .zero]
         var meta: [CGDirectDisplayID: (ambiguous: Bool, dockedTo: CGDirectDisplayID?)] = [start.id: (false, nil)]
         var queue = [start.id]
-        let tol: CGFloat = 2
+        let tol = Tol.seam
         while !queue.isEmpty {
             let parentID = queue.removeFirst()
             for child in displays where origins[child.id] == nil {
@@ -674,7 +692,7 @@ enum SchematicLayout {
     }
 
     /// The seam shared by `a` and `b`, or nil if they aren't edge-adjacent.
-    static func seam(_ a: CGRect, _ b: CGRect, tol: CGFloat = 2) -> Seam? {
+    static func seam(_ a: CGRect, _ b: CGRect, tol: CGFloat = Tol.seam) -> Seam? {
         if abs(a.maxX - b.minX) <= tol || abs(b.maxX - a.minX) <= tol {
             let aLeft = abs(a.maxX - b.minX) <= tol
             let l = aLeft ? a : b, r = aLeft ? b : a

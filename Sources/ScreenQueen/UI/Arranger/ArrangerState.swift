@@ -221,7 +221,7 @@ final class ArrangerState {
         let ox = ourRef.x - ref.bounds.minX, oy = ourRef.y - ref.bounds.minY
         for d in snapshot {
             guard let o = ours[d.id],
-                  abs((o.x - ox) - d.bounds.minX) < 1.5, abs((o.y - oy) - d.bounds.minY) < 1.5 else { return false }
+                  abs((o.x - ox) - d.bounds.minX) < Tol.planeMatch, abs((o.y - oy) - d.bounds.minY) < Tol.planeMatch else { return false }
         }
         return true
     }

@@ -31,7 +31,7 @@ enum DockPredictor {
                             mainID: CGDirectDisplayID?,
                             edge: Edge) -> CGDirectDisplayID? {
         guard let start = mainID ?? pointRects.keys.first, pointRects[start] != nil else { return nil }
-        let tol: CGFloat = 2
+        let tol = Tol.seam
 
         // Does `n` abut `cur` on the Dock-ward side, with real overlap along the seam?
         func stepsToward(from cur: CGRect, _ n: CGRect) -> Bool {

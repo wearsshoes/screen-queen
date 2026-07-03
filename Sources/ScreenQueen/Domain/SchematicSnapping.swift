@@ -139,7 +139,7 @@ enum SchematicSnapping {
     /// The display `id`'s current docking against a neighbor on the plane.
     static func currentJoin(_ id: CGDirectDisplayID, plane: [CGDirectDisplayID: CGRect]) -> Join? {
         guard let A = plane[id] else { return nil }
-        let tol: CGFloat = 0.1
+        let tol = Tol.join
         for (oid, O) in plane where oid != id {
             let yOv = min(A.maxY, O.maxY) - max(A.minY, O.minY)
             let xOv = min(A.maxX, O.maxX) - max(A.minX, O.minX)
@@ -231,12 +231,12 @@ enum SchematicSnapping {
                            plane: [CGDirectDisplayID: CGRect]) -> CGPoint? {
         guard let r = plane[id], let O = plane[oid] else { return nil }
         if fromVerticalSeam {
-            let onRight = abs(r.minX - O.maxX) < 0.1
+            let onRight = abs(r.minX - O.maxX) < Tol.join
             let y = increasing ? O.maxY : O.minY - r.height        // below / above O
             let snaps = SchematicLayout.physSnaps(childExtent: r.width, parent: O, vertical: false)
             return CGPoint(x: (onRight ? snaps.last! : snaps.first!).along, y: y)
         } else {
-            let below = abs(r.minY - O.maxY) < 0.1
+            let below = abs(r.minY - O.maxY) < Tol.join
             let x = increasing ? O.maxX : O.minX - r.width         // right / left of O
             let snaps = SchematicLayout.physSnaps(childExtent: r.height, parent: O, vertical: true)
             return CGPoint(x: x, y: (below ? snaps.last! : snaps.first!).along)
