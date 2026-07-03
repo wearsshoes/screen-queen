@@ -72,31 +72,17 @@ extension AppDelegate: DisplayCommanding {
                         revert: { DisplayManager.applyOrigins(before, permanent: true) })
     }
 
-    /// Change a display's resolution, preserving alignment: apply the new mode
-    /// *and* re-set the arrangement so the display stays where the plane put it at
-    /// the new point size. Reverts both (undoable) if a bad mode blacks a screen.
+    /// Change one display's resolution — a batch of one.
     func setResolution(_ id: CGDirectDisplayID, _ mode: CGDisplayMode,
                        _ origins: [CGDirectDisplayID: CGPoint]) {
-        isLiveDragging = false
-        let snap = DisplayManager.snapshot()
-        let previousMode = CGDisplayCopyDisplayMode(id)
-        let previousOrigins = originMap(of: snap)
-        let mainID = snap.first(where: { $0.isMain })?.id
-        let applied = applyRevertable(apply: {
-            guard DisplayManager.applyMode(mode, to: id) else { return false }
-            DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true)
-            return true
-        }, revert: {
-            if let previousMode { DisplayManager.applyMode(previousMode, to: id) }
-            DisplayManager.applyOrigins(previousOrigins, permanent: true)
-        })
-        // One display *is* every display on a single-screen setup — the only case
-        // where this change can leave no live arranger to recover from.
-        if applied, affectsEveryDisplay([id]) { armRevertCountdown() }
+        setResolutions([id: mode], origins)
     }
 
-    /// Apply a resolution change to several displays at once (the `.all`-scope slider),
-    /// as a single revertable step so one undo restores every display's prior mode.
+    /// Apply a resolution change to one or more displays (the ⌘± keys, the tile menu,
+    /// either slider scope) as a single revertable step, preserving alignment: the
+    /// modes apply *and* the arrangement is re-set so every display stays where the
+    /// plane put it at the new point sizes. Strict: if any mode fails to take, the
+    /// whole batch rolls back — no half-changed cast.
     func setResolutions(_ modes: [CGDirectDisplayID: CGDisplayMode],
                         _ origins: [CGDirectDisplayID: CGPoint]) {
         guard !modes.isEmpty else { return }
@@ -106,16 +92,20 @@ extension AppDelegate: DisplayCommanding {
             modes.keys.compactMap { id in CGDisplayCopyDisplayMode(id).map { (id, $0) } })
         let previousOrigins = originMap(of: snap)
         let mainID = snap.first(where: { $0.isMain })?.id
-        let applied = applyRevertable(apply: {
-            for (id, mode) in modes { _ = DisplayManager.applyMode(mode, to: id) }
-            DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true)
-            return true
-        }, revert: {
+        let restore = {
             for (id, mode) in previousModes { DisplayManager.applyMode(mode, to: id) }
             DisplayManager.applyOrigins(previousOrigins, permanent: true)
-        })
+        }
+        let applied = applyRevertable(apply: {
+            var ok = true
+            for (id, mode) in modes { ok = DisplayManager.applyMode(mode, to: id) && ok }
+            guard ok else { restore(); return false }   // strict: no half-changed cast
+            DisplayManager.applyOrigins(pin(origins, mainID: mainID), permanent: true)
+            return true
+        }, revert: restore)
         // The whole cast changed looks at once → every screen might be dark → the
-        // change must be able to snatch itself back.
+        // change must be able to snatch itself back. (One display *is* the whole
+        // cast on a single-screen setup.)
         if applied, affectsEveryDisplay(Set(modes.keys)) { armRevertCountdown() }
     }
 
