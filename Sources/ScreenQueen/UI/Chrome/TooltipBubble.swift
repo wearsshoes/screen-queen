@@ -31,7 +31,7 @@ final class TooltipHost: NSHostingView<TooltipBubbleView> {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-// MARK: - Canvas plumbing (rides the ghost mapping — see VirtualMouse.swift)
+// MARK: - Canvas plumbing (rides the `ghostPoint` mapping — see Arranger+Chrome)
 
 extension Arranger {
 

@@ -51,6 +51,14 @@ extension Arranger {
         solvePanel.setGhost(inactive)
     }
 
+    /// Map a point from the active canvas's view coords onto this canvas (the ghost
+    /// mapping the mouse and tooltip ride). Identity when active. Its inputs
+    /// (`ghostScale`, `ghostActiveCenter`) are set by `renderChrome` above.
+    func ghostPoint(_ p: CGPoint) -> CGPoint {
+        ArrangerGeometry.ghostPoint(p, ghostScale: ghostScale, activeCenter: ghostActiveCenter,
+                                    destCenter: CGPoint(x: bounds.midX, y: bounds.midY))
+    }
+
     /// Sizes the chrome in proportion to this canvas's minimap tiles: the minimap scale
     /// over a reference, so bigger tiles → bigger bar.
     func chromeTileScale(_ t: Transform) -> CGFloat {

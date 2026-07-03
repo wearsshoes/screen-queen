@@ -59,16 +59,9 @@ final class GhostCursorLayer: CAShapeLayer {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-// MARK: - The ghost projection (per-canvas chrome rendering lives in Arranger+Chrome)
+// MARK: - The ghost mouse (the `ghostPoint` projection lives in Arranger+Chrome)
 
 extension Arranger {
-
-    /// Map a point from the active canvas's view coords onto this canvas (the ghost
-    /// mapping for the mouse and tooltip). Identity when active.
-    func ghostPoint(_ p: CGPoint) -> CGPoint {
-        ArrangerGeometry.ghostPoint(p, ghostScale: ghostScale, activeCenter: ghostActiveCenter,
-                                    destCenter: CGPoint(x: bounds.midX, y: bounds.midY))
-    }
 
     /// Move the ghost mouse — position only, the per-event path. Like a real cursor
     /// (and its own tooltip), the arrow never changes size.
