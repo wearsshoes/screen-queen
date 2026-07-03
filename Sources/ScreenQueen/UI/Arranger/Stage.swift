@@ -239,8 +239,6 @@ final class Stage: NSView {
     var displays: [DisplaySnapshot] { get { state.displays } set { state.displays = newValue } }
     var selectedID: CGDirectDisplayID? { get { state.selectedID } set { state.selectedID = newValue } }
     var plane: [CGDirectDisplayID: CGRect] { state.plane }
-    var pendingSize: [CGDirectDisplayID: CGSize] { get { state.pendingSize } set { state.pendingSize = newValue } }
-    var pendingMode: (id: CGDirectDisplayID, mode: CGDisplayMode)? { get { state.pendingMode } set { state.pendingMode = newValue } }
     var activeV: (selfA: VAnchor, otherA: VAnchor, otherID: CGDirectDisplayID)? { get { state.activeV } set { state.activeV = newValue } }
     var activeH: (selfA: HAnchor, otherA: HAnchor, otherID: CGDirectDisplayID)? { get { state.activeH } set { state.activeH = newValue } }
     var extendedBuiltinModes: Bool { get { state.extendedBuiltinModes } set { state.extendedBuiltinModes = newValue } }

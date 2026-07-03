@@ -74,12 +74,6 @@ enum ResolutionLadder {
         byArea(modesList(all: all, isBuiltin: isBuiltin, notched: notched, extended: extended, current: current))
     }
 
-    /// Index of `current` within `modes`, if present.
-    static func currentIndex(in modes: [DisplayMode], matching current: CGDisplayMode?) -> Int? {
-        guard let key = current.map(ModeKey.init) else { return nil }
-        return modes.firstIndex { $0.key == key }
-    }
-
     /// The default mode: the largest clean 2× Retina mode (falling back to the largest of
     /// any kind), used by the ⌘0 / ⌘⇧0 reset.
     static func defaultMode(_ modes: [DisplayMode]) -> DisplayMode? {

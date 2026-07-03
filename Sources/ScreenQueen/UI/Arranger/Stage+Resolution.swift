@@ -7,7 +7,7 @@ import Foundation
 /// here supply the live system facts (catalog modes, notch, current mode, pending state).
 extension Stage {
 
-    /// Step the selected display's resolution: preview via `pendingSize` (physical
+    /// Step the selected display's resolution: preview via `pendingModes` (physical
     /// size is unchanged, so the plane and alignment are untouched), apply the mode
     /// when ⌘ is released.
     func handleResolutionKey(_ ch: String) {
@@ -94,7 +94,7 @@ extension Stage {
             return
         }
 
-        state.pendingModes.removeAll(); pendingSize.removeAll()
+        state.pendingModes.removeAll()
         for (id, mode) in targets { previewMode(mode, on: id, replacing: false) }
         zoomPending = true
     }
@@ -109,7 +109,8 @@ extension Stage {
 
     /// Index of `d`'s current (or pending) mode within `sortedModes`, if present.
     func currentModeIndex(for d: DisplaySnapshot, in modes: [DisplayMode]) -> Int? {
-        ResolutionLadder.currentIndex(in: modes, matching: state.pendingMode(for: d.id) ?? CGDisplayCopyDisplayMode(d.id))
+        let key = state.pendingMode(for: d.id)?.key ?? CGDisplayCopyDisplayMode(d.id).map(ModeKey.init)
+        return key.flatMap { k in modes.firstIndex { $0.key == k } }
     }
 
     /// The modes to *list* for `d` (menu order isn't sorted-by-area; the menu uses this
@@ -125,9 +126,8 @@ extension Stage {
     /// single-display path (⌘± keys, `.one` slider); `false` adds to the set for the
     /// `.all` slider, which previews several displays at once.
     func previewMode(_ mode: DisplayMode, on id: CGDirectDisplayID, replacing: Bool = true) {
-        if replacing { state.pendingModes.removeAll(); pendingSize.removeAll() }
-        state.pendingModes[id] = mode.cgMode
-        pendingSize[id] = CGSize(width: mode.pointWidth, height: mode.pointHeight)
+        if replacing { state.pendingModes.removeAll() }
+        state.pendingModes[id] = mode
         repaintSchematic()
         emitPreview()
     }
@@ -140,8 +140,8 @@ extension Stage {
         let modes = state.pendingModes
         guard !modes.isEmpty else { return }
         let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
-        state.pendingModes.removeAll(); pendingSize.removeAll()
-        commander?.setResolutions(modes, origins)
+        state.pendingModes.removeAll()
+        commander?.setResolutions(modes.mapValues(\.cgMode), origins)
     }
 
     /// Whether `d` is a notched built-in display — the live screen query lives in

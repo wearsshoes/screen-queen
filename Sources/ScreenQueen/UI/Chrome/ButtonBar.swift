@@ -356,8 +356,8 @@ extension Stage {
             let n = sliderModes.count
             // Pending (mid-drag, any stage) wins; else the committed mode. One rule for
             // every stage — the ghosts mirror a live drag for free.
-            if let pending = state.pendingMode(for: d.id).map(ModeKey.init),
-               let idx = sliderModes.firstIndex(where: { $0.key == pending }) {
+            if let pending = state.pendingMode(for: d.id),
+               let idx = sliderModes.firstIndex(of: pending) {
                 m.sliderValue = Double(idx) / Double(n - 1)
             } else {
                 let idx = currentModeIndex(for: d, in: sliderModes) ?? (n - 1) / 2
@@ -488,7 +488,7 @@ extension Stage {
     /// Preview every display shifted by `stepDelta` detents from its current mode
     /// (clamped per display), for `.all` scope.
     private func previewProportional(stepDelta: Int) {
-        state.pendingModes.removeAll(); pendingSize.removeAll()
+        state.pendingModes.removeAll()
         for d in displays where !d.isMirrored {
             let modes = sortedModes(for: d)
             guard modes.count > 1, let base = currentModeIndex(for: d, in: modes) else { continue }

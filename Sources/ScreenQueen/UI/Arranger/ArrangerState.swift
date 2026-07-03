@@ -55,20 +55,13 @@ final class ArrangerState {
     }
     func endDragLock() { lockedPointOrigins = nil }
 
-    /// Resolution preview (pending until ⌘ released) — one entry in `.one` scope, many in `.all`.
-    var pendingSize: [CGDirectDisplayID: CGSize] = [:]
-    var pendingModes: [CGDirectDisplayID: CGDisplayMode] = [:]
-    /// Single-display view of `pendingModes` for callers that think in one display.
-    var pendingMode: (id: CGDirectDisplayID, mode: CGDisplayMode)? {
-        get { pendingModes.first.map { ($0.key, $0.value) } }
-        set {
-            pendingModes.removeAll()
-            if let newValue { pendingModes[newValue.id] = newValue.mode }
-        }
-    }
+    /// Resolution preview (pending until ⌘ released) — one entry in `.one` scope, many
+    /// in `.all`. The previewed point size is the mode's own (see `pointSize`); there is
+    /// no second copy to drift.
+    var pendingModes: [CGDirectDisplayID: DisplayMode] = [:]
 
     /// The previewed mode for `id`, if any.
-    func pendingMode(for id: CGDirectDisplayID) -> CGDisplayMode? { pendingModes[id] }
+    func pendingMode(for id: CGDirectDisplayID) -> DisplayMode? { pendingModes[id] }
 
     /// Whether the resolution slider drives one display or all of them proportionally.
     enum SliderScope { case one, all }
@@ -204,8 +197,7 @@ final class ArrangerState {
         self.airplaySession = AirPlayMonitor.currentSession()
         let plane = displays.filter { !$0.isMirrored }
         if force || !planeMatches(plane) { self.plane = SchematicLayout.toPlane(plane) }
-        pendingSize.removeAll()
-        pendingMode = nil
+        pendingModes.removeAll()
         if let sel = selectedID, !displays.contains(where: { $0.id == sel }) {
             selectedID = nil; activeV = nil; activeH = nil
         }
@@ -235,7 +227,9 @@ final class ArrangerState {
     }
 
     /// Effective point size (live during a zoom preview).
-    func pointSize(_ d: DisplaySnapshot) -> CGSize { pendingSize[d.id] ?? d.bounds.size }
+    func pointSize(_ d: DisplaySnapshot) -> CGSize {
+        pendingModes[d.id].map { CGSize(width: $0.pointWidth, height: $0.pointHeight) } ?? d.bounds.size
+    }
 
     /// Points per physical inch at the effective point size — the density readout the
     /// label cards and mirror cards show. nil when the physical size is unknown.
