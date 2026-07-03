@@ -15,13 +15,20 @@
 * Sparkle auto-update
 * hardware matrix: Intel, clamshell, hub/dock, 3+ monitors, DisplayLink
 
-**SwiftUI port — ✅ COMPLETE (July 2026):**
+**SwiftUI port (July 2026 — one frontier left):**
 * The UI layer is SwiftUI now: chrome as NSHostingView islands per canvas
-  (banner, button bar + 👑 house menu, tooltip, solve panel, Backstage Pass,
-  debug); the schematic in a `Canvas` drawing native `GraphicsContext`; input
-  via EventPlumbing key monitors + the schematic host's DragGesture (right-click
+  (banner, button bar + 👑 house menu, tooltip, solve panel, label cards —
+  supersampling dropped by decree, Backstage Pass, debug, calibration panel);
+  the schematic in a `Canvas` drawing native `GraphicsContext`; input via
+  EventPlumbing key monitors + the schematic host's DragGesture (right-click
   forwards to `menu(for:)`). Display guts (`CGDirectDisplay`, CGEvent,
   ScreenCaptureKit, IOKit EDID) were never UI-framework code and are unchanged.
+* Remaining frontier: **CalibrationTape** — the last custom NSView draw+input
+  surface. Portable with the schematic's own pattern (Canvas + withCGContext
+  or native, DragGesture for tabs/ribbon, key monitors), but it's a full
+  campaign: grab-region hit tests, cursor rects, first-responder tip glow,
+  two overlapping tapes per window. CalibrationController keeps the window
+  shells either way.
 * Conventions the port established:
   - Geometry computes **y-up** (the `Transform`/hit-test space shared with the
     AppKit layer worlds) and flips at each draw subject's boundary
@@ -44,15 +51,11 @@
     click — so it can neither run the toggle nor host the overlay fleet.
   - **Seam particles**: CAEmitterLayer (render-server GPU, zero app frame
     loop). Metal only if the art direction wants shader glitter someday.
-  - **LabelCard**: its text supersamples at 2× backing scale because script
-    hairlines go mushy at 1× on non-Retina panels — SwiftUI text can't express
-    that. Revisit only with a non-Retina monitor to check against.
   - **EventPlumbing**: NSEvent monitors + debounce. Known upgrade is a
     CGEventTap (consume ⌘⌥F1, event injection); it likely rides the existing
     Accessibility grant — switch only when something needs the tap's powers.
-  - **Calibration overlay**: shielding-level windows, cursor rects, key
-    routing — keeper-shaped; its panel could go SwiftUI like the Backstage
-    Pass if ever wanted.
+  (LabelCard's supersampling keeper was overruled — ported, hack dropped; if
+  script hairlines read mushy on a non-Retina panel, that's the culprit.)
 * OS-version policy: floor stays macOS 14; newer-API paths ship as
   default-with-fallback (the macOS-26 glass pattern) *when they earn their
   keep*. Audited July 2026: no macOS-15 API beats what's shipped. Re-audit
