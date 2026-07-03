@@ -141,7 +141,7 @@ extension Arranger {
         guard !modes.isEmpty else { return }
         let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
         state.pendingModes.removeAll(); pendingSize.removeAll()
-        onSetResolutions?(modes, origins)
+        commander?.setResolutions(modes, origins)
     }
 
     /// Whether `d` is a notched built-in display (its screen reserves a top safe area) —

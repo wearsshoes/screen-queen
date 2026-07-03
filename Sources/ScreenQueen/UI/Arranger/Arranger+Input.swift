@@ -27,8 +27,8 @@ extension Arranger {
         // Mirror-column buttons, hit-tested against the same pure layout the draw uses.
         if let hit = mirrorColumnHit(at: p) {
             switch hit {
-            case .unmirror(let id): onUnmirror?(id)
-            case .airplaySettings: onOpenAirPlaySettings?()
+            case .unmirror(let id): commander?.unmirror(id)
+            case .airplaySettings: commander?.openAirPlaySettings()
             }
             return
         }
@@ -89,7 +89,7 @@ extension Arranger {
         // Dropped the menu-bar strip: whichever tile it's over becomes main.
         if let p = draggingMenuBar {
             needsDisplay = true
-            if let d = display(at: p), !d.isMain { onSetMain?(d.id) }
+            if let d = display(at: p), !d.isMain { commander?.setMainDisplay(d.id) }
             return
         }
         // Option-mirror drop: if released over a *different* plane tile, mirror the
@@ -97,7 +97,7 @@ extension Arranger {
         if optionMirrorDrag, let slave = draggedID {
             mirrorDragPoint = nil
             if let target = display(at: convert(event.locationInWindow, from: nil)),
-               target.id != slave { onSetMirror?(slave, target.id) }
+               target.id != slave { commander?.setMirror(slave: slave, master: target.id) }
             needsDisplay = true
             return
         }
@@ -113,7 +113,7 @@ extension Arranger {
         let cmd = flags.contains(.command), shift = flags.contains(.shift)
 
         // Escape / Return / ⌘Return = Done (commit & exit).
-        if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 { onDismiss?(); return }
+        if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 { commander?.dismissArranger(); return }
 
         if cmd, let ch = event.charactersIgnoringModifiers, "+=-_0".contains(ch) {
             if !event.isARepeat {

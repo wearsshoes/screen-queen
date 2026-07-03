@@ -2,7 +2,7 @@ import AppKit
 
 /// The per-tile right-click context menu: resolution submenu plus size-calibration
 /// entries, and the `@objc` actions they fire. Builds off the display under the cursor;
-/// the actions hand off through the canvas's `onSet*`/`onCalibrate*` closures.
+/// the actions hand off to the `commander`.
 extension Arranger {
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -55,9 +55,9 @@ extension Arranger {
         guard let c = s.representedObject as? ModeChoice else { return }
         let size = CGSize(width: CGFloat(c.mode.width), height: CGFloat(c.mode.height)) // "Looks like" points
         let ds = displays.map { $0.id == c.id ? $0.with(bounds: CGRect(origin: $0.bounds.origin, size: size)) : $0 }
-        onSetResolution?(c.id, c.mode, SchematicLayout.toPoints(rects: plane, displays: ds))
+        commander?.setResolution(c.id, c.mode, SchematicLayout.toPoints(rects: plane, displays: ds))
     }
-    @objc private func calibrateFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { onCalibrate?($0.uint32Value) } }
-    @objc private func calibrateVisualFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { onCalibrateVisual?($0.uint32Value) } }
-    @objc private func resetCalibrationFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { onResetCalibration?($0.uint32Value) } }
+    @objc private func calibrateFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { commander?.calibrate($0.uint32Value) } }
+    @objc private func calibrateVisualFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { commander?.calibrateVisual($0.uint32Value) } }
+    @objc private func resetCalibrationFromMenu(_ s: NSMenuItem) { (s.representedObject as? NSNumber).map { commander?.resetCalibration($0.uint32Value) } }
 }

@@ -6,25 +6,13 @@ import AppKit
 @MainActor
 final class ArrangerState {
 
-    // App callbacks (wired once by the AppDelegate).
-    var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)?
+    /// The app-level executor for every display command (set once by the AppDelegate) —
+    /// one reference instead of a closure per command.
+    weak var commander: (any DisplayCommanding)?
+
     /// Resolution-slider drag began/ended — ArrangerWindows drives the ghost aids from a
     /// timer while held (the modal tracking loop starves the mouse monitors).
     var onSliderDragChanged: ((Bool) -> Void)?
-    var onSetMain: ((CGDirectDisplayID) -> Void)?
-    var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)?
-    /// Apply resolution changes to one *or many* displays as a single revertable step.
-    var onSetResolutions: (([CGDirectDisplayID: CGDisplayMode], [CGDirectDisplayID: CGPoint]) -> Void)?
-    var onSetMirror: ((_ slave: CGDirectDisplayID, _ master: CGDirectDisplayID) -> Void)?
-    var onUnmirror: ((CGDirectDisplayID) -> Void)?
-    var onCalibrate: ((CGDirectDisplayID) -> Void)?
-    var onCalibrateVisual: ((CGDirectDisplayID) -> Void)?
-    var onResetCalibration: ((CGDirectDisplayID) -> Void)?
-    /// Open system Screen Mirroring settings (we can detect AirPlay but not cancel it).
-    var onOpenAirPlaySettings: (() -> Void)?
-    var onDismiss: (() -> Void)?
-    /// Restore everything to the state captured when the arranger was opened.
-    var onReset: (() -> Void)?
 
     /// Called after any mutation so every canvas redraws.
     var changed: (() -> Void)?
@@ -296,7 +284,7 @@ final class ArrangerState {
 
     func commit() {
         guard !plane.isEmpty else { return }
-        onCommit?(SchematicLayout.toPoints(rects: plane, displays: sizedDisplays()))
+        commander?.commitArrangement(SchematicLayout.toPoints(rects: plane, displays: sizedDisplays()))
     }
 
     /// The current plane as a point arrangement shifted so `id` sits at the origin —

@@ -195,18 +195,8 @@ final class Arranger: NSView {
     var activeH: (selfA: HAnchor, otherA: HAnchor, otherID: CGDirectDisplayID)? { get { state.activeH } set { state.activeH = newValue } }
     var extendedBuiltinModes: Bool { get { state.extendedBuiltinModes } set { state.extendedBuiltinModes = newValue } }
 
-    // Convenience forwards to the shared callbacks.
-    var onCommit: (([CGDirectDisplayID: CGPoint]) -> Void)? { state.onCommit }
-    var onSetMain: ((CGDirectDisplayID) -> Void)? { state.onSetMain }
-    var onSetResolution: ((CGDirectDisplayID, CGDisplayMode, [CGDirectDisplayID: CGPoint]) -> Void)? { state.onSetResolution }
-    var onSetResolutions: (([CGDirectDisplayID: CGDisplayMode], [CGDirectDisplayID: CGPoint]) -> Void)? { state.onSetResolutions }
-    var onSetMirror: ((CGDirectDisplayID, CGDirectDisplayID) -> Void)? { state.onSetMirror }
-    var onUnmirror: ((CGDirectDisplayID) -> Void)? { state.onUnmirror }
-    var onCalibrate: ((CGDirectDisplayID) -> Void)? { state.onCalibrate }
-    var onCalibrateVisual: ((CGDirectDisplayID) -> Void)? { state.onCalibrateVisual }
-    var onResetCalibration: ((CGDirectDisplayID) -> Void)? { state.onResetCalibration }
-    var onOpenAirPlaySettings: (() -> Void)? { state.onOpenAirPlaySettings }
-    var onDismiss: (() -> Void)? { state.onDismiss }
+    /// The app-level command executor (see `DisplayCommanding`).
+    var commander: (any DisplayCommanding)? { state.commander }
 
     var airplaySession: AirPlaySession? { state.airplaySession }
 

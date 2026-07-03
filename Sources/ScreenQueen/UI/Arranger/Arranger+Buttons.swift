@@ -275,9 +275,9 @@ extension Arranger {
         feedButtonSymbol = state.feedEnabled ? "figure.run" : "figure.stand"
     }
 
-    @objc private func resetTapped() { state.onReset?() }
+    @objc private func resetTapped() { state.commander?.resetToBaseline() }
     @objc private func undoTapped() { state.undo() }
-    @objc private func doneTapped() { onDismiss?() }
+    @objc private func doneTapped() { commander?.dismissArranger() }
     @objc private func feedTapped() { state.onToggleFeed?(!state.feedEnabled) }
     @objc private func scopeTapped() {
         state.sliderScope = state.sliderScope == .one ? .all : .one
