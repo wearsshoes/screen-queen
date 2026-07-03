@@ -69,7 +69,7 @@ final class Arranger {
         }
         model.onSliderDragChanged = { [weak self] dragging in self?.events?.setSliderDragging(dragging) }
         model.capture = capture
-        capture.onFrame = { [weak self] in self?.stages.forEach { $0.repaintSchematic() } }
+        capture.onFrame = { [weak self] in self?.stages.forEach { $0.repaintCanvas() } }
         model.onToggleFeed = { [weak self] on in self?.setFeed(on) }
         model.onCountdownResolved = { [weak self] kind in
             if kind == .feedGuard { self?.cancelFeedWatchdog() }

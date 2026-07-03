@@ -77,7 +77,7 @@ extension Stage {
             return
         }
         // Option-mirror drag: don't move the plane; just track the drop target.
-        if optionMirrorDrag { mirrorDragPoint = p; dragMoved = true; repaintSchematic(); return }
+        if optionMirrorDrag { mirrorDragPoint = p; dragMoved = true; repaintCanvas(); return }
         guard let id = draggedID, let dragged = displays.first(where: { $0.id == id }),
               let t = dragTransform ?? transform(plane) else { return }
         // 1:1 cursor tracking: view delta ÷ scale = physical delta (both y-down).
@@ -90,7 +90,7 @@ extension Stage {
         if !dragMoved { model.pushUndo() }   // snapshot before the drag's first move
         model.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(dragged)), for: id)
         dragMoved = true
-        repaintSchematic()
+        repaintCanvas()
         emitPreview()
     }
 
@@ -101,7 +101,7 @@ extension Stage {
                 model.draggingDisplayID = nil; model.endDragLock(); model.notify() }
         // Dropped the menu-bar strip: whichever tile it's over becomes main.
         if let strip = draggingMenuBar {
-            repaintSchematic()
+            repaintCanvas()
             if let d = display(at: strip), !d.isMain { commander?.setMainDisplay(d.id) }
             return
         }
@@ -112,11 +112,11 @@ extension Stage {
             if let target = display(at: p), target.id != slave {
                 commander?.setMirror(slave: slave, master: target.id)
             }
-            repaintSchematic()
+            repaintCanvas()
             return
         }
         guard draggedID != nil else { return }
-        guard dragMoved else { repaintSchematic(); return } // click, no move: plane unchanged
+        guard dragMoved else { repaintCanvas(); return } // click, no move: plane unchanged
         commitPlane()
     }
 
@@ -230,7 +230,7 @@ extension Stage {
                                                  snap: true, plane: plane)
         activeV = snap.activeV; activeH = snap.activeH
         model.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel)), for: id)
-        repaintSchematic()
+        repaintCanvas()
         emitPreview()
     }
 

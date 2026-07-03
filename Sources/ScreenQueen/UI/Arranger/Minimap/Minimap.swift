@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// The stage stays the input owner and supplies the view-local facts (bounds, the
 /// drag-frozen transform, gesture state); the shared editing model comes from `model`.
-/// Paint order still lives in the stage's render pass (`Stage.drawSchematic`),
+/// Paint order still lives in the stage's render pass (`Stage.render`),
 /// which interleaves these subjects with the glass-anchored ones.
 @MainActor
 final class Minimap {
