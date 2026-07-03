@@ -32,7 +32,12 @@ final class ArrangerState {
     var airplaySession: AirPlaySession?
 
     /// The physical plane (inches) — the source of truth while manipulating.
-    var plane: [CGDirectDisplayID: CGRect] = [:]
+    /// External writes go through `setPlaneRect` so mutations are named and the
+    /// state can adopt @Observable without hunting down pokes.
+    private(set) var plane: [CGDirectDisplayID: CGRect] = [:]
+
+    /// Move/resize one display's plane rect — the drag / nudge / alignment mutation.
+    func setPlaneRect(_ rect: CGRect, for id: CGDirectDisplayID) { plane[id] = rect }
 
     /// The display whose tile is being dragged right now (shared so its own screen can
     /// brighten). nil when not dragging.

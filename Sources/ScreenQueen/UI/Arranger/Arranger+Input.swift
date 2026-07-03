@@ -76,7 +76,7 @@ extension Arranger {
         activeV = snap.activeV; activeH = snap.activeH
         guard snap.origin != plane[id]?.origin else { return }
         if !dragMoved { state.pushUndo() }   // snapshot before the drag's first move
-        plane[id] = CGRect(origin: snap.origin, size: SchematicLayout.physSize(dragged))
+        state.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(dragged)), for: id)
         dragMoved = true
         repaintSchematic()
         emitPreview()
@@ -217,7 +217,7 @@ extension Arranger {
                                                  free: nudgeAccum, scale: drawTransform(plane)?.scale ?? 1,
                                                  snap: true, plane: plane)
         activeV = snap.activeV; activeH = snap.activeH
-        plane[id] = CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel))
+        state.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel)), for: id)
         repaintSchematic()
         emitPreview()
     }
@@ -264,14 +264,14 @@ extension Arranger {
                                                          free: plane[id]?.origin ?? .zero,
                                                          scale: drawTransform(plane)?.scale ?? 1, snap: true, plane: plane)
                 activeV = snap.activeV; activeH = snap.activeH
-                plane[id] = CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel))
+                state.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel)), for: id)
             }
             emitPreview()
             return
         }
         // Same source the ghost preview reads, so what was previewed is what applies.
         guard let o = SchematicSnapping.plannedMoves(id, plane: plane, activeV: activeV, activeH: activeH)[dir] else { return }
-        plane[id] = CGRect(origin: o, size: plane[id]!.size)
+        state.setPlaneRect(CGRect(origin: o, size: plane[id]!.size), for: id)
         let m = SchematicSnapping.markerForJoin(id, plane: plane)
         activeV = m.v; activeH = m.h
         emitPreview()
