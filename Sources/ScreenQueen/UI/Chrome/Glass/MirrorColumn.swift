@@ -4,35 +4,26 @@ import SwiftUI
 /// resolution / what they mirror, with an un-mirror button) and a macOS-managed
 /// AirPlay session. Screen-anchored UI above the schematic, unrelated to the
 /// physical plane.
-struct MirrorColumnContent {
-    struct Card: Identifiable {
-        let id: CGDirectDisplayID
-        let nickname: String
-        let name: String
-        let resolution: String
-        let detail: String
-        let mirrors: String
-        /// From the mirrored screen's aspect, clamped so the text still fits.
-        let height: CGFloat
-    }
-    var cards: [Card] = []
-    var airplayName: String?
-}
-
+///
+/// Observes the shared model directly: the body's reads (mirrored displays, AirPlay
+/// session, stat lines) repaint via Observation, and the host self-sizes through
+/// Auto Layout. The stage only creates the host and toggles its visibility.
 struct MirrorColumnView: View {
-    var content: MirrorColumnContent
-    var unmirror: (CGDirectDisplayID) -> Void = { _ in }
-    var openAirPlaySettings: () -> Void = {}
+    let model: ArrangerModel
+
+    /// Fixed card width: the column's 360 minus 18 breathing room each side.
+    static let cardWidth: CGFloat = 324
 
     var body: some View {
+        let mirrored = model.mirroredDisplays
         VStack(alignment: .leading, spacing: 16) {
-            if !content.cards.isEmpty {
+            if !mirrored.isEmpty {
                 header(Copy.mirroredHeader)
-                ForEach(content.cards) { mirrorCard($0) }
+                ForEach(mirrored, id: \.id) { mirrorCard($0) }
             }
-            if let name = content.airplayName {
+            if model.airplaySession != nil {
                 header(Copy.airplayHeader)
-                airplayCard(name)
+                airplayCard(model.airplaySession?.receiverName ?? Copy.unknownAirPlayReceiver)
             }
         }
     }
@@ -41,24 +32,30 @@ struct MirrorColumnView: View {
         Text(s).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
     }
 
-    private func mirrorCard(_ card: MirrorColumnContent.Card) -> some View {
+    private func mirrorCard(_ d: DisplaySnapshot) -> some View {
+        let sz = model.pointSize(d)
+        let aspect = sz.height > 0 ? sz.width / sz.height : 16.0 / 9
+        let stats = model.statLines(for: d)
+        let master = model.displays.first { $0.id == d.mirrorMaster }?.name ?? Copy.unknownDisplayName
+        // From the mirrored screen's aspect, clamped so the text still fits.
+        let height = min(max(Self.cardWidth / max(aspect, 0.1), 120), 260)
         // The glow blend (pink toward white) stays NSColor-sourced: Color.mix is macOS 15+.
         let nameGlow = Color(nsColor: NSColor.systemPink.blended(withFraction: 0.55, of: .white) ?? .white)
         let dim = Color.white.opacity(0.7)
         return VStack(alignment: .leading, spacing: 5) {
-            Text(card.nickname).font(.script(size: 30)).foregroundStyle(.pink)
+            Text(d.nickname).font(.script(size: 30)).foregroundStyle(.pink)
                 .shadow(color: nameGlow, radius: 6)
-            Text(card.name).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
-            Text(card.resolution).font(.system(size: 15)).foregroundStyle(.white)
-            Text(card.detail).font(.system(size: 15)).foregroundStyle(dim)
-            Text(card.mirrors).font(.system(size: 15)).foregroundStyle(dim)
+            Text(d.name).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
+            Text(stats.resolution).font(.system(size: 15)).foregroundStyle(.white)
+            Text(stats.detail).font(.system(size: 15)).foregroundStyle(dim)
+            Text(Copy.mirrorsLine(master)).font(.system(size: 15)).foregroundStyle(dim)
         }
         .padding(EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
-        .frame(maxWidth: .infinity, minHeight: card.height, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: height, alignment: .topLeading)
         // Dark card so the drag name's glow reads as a glow, not a smudge.
         .background(Color(white: 0.12).opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
         .overlay(alignment: .topTrailing) {
-            Button { unmirror(card.id) } label: {
+            Button { model.commander?.unmirror(d.id) } label: {
                 Text("✕").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(Color(white: 0.4).opacity(0.9)))
@@ -83,7 +80,7 @@ struct MirrorColumnView: View {
             Spacer(minLength: 0)
             // Hands off to Control Center's Screen Mirroring menu (Display Settings
             // doesn't know about AirPlay sessions).
-            Button(action: openAirPlaySettings) {
+            Button { model.commander?.openAirPlaySettings() } label: {
                 Text(Copy.airplayOpenSettings).font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 168, height: 28)
@@ -108,46 +105,26 @@ extension Stage {
         model.mirroredDisplays.isEmpty && model.airplaySession == nil ? 0 : 360
     }
 
-    /// Rebuild + place the column against the right edge (refresh path); hidden when
-    /// it holds nothing.
+    /// Show/hide the column (content and height are Observation's job now).
     func layoutMirrorColumn() {
-        let mirrored = model.mirroredDisplays
-        guard !mirrored.isEmpty || model.airplaySession != nil else {
+        guard mirrorColumnWidth > 0 else {
             mirrorColumn?.isHidden = true
             return
         }
-        let colW = mirrorColumnWidth
-        let pad: CGFloat = 18
-        let cardW = colW - pad * 2       // fixed width; height follows each screen's aspect
-        var content = MirrorColumnContent()
-        for d in mirrored {
-            let sz = model.pointSize(d)
-            let aspect = sz.height > 0 ? sz.width / sz.height : 16.0 / 9
-            let stats = model.statLines(for: d)
-            let master = displays.first { $0.id == d.mirrorMaster }?.name ?? Copy.unknownDisplayName
-            content.cards.append(.init(
-                id: d.id, nickname: d.nickname, name: d.name,
-                resolution: stats.resolution,
-                detail: stats.detail, mirrors: Copy.mirrorsLine(master),
-                height: min(max(cardW / max(aspect, 0.1), 120), 260)))
-        }
-        if model.airplaySession != nil {
-            content.airplayName = model.airplaySession?.receiverName ?? Copy.unknownAirPlayReceiver
-        }
-        let host = ensureMirrorColumn()
-        host.rootView = MirrorColumnView(
-            content: content,
-            unmirror: { [weak self] id in self?.commander?.unmirror(id) },
-            openAirPlaySettings: { [weak self] in self?.commander?.openAirPlaySettings() })
-        host.frame = NSRect(x: bounds.width - colW + pad, y: outerPadding,
-                            width: cardW, height: host.fittingSize.height)
-        host.isHidden = false
+        ensureMirrorColumn().isHidden = false
     }
 
     private func ensureMirrorColumn() -> MirrorColumnHost {
         if let c = mirrorColumn { return c }
-        let c = MirrorColumnHost(rootView: MirrorColumnView(content: MirrorColumnContent()))
+        let c = MirrorColumnHost(rootView: MirrorColumnView(model: model))
+        c.translatesAutoresizingMaskIntoConstraints = false
         addSubview(c)
+        // Top-right pin; height rides the SwiftUI content's intrinsic size.
+        NSLayoutConstraint.activate([
+            c.topAnchor.constraint(equalTo: topAnchor, constant: outerPadding),
+            c.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
+            c.widthAnchor.constraint(equalToConstant: MirrorColumnView.cardWidth),
+        ])
         mirrorColumn = c
         return c
     }
