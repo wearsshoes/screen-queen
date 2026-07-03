@@ -5,23 +5,8 @@ enum BarControl: Hashable, CaseIterable {
     case feed, reset, undo, slider, scope, done
 }
 
-/// Everything the bar renders from. Plain values: the stage rebuilds the rootView on
-/// every refresh/renderChrome pass, so the bar is a pure function of this.
-struct BarModel: Equatable {
-    var scale: CGFloat = 1        // chromeTileScale — every length/font multiplies by it
-    var isGhost = false           // pink chrome on inactive stages
-    var feedEnabled = true
-    var scopeAll = false
-    var canUndo = false
-    var sliderValue = 0.5         // 0…1, detent-snapped upstream
-    var sliderEnabled = false
-    // House-menu state (the status item is a plain toggle; the menu lives here).
-    var seamLightsOn = false
-    var wardrobeOn = false
-    var version: String?
-}
-
-/// The bar's outbound wiring, kept out of the model so Equatable stays derivable.
+/// The bar's outbound wiring — plain closures, so the view stays a pure function of
+/// the model plus this.
 struct BarActions {
     var feed: () -> Void = {}
     var reset: () -> Void = {}
@@ -39,15 +24,36 @@ struct BarActions {
 
 /// The bottom button bar (feed · reset · undo · [resolution slider] · done): Liquid
 /// Glass capsules on macOS 26, one HUD box below. All chrome sizes are functions of
-/// `model.scale` — the SwiftUI replacement for the old BarMetrics constraint mutation.
+/// `scale` — the SwiftUI replacement for the old BarMetrics constraint mutation.
+///
+/// Observes the shared model directly: the body's reads (feed, undo, scope, pending
+/// modes) repaint via Observation. The stage rebuilds the rootView only for the
+/// per-stage facts — tile scale, ghost dress, and the commander-owned seam-lights bit.
 struct ButtonBarView: View {
-    var model: BarModel
+    let model: ArrangerModel
+    var scale: CGFloat = 1        // chromeTileScale — every length/font multiplies by it
+    var isGhost = false           // pink chrome on inactive stages
+    var seamLightsOn = false      // commander-owned, not observable — passed in
     var actions = BarActions()
     /// Reports hover per control (SwiftUI owns the hit-testing), for the ghost tooltip.
     var onControlHover: (BarControl, Bool) -> Void = { _, _ in }
 
-    private var k: CGFloat { model.scale }
+    private var k: CGFloat { scale }
     private var pink: Color { ChromeMetrics.ghostPink }
+
+    /// Slider position/enablement from the model: the pending mode (mid-drag, any
+    /// stage) wins; else the committed mode. One rule for every stage — the ghosts
+    /// mirror a live drag for free.
+    private var sliderInfo: (value: Double, enabled: Bool) {
+        let modes = model.selectedSliderModes()
+        guard modes.count > 1,
+              let d = model.selectedID.flatMap({ id in model.displays.first { $0.id == id } })
+        else { return (0.5, false) }
+        let n = modes.count
+        let idx = model.pendingMode(for: d.id).flatMap { modes.firstIndex(of: $0) }
+            ?? model.currentModeIndex(for: d, in: modes) ?? (n - 1) / 2
+        return (Double(idx) / Double(n - 1), true)
+    }
 
     var body: some View {
         // No width cap here: `layoutBar` clamps the hosting frame to `barWidthCap`,
@@ -149,8 +155,8 @@ struct ButtonBarView: View {
         .padding(.horizontal, 16 * k)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22 * k, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22 * k, style: .continuous)
-            .strokeBorder(model.isGhost ? pink : Color.white.opacity(0.12),
-                          lineWidth: model.isGhost ? 1.5 : 0.5))
+            .strokeBorder(isGhost ? pink : Color.white.opacity(0.12),
+                          lineWidth: isGhost ? 1.5 : 0.5))
     }
 
     private func plainButton(_ id: BarControl, symbol: String, enabled: Bool = true,
@@ -177,12 +183,12 @@ struct ButtonBarView: View {
         Menu {
             Button(Copy.menuSetup, action: actions.showSetup)
             Toggle(Copy.menuSeamLights, isOn: Binding(
-                get: { model.seamLightsOn }, set: { _ in actions.toggleSeamLights() }))
+                get: { seamLightsOn }, set: { _ in actions.toggleSeamLights() }))
             Toggle(Copy.menuShowExtendedResolutions, isOn: Binding(
-                get: { model.wardrobeOn }, set: { _ in actions.toggleWardrobe() }))
+                get: { model.extendedBuiltinModes }, set: { _ in actions.toggleWardrobe() }))
             Button(Copy.menuDebug, action: actions.showDebug)
             Divider()
-            if let version = model.version { Text(version) }
+            if let version = Self.versionLine { Text(version) }
             Button(Copy.menuQuit, action: actions.quit)
         } label: {
             Image(systemName: "crown")
@@ -197,8 +203,8 @@ struct ButtonBarView: View {
     }
 
     private var slider: some View {
-        BarSlider(value: model.sliderValue, enabled: model.sliderEnabled,
-                  fill: model.isGhost ? pink : Color.accentColor, k: k,
+        BarSlider(value: sliderInfo.value, enabled: sliderInfo.enabled,
+                  fill: isGhost ? pink : Color.accentColor, k: k,
                   onChanged: actions.sliderChanged, onEnded: actions.sliderEnded)
             .frame(minWidth: 60 * k, idealWidth: 144 * k, maxWidth: 144 * k)
             .reportHover(.slider, to: onControlHover)
@@ -206,7 +212,7 @@ struct ButtonBarView: View {
 
     private var scopeButton: some View {
         Button(action: actions.scope) {
-            Image(systemName: model.scopeAll ? "rectangle.stack" : "rectangle")
+            Image(systemName: model.sliderScope == .all ? "rectangle.stack" : "rectangle")
                 .font(.system(size: 15 * k, weight: .semibold))
                 .foregroundStyle(iconColor(enabled: true))
                 .frame(width: 24 * k, height: 24 * k)
@@ -219,10 +225,17 @@ struct ButtonBarView: View {
     /// Ghost mode tints only the *icon* — a washed capsule read as a solid pink blob.
     private func iconColor(enabled: Bool) -> Color {
         guard enabled else { return .secondary }
-        return model.isGhost ? pink : Color.primary
+        return isGhost ? pink : Color.primary
     }
 
-    private var glyphColor: Color { model.isGhost ? pink : Color.primary }
+    private var glyphColor: Color { isGhost ? pink : Color.primary }
+
+    /// Version line for the house menu (nil for the bare dev binary — no Info.plist).
+    static let versionLine: String? = {
+        guard let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+              let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String else { return nil }
+        return "Screen Queen \(v) (\(b))"
+    }()
 }
 
 /// The resolution slider, drawn by hand: the stock control dims in non-key windows and
@@ -303,11 +316,12 @@ private extension View {
     }
 }
 
-// MARK: - Stage plumbing (model building, actions, placement, slider preview/commit)
+// MARK: - Stage plumbing (actions, placement)
 
-/// The bottom button bar's stage-side wiring: the NSHostingView island, model
-/// building, slider preview/commit, and frame placement. The bar's look lives in
-/// ButtonBarView (SwiftUI); everything here is state plumbing.
+/// The bottom button bar's stage-side wiring: the NSHostingView island, the action
+/// closures, and frame placement. The bar's look lives in ButtonBarView (SwiftUI);
+/// its shared inputs arrive by Observation — the rootView is rebuilt only when the
+/// per-stage facts (tile scale, ghost dress, seam-lights bit) change.
 extension Stage {
 
     func setupButtonBar() {
@@ -323,48 +337,21 @@ extension Stage {
         footerHost = footer
     }
 
-    /// Rebuild the bar from current model. `scale` sticks when given (renderChrome
-    /// passes its pass's chromeTileScale; the plain refresh path reuses the last).
+    /// Re-dress the bar with the per-stage facts. `scale` sticks when given
+    /// (renderChrome passes its pass's chromeTileScale; other callers reuse the last).
     func updateBar(scale: CGFloat? = nil) {
         if let scale { barScale = scale }
         barHost?.rootView = makeBarView()
     }
 
     private func makeBarView() -> ButtonBarView {
-        ButtonBarView(model: barModel(), actions: barActions()) { [weak self] control, hovering in
+        ButtonBarView(model: model, scale: barScale, isGhost: isGhost,
+                      seamLightsOn: model.commander?.seamLightsOn ?? false,
+                      actions: barActions()) { [weak self] control, hovering in
             guard let self else { return }
             if hovering { self.hoveredBarControl = control }
             else if self.hoveredBarControl == control { self.hoveredBarControl = nil }
         }
-    }
-
-    private func barModel() -> BarModel {
-        var m = BarModel()
-        m.scale = barScale
-        m.isGhost = isGhost
-        m.feedEnabled = model.feedEnabled
-        m.scopeAll = model.sliderScope == .all
-        m.canUndo = model.canUndo
-        m.seamLightsOn = model.commander?.seamLightsOn ?? false
-        m.wardrobeOn = model.extendedBuiltinModes
-        m.version = Self.versionLine
-
-        let selected = selectedID.flatMap { id in displays.first(where: { $0.id == id }) }
-        model.sliderModes = selected.map { model.sortedModes(for: $0) } ?? []
-        m.sliderEnabled = model.sliderModes.count > 1
-        if m.sliderEnabled, let d = selected {
-            let n = model.sliderModes.count
-            // Pending (mid-drag, any stage) wins; else the committed mode. One rule for
-            // every stage — the ghosts mirror a live drag for free.
-            if let pending = model.pendingMode(for: d.id),
-               let idx = model.sliderModes.firstIndex(of: pending) {
-                m.sliderValue = Double(idx) / Double(n - 1)
-            } else {
-                let idx = model.currentModeIndex(for: d, in: model.sliderModes) ?? (n - 1) / 2
-                m.sliderValue = Double(idx) / Double(n - 1)
-            }
-        }
-        return m
     }
 
     private func barActions() -> BarActions {
@@ -397,13 +384,6 @@ extension Stage {
             quit: { NSApp.terminate(nil) })
     }
 
-    /// Version line for the house menu (nil for the bare dev binary — no Info.plist).
-    private static let versionLine: String? = {
-        guard let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-              let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String else { return nil }
-        return "Screen Queen \(v) (\(b))"
-    }()
-
     /// The fun copy per control — the single source (no native `.toolTip`; it would pop
     /// on the hovered screen only, doubling up).
     func tooltipText(for control: BarControl) -> String? {
@@ -420,7 +400,7 @@ extension Stage {
     func barControlEnabled(_ control: BarControl) -> Bool {
         switch control {
         case .reset, .undo: return model.canUndo
-        case .slider:       return model.sliderModes.count > 1
+        case .slider:       return model.selectedSliderModes().count > 1
         case .feed, .scope, .done: return true
         }
     }

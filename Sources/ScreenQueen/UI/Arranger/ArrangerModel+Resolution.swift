@@ -147,17 +147,27 @@ extension ArrangerModel {
 
     // MARK: - The bar slider (preview as it moves, commit on release)
 
+    /// The selected display's sorted modes — the list the slider scrubs (and the bar's
+    /// enablement test). Fresh each call; a live drag uses the `sliderModes` cache.
+    func selectedSliderModes() -> [DisplayMode] {
+        guard let d = selectedID.flatMap({ id in displays.first { $0.id == id } }) else { return [] }
+        return sortedModes(for: d)
+    }
+
     /// Live-preview resolution as the slider moves (one display, or all by the same step
     /// delta): snap the raw 0…1 position to a detent, preview, commit on release.
     func sliderChanged(_ raw: Double) {
-        guard let id = selectedID, sliderModes.count > 1 else { return }
-        let n = sliderModes.count
-        let idx = max(0, min(n - 1, Int((Double(n - 1) * raw).rounded())))
-
+        guard let id = selectedID else { return }
         if sliderDragStartIndex == nil {
+            // Drag start: cache the mode list so the detents are stable all drag long.
+            sliderModes = selectedSliderModes()
+            guard sliderModes.count > 1 else { return }
             sliderDragStartIndex = currentModeIndex(for: displays.first { $0.id == id }!, in: sliderModes)
             onSliderDragChanged?(true)    // drive the ghost aids while held
         }
+        let n = sliderModes.count
+        guard n > 1 else { return }
+        let idx = max(0, min(n - 1, Int((Double(n - 1) * raw).rounded())))
 
         switch sliderScope {
         case .one:
