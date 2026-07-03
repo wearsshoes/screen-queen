@@ -21,6 +21,9 @@ enum Copy {
     static let menuShowArranger = "Places, Everyone  (⌘⌥F1)"
     /// The permissions/setup window (see `SetupWindow`).
     static let menuSetup = "Backstage Pass…"
+    /// Toggle for the always-on seam lights (see `SeamLights`): a thin colored bar on
+    /// each side of every seam, at all times, marking where the cursor crosses.
+    static let menuSeamLights = "Keep the Seams Showing"
     /// Dev inspector window.
     static let menuDebug = "Backstage…"
     /// Quit item at the bottom of the menu.

@@ -158,6 +158,7 @@ extension Arranger {
         case .minY: ext = NSRect(x: rect.minX, y: rect.maxY - reach, width: rect.width, height: reach)
         case .maxY: ext = NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: reach)
         }
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         dPath(ext, roundedOn: inward).addClip()
@@ -172,7 +173,29 @@ extension Arranger {
         // Slightly softened at the seam so the front glow reads as the brighter core.
         let gradient = NSGradient(colors: [color.withAlphaComponent(0.7), color.withAlphaComponent(0)],
                                   atLocations: [0, 1], colorSpace: .sRGB)
+        // Composite the glow in its own transparency layer so the end feathers below
+        // erase only *the glow*, not the canvas painted beneath it.
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
         gradient?.draw(from: start, to: end, options: [])
+        // Feather the two ends along the seam — inside the bar's true bounds, so the
+        // extent stays exact — with destination-out ramps that melt the slab's square
+        // cuts. Point-capped so long bars keep tight, readable ends.
+        let vertical = inward == .minX || inward == .maxX
+        let alongLen = vertical ? ext.height : ext.width
+        let ramp = min(22, alongLen * 0.3)
+        if ramp > 1, let fade = NSGradient(colors: [.black, NSColor.black.withAlphaComponent(0)],
+                                           atLocations: [0, 1], colorSpace: .sRGB) {
+            ctx.setBlendMode(.destinationOut)
+            if vertical {
+                fade.draw(from: CGPoint(x: ext.midX, y: ext.minY), to: CGPoint(x: ext.midX, y: ext.minY + ramp), options: [])
+                fade.draw(from: CGPoint(x: ext.midX, y: ext.maxY), to: CGPoint(x: ext.midX, y: ext.maxY - ramp), options: [])
+            } else {
+                fade.draw(from: CGPoint(x: ext.minX, y: ext.midY), to: CGPoint(x: ext.minX + ramp, y: ext.midY), options: [])
+                fade.draw(from: CGPoint(x: ext.maxX, y: ext.midY), to: CGPoint(x: ext.maxX - ramp, y: ext.midY), options: [])
+            }
+            ctx.setBlendMode(.normal)
+        }
+        ctx.endTransparencyLayer()
     }
 
     /// The behind glow reaches this multiple of the bar depth toward the display center.

@@ -121,6 +121,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: Copy.menuShowArranger, action: #selector(showWindow), keyEquivalent: "")
         menu.addItem(withTitle: Copy.menuSetup, action: #selector(showSetup), keyEquivalent: "")
+        let lights = NSMenuItem(title: Copy.menuSeamLights, action: #selector(toggleSeamLights(_:)),
+                                keyEquivalent: "")
+        lights.state = seamLights.enabled ? .on : .off
+        menu.addItem(lights)
         menu.addItem(withTitle: Copy.menuDebug, action: #selector(showDebug), keyEquivalent: "")
         menu.addItem(.separator())
         // Version line (disabled): only the bundled app has an Info.plist to read.
@@ -136,6 +140,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let debugWindow = DebugWindow()
     @objc private func showDebug() { debugWindow.show() }
+
+    /// The always-on seam lights (see `SeamLights`), rebuilt only from `refresh()`.
+    private let seamLights = SeamLights()
+
+    @objc private func toggleSeamLights(_ sender: NSMenuItem) {
+        seamLights.enabled.toggle()
+        sender.state = seamLights.enabled ? .on : .off
+        if seamLights.enabled { seamLights.refresh(displays: DisplayManager.snapshot()) }
+    }
 
     @objc private func statusItemClicked() {
         let rightClick = NSApp.currentEvent?.type == .rightMouseUp
@@ -459,6 +472,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let displays = DisplayManager.snapshot()
         handleProfiles(displays)
         arranger.refresh(displays: displays)
+        // The always-on seam lights follow the committed layout: this runs at launch, on
+        // every display reconfiguration, and after every commit — and nowhere else.
+        seamLights.refresh(displays: displays)
     }
 
     private var lastDisplaySet: Set<String> = []

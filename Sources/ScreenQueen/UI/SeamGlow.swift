@@ -64,15 +64,19 @@ final class SeamGlow {
     }
 
     /// An along-length alpha mask: opaque through the middle, fading to transparent at both
-    /// ends of the seam, so the glow tapers gently at its tips. `alongY` = the seam runs
-    /// along y (vertical seam); otherwise along x.
+    /// ends of the seam, so the glow tapers gently at its tips. The ramp is point-based
+    /// (capped fraction on short bars), so a long seam's tips stay tight and readable
+    /// instead of dissolving over a fifth of its length. `alongY` = the seam runs along y
+    /// (vertical seam); otherwise along x.
     private func endTaperMask(size: CGSize, alongY: Bool) -> CAGradientLayer {
         let m = CAGradientLayer()
         m.frame = CGRect(origin: .zero, size: size)
-        // White = opaque (glow shows), clear = masked out. Ramp in over the first/last ~22%.
+        let alongLen = max(alongY ? size.height : size.width, 1)
+        let ramp = min(18, alongLen * 0.25) / alongLen
+        // White = opaque (glow shows), clear = masked out.
         let solid = CGColor(gray: 1, alpha: 1), clear = CGColor(gray: 1, alpha: 0)
         m.colors = [clear, solid, solid, clear]
-        m.locations = [0, 0.22, 0.78, 1]
+        m.locations = [0, NSNumber(value: ramp), NSNumber(value: 1 - ramp), 1]
         if alongY { m.startPoint = CGPoint(x: 0.5, y: 0); m.endPoint = CGPoint(x: 0.5, y: 1) }
         else      { m.startPoint = CGPoint(x: 0, y: 0.5); m.endPoint = CGPoint(x: 1, y: 0.5) }
         return m

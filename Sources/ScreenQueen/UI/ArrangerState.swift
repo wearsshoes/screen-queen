@@ -331,20 +331,12 @@ final class ArrangerState {
         NSColor(srgbRed: 0.95, green: 0.20, blue: 0.30, alpha: 1),  // classic red lip
     ]
 
-    /// The last seam→palette-index assignment, fed back into the next coloring so a surviving
-    /// seam keeps its color across tree rebuilds instead of churning when the index order
-    /// shifts. (Stale entries for vanished seams are harmless — they're just ignored.)
-    private var lastSeamIndices: [DisplayGraph.SeamKey: Int] = [:]
-
     /// Colors keyed by seam (unordered display pair), derived from the current bars so
     /// both bars of a seam — edge and mini-map — share one color, recomputed as the
-    /// layout changes during a drag. Seeded with the previous assignment so untouched seams
-    /// hold their color when the graph rebuilds.
+    /// layout changes during a drag. Delegates to the shared `SeamColorBook` so the
+    /// arranger and the always-on seam lights agree on every seam's color.
     func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] {
-        let indices = DisplayGraph.seamColorIndices(bars.map { ($0.aID, $0.bID) },
-                                                    previous: lastSeamIndices)
-        lastSeamIndices = indices   // only surviving seams (the result drops vanished ones)
-        return indices.mapValues { Self.seamPalette[$0 % Self.seamPalette.count] }
+        SeamColorBook.shared.colors(for: bars.map { ($0.aID, $0.bID) })
     }
 
     func commit() {
@@ -359,5 +351,24 @@ final class ArrangerState {
         let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
         guard let offset = origins[id] else { return nil }
         return origins.mapValues { CGPoint(x: $0.x - offset.x, y: $0.y - offset.y) }
+    }
+}
+
+/// The app's one seam→color assignment, shared by every consumer (the arranger's bars and
+/// the always-on seam lights), so a seam wears the same color everywhere it appears.
+/// Remembers the last assignment and feeds it back into the edge-coloring, so a surviving
+/// seam keeps its color across rebuilds instead of churning when the index order shifts.
+/// (Stale entries for vanished seams are harmless — the result drops them.)
+@MainActor
+final class SeamColorBook {
+    static let shared = SeamColorBook()
+
+    private var last: [DisplayGraph.SeamKey: Int] = [:]
+
+    /// The color for each seam (unordered display pair), stable across calls.
+    func colors(for pairs: [(CGDirectDisplayID, CGDirectDisplayID)]) -> [DisplayGraph.SeamKey: NSColor] {
+        let indices = DisplayGraph.seamColorIndices(pairs, previous: last)
+        last = indices   // only surviving seams (the result drops vanished ones)
+        return indices.mapValues { ArrangerState.seamPalette[$0 % ArrangerState.seamPalette.count] }
     }
 }
