@@ -186,11 +186,8 @@ enum DisplayManager {
     @MainActor
     private static func screenNamesByDisplayID() -> [CGDirectDisplayID: String] {
         var result: [CGDirectDisplayID: String] = [:]
-        let key = NSDeviceDescriptionKey("NSScreenNumber")
         for screen in NSScreen.screens {
-            if let number = screen.deviceDescription[key] as? NSNumber {
-                result[number.uint32Value] = screen.localizedName
-            }
+            if let id = screen.displayID { result[id] = screen.localizedName }
         }
         return result
     }

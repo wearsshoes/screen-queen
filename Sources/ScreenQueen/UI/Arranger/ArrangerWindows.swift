@@ -299,9 +299,8 @@ final class ArrangerWindows {
 
     private func screenMap() -> [CGDirectDisplayID: NSScreen] {
         var result: [CGDirectDisplayID: NSScreen] = [:]
-        let key = NSDeviceDescriptionKey("NSScreenNumber")
         for screen in NSScreen.screens {
-            if let n = screen.deviceDescription[key] as? NSNumber { result[n.uint32Value] = screen }
+            if let id = screen.displayID { result[id] = screen }
         }
         return result
     }

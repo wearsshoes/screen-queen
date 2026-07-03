@@ -144,10 +144,8 @@ extension Arranger {
     /// reloaded when the wallpaper URL changes.
     private func wallpaper(for display: DisplaySnapshot) -> NSImage? {
         let id = display.mirrorMaster ?? display.id
-        let key = NSDeviceDescriptionKey("NSScreenNumber")
-        guard let screen = NSScreen.screens.first(where: {
-            ($0.deviceDescription[key] as? NSNumber)?.uint32Value == id
-        }), let url = NSWorkspace.shared.desktopImageURL(for: screen) else {
+        guard let screen = NSScreen.screen(for: id),
+              let url = NSWorkspace.shared.desktopImageURL(for: screen) else {
             wallpaperCache[display.id] = .some(nil)
             return nil
         }

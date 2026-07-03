@@ -147,8 +147,6 @@ extension Arranger {
     /// Whether `d` is a notched built-in display (its screen reserves a top safe area) —
     /// a live `NSScreen` query, kept in the UI layer so `ResolutionLadder` stays pure.
     private func isNotched(_ d: DisplaySnapshot) -> Bool {
-        let key = NSDeviceDescriptionKey("NSScreenNumber")
-        let screen = NSScreen.screens.first { ($0.deviceDescription[key] as? NSNumber)?.uint32Value == d.id }
-        return (screen?.safeAreaInsets.top ?? 0) > 0
+        (NSScreen.screen(for: d.id)?.safeAreaInsets.top ?? 0) > 0
     }
 }

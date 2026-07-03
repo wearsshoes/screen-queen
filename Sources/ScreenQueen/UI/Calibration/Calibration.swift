@@ -53,8 +53,8 @@ final class CalibrationController {
 
     func begin(target: DisplaySnapshot, reference: DisplaySnapshot) {
         guard let refPPT = reference.pointsPerInch, refPPT > 0,
-              let refScreen = screen(for: reference.id),
-              let targetScreen = screen(for: target.id) else {
+              let refScreen = NSScreen.screen(for: reference.id),
+              let targetScreen = NSScreen.screen(for: target.id) else {
             onComplete?()
             return
         }
@@ -309,19 +309,6 @@ final class CalibrationController {
         return window
     }
 
-    private func screen(for id: CGDirectDisplayID) -> NSScreen? {
-        let key = NSDeviceDescriptionKey("NSScreenNumber")
-        return NSScreen.screens.first {
-            ($0.deviceDescription[key] as? NSNumber)?.uint32Value == id
-        }
-    }
-}
-
-/// Borderless windows can't become key by default, which would block the
-/// Save/Cancel buttons. This subclass allows it.
-final class KeyableBorderlessWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
 }
 
 /// The native control surface for match calibration: a small floating HUD panel
