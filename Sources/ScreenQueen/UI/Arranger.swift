@@ -62,11 +62,13 @@ final class Arranger: NSView {
     weak var barContainer: NSView?
 
     /// On an inactive display the one set of chrome (VirtualMouse.swift) restyles pink
-    /// and transforms to the active screen's perspective. `ghostArrow` is the ghost
-    /// mouse; `ghostAffine` (active canvas → this canvas) is what both ride, recomputed
-    /// only on active-screen change; `chromeWashes` are the pink overlays per chrome view.
+    /// and scales (from the minimap centre) to the active screen's minimap scale.
+    /// `ghostArrow` is the ghost mouse; `ghostScale` (this minimap's px-per-inch ÷ the
+    /// active's) and `ghostActiveCenter` are what both ride, recomputed only on
+    /// active-screen change; `chromeWashes` are the pink overlays per chrome view.
     var ghostArrow: GhostCursorLayer?
-    var ghostAffine: CGAffineTransform = .identity
+    var ghostScale: CGFloat = 1
+    var ghostActiveCenter: CGPoint = .zero
     var chromeWashes: [ObjectIdentifier: CALayer] = [:]
 
     /// The top-of-screen countdown banner (auto-revert / feed guard) — built on demand

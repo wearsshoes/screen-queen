@@ -61,15 +61,24 @@ final class GhostCursorLayer: CAShapeLayer {
 extension Arranger {
 
     /// Render the chrome for this display's mode. `active` is the canvas under the
-    /// cursor (nil ⇒ this one is it). Inactive → each chrome view's layer is
-    /// transformed to the active screen's perspective and washed pink; active →
-    /// identity, no wash. Recomputes the projection affine (also used by the ghost
-    /// mouse); called only when the active screen changes.
+    /// cursor (nil ⇒ this one is it). Inactive → each chrome view scales (from the
+    /// minimap centre) to the active screen's minimap scale and washes pink; active →
+    /// identity, no wash. The minimap centre is the view centre (the union of tiles is
+    /// centred there), so the bar — itself centred — moves straight up and down.
+    /// Recomputes the scale (also used by the ghost mouse); only on active-screen change.
     func renderChrome(active: Arranger?) {
         guard VirtualMouse.ghostChromeEnabled else { return }
         let inactive = active != nil && active !== self
-        ghostAffine = inactive ? affine(from: active!) : .identity
-        for view in chromeViews { applyChromeMode(view, inactive: inactive) }
+        if inactive, let myT = drawTransform(currentRects()),
+           let actT = active!.drawTransform(active!.currentRects()), actT.scale > 0 {
+            ghostScale = myT.scale / actT.scale
+            ghostActiveCenter = CGPoint(x: active!.bounds.midX, y: active!.bounds.midY)
+        } else {
+            ghostScale = 1
+            ghostActiveCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+        }
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        for view in chromeViews { applyChromeMode(view, inactive: inactive, scale: ghostScale, center: center) }
     }
 
     /// The one set of chrome: the button bar, the "what she sees" (granny) panel, and
@@ -82,23 +91,19 @@ extension Arranger {
         return views
     }
 
-    /// Transform + wash one chrome view for the mode. The layer transform reproduces
-    /// the canvas-space projection about the view's own centre (so its position and
-    /// scale both land right); the pink wash is a sublayer shown only when inactive.
-    private func applyChromeMode(_ view: NSView, inactive: Bool) {
+    /// Scale + wash one chrome view for the mode. The layer transform is a uniform
+    /// scale about the minimap centre `c` — reproduced about the view's own centre, so
+    /// a centred view (the bar) moves straight up/down. The pink wash is a sublayer
+    /// shown only when inactive.
+    private func applyChromeMode(_ view: NSView, inactive: Bool, scale s: CGFloat, center c: CGPoint) {
         view.wantsLayer = true
         guard let layer = view.layer else { return }
         CATransaction.begin(); CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         if inactive {
-            // Apply the canvas-space affine about the layer's centre: rendered =
-            // centre + M(p − centre) needs a transform with M's linear part and a
-            // translation of M(centre) − centre.
-            let c = CGPoint(x: view.frame.midX, y: view.frame.midY)
-            let mc = c.applying(ghostAffine)
+            let vc = CGPoint(x: view.frame.midX, y: view.frame.midY)
             layer.setAffineTransform(CGAffineTransform(
-                a: ghostAffine.a, b: ghostAffine.b, c: ghostAffine.c, d: ghostAffine.d,
-                tx: mc.x - c.x, ty: mc.y - c.y))
+                a: s, b: 0, c: 0, d: s, tx: (1 - s) * (c.x - vc.x), ty: (1 - s) * (c.y - vc.y)))
         } else {
             layer.setAffineTransform(.identity)
         }
@@ -122,27 +127,18 @@ extension Arranger {
     }
 
     /// Move the ghost mouse. `cursorActivePoint` is the real cursor in the active
-    /// canvas's view coords; it rides the *same* affine as the chrome. Hidden on the
-    /// active screen (real cursor there).
+    /// canvas's view coords; it rides the *same* scale-about-centre as the chrome (the
+    /// active screen's centre to this canvas's centre). Hidden on the active screen.
     func updateGhostArrow(cursorActivePoint: CGPoint?, isActive: Bool) {
         guard VirtualMouse.ghostMouseEnabled else { return }
         let arrow = ensureGhostArrow()
         guard !isActive, let p = cursorActivePoint else { arrow.isHidden = true; return }
+        let c = CGPoint(x: bounds.midX, y: bounds.midY)
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        arrow.position = p.applying(ghostAffine)
+        arrow.position = CGPoint(x: c.x + ghostScale * (p.x - ghostActiveCenter.x),
+                                 y: c.y + ghostScale * (p.y - ghostActiveCenter.y))
         arrow.isHidden = false
         CATransaction.commit()
-    }
-
-    /// The affine mapping the active canvas's view space onto this canvas's, via the
-    /// shared plane (both transforms are scale+translate, so the composition is too).
-    private func affine(from active: Arranger) -> CGAffineTransform {
-        guard let myT = drawTransform(currentRects()),
-              let actT = active.drawTransform(active.currentRects()) else { return .identity }
-        func map(_ p: CGPoint) -> CGPoint { myT.viewPoint(actT.planePoint(p)) }
-        let o = map(.zero), ex = map(CGPoint(x: 1, y: 0)), ey = map(CGPoint(x: 0, y: 1))
-        return CGAffineTransform(a: ex.x - o.x, b: ex.y - o.y,
-                                 c: ey.x - o.x, d: ey.y - o.y, tx: o.x, ty: o.y)
     }
 
     private func ensureGhostArrow() -> GhostCursorLayer {
