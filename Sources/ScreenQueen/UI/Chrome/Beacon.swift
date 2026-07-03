@@ -1,13 +1,9 @@
 import QuartzCore
 
-/// The beacon: a pulsing map-pin at the cursor's location on the *schematic*, shown on
-/// every stage — where you are on the map, from any screen. A map marker, not a
-/// pointer: distinct from the ghost mouse (VirtualMouse.swift), which mirrors the
-/// cursor itself.
-enum Beacon {
-    /// Feature flag.
-    static let enabled = true
-}
+// The beacon: a pulsing map-pin at the cursor's location on the *schematic*, shown on
+// every stage — where you are on the map, from any screen. A map marker, not a
+// pointer: distinct from the ghost mouse (VirtualMouse.swift), which mirrors the
+// cursor itself. Toggled by `Prefs.beacon`.
 
 /// A hot-pink dot with a repeating expanding pulse ring (Find-My style).
 final class PlaneMouseMarkerLayer: CALayer {
@@ -63,7 +59,7 @@ extension Stage {
     /// Move the beacon to the cursor's location on this stage's schematic. Shows on
     /// every stage; hidden if the host display has no tile.
     func updatePlaneMarker(cursor: CGPoint, hostID: CGDirectDisplayID?) {
-        guard Beacon.enabled else { return }
+        guard Prefs.beacon else { return }
         let marker = ensurePlaneMarker()
         CATransaction.begin(); CATransaction.setDisableActions(true)
         if let p = beaconViewPoint(cursor: cursor, hostID: hostID) {

@@ -7,13 +7,8 @@ import QuartzCore
 /// `BarModel.isGhost`, the panel via `SolvePanelHost.setGhost`) — no flat overlay. Plus a ghost mouse (`GhostCursorLayer`) mirrored onto this stage via
 /// `ghostPoint`, moved on every mouse event. (The tint's SwiftUI currency is
 /// `ChromeMetrics.ghostPink`; the tooltip that trails the ghost lives with its bubble
-/// in TooltipBubble.swift — this file is QuartzCore-only.)
-enum VirtualMouse {
-    /// Feature flag: the ghost mouse.
-    static let ghostMouseEnabled = true
-    /// Feature flag: pink chrome on inactive displays.
-    static let ghostChromeEnabled = true
-}
+/// in TooltipBubble.swift — this file is QuartzCore-only. `Prefs.ghostMouse` /
+/// `Prefs.ghostChrome` gate the act.)
 
 /// The ghost mouse: a dashed, glowing, translucent hot-pink arrow. Obviously a ghost.
 /// Its `position` is the arrow's *tip* (anchor at the top-left of the glyph).
@@ -60,7 +55,7 @@ extension Stage {
     /// Move the ghost mouse — position only, the per-event path. Like a real cursor
     /// (and its own tooltip), the arrow never changes size.
     func updateGhostArrow(cursorActivePoint: CGPoint?, isActive: Bool) {
-        guard VirtualMouse.ghostMouseEnabled else { return }
+        guard Prefs.ghostMouse else { return }
         let arrow = ensureGhostArrow()
         guard !isActive, let p = cursorActivePoint else { arrow.isHidden = true; return }
         CATransaction.begin(); CATransaction.setDisableActions(true)

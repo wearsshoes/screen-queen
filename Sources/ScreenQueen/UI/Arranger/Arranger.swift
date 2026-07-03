@@ -142,7 +142,7 @@ final class Arranger {
         let busy = (SystemLoad.systemCPUUsage() ?? 0) > 0.5
         let bigCast = NSScreen.screens.count >= Self.bigCastThreshold
         setFeed(!busy && !bigCast)
-        if VirtualMouse.ghostMouseEnabled { events?.startMouseMonitors() }
+        if Prefs.ghostMouse { events?.startMouseMonitors() }
         events?.startKeyMonitors()
         activeDisplayID = nil
         mouseDidMove()   // seed the active screen + render the ghost

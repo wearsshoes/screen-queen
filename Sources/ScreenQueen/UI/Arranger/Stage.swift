@@ -182,7 +182,7 @@ final class Stage: NSView {
     /// The scale/placement half always runs; only the pink dressing consults the flag.
     func renderChrome(active: Stage?) {
         let inactive = active != nil && active !== self
-        isGhost = VirtualMouse.ghostChromeEnabled && inactive
+        isGhost = Prefs.ghostChrome && inactive
         let myT = drawTransform(currentRects())
         if inactive, let myT, myT.scale > 0,
            let actT = active!.drawTransform(active!.currentRects()), actT.scale > 0 {
