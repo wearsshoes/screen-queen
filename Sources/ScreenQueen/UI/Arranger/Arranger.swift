@@ -1,12 +1,12 @@
 import AppKit
 
 /// One full-screen borderless arranger window per display, all sharing a single
-/// `ArrangerState`. Each window's stage centers on its own screen's tile; a mutation
-/// on any of them broadcasts through the state so all repaint.
+/// `ArrangerModel`. Each window's stage centers on its own screen's tile; a mutation
+/// on any of them broadcasts through the model so all repaint.
 @MainActor
 final class Arranger {
 
-    let state = ArrangerState()
+    let model = ArrangerModel()
     /// The window fleet — one overlay per screen, just below the system menu bar so
     /// the menu bar and our status icon stay clickable on top. (Calibration/alerts
     /// sit above via the shielding level.)
@@ -63,15 +63,15 @@ final class Arranger {
     init() {
         ensemble.dress = { [weak self] id, window in self?.dress(window, centerID: id) }
         ensemble.retire = { [weak self] id in self?.stages.removeAll { $0.centerID == id } }
-        state.changed = { [weak self] in
+        model.changed = { [weak self] in
             self?.stages.forEach { $0.refresh() }
             self?.rerenderChrome()
         }
-        state.onSliderDragChanged = { [weak self] dragging in self?.events?.setSliderDragging(dragging) }
-        state.capture = capture
+        model.onSliderDragChanged = { [weak self] dragging in self?.events?.setSliderDragging(dragging) }
+        model.capture = capture
         capture.onFrame = { [weak self] in self?.stages.forEach { $0.repaintSchematic() } }
-        state.onToggleFeed = { [weak self] on in self?.setFeed(on) }
-        state.onCountdownResolved = { [weak self] kind in
+        model.onToggleFeed = { [weak self] on in self?.setFeed(on) }
+        model.onCountdownResolved = { [weak self] kind in
             if kind == .feedGuard { self?.cancelFeedWatchdog() }
         }
     }
@@ -90,18 +90,18 @@ final class Arranger {
 
     /// Turn the live per-display feed on or off.
     private func setFeed(_ on: Bool) {
-        state.feedEnabled = on
+        model.feedEnabled = on
         if on {
             capture.start()
             armFeedGuardIfBigCast()
         } else {
             capture.stop()
             // No-op unless a guard was running (its own expiry lands here too).
-            state.resolveCountdown(.feedGuard, keep: true)
+            model.resolveCountdown(.feedGuard, keep: true)
         }
         // Through the broadcast, not a bare refresh — the feed button lives on the
         // bar, and the bar renders on the chrome pass that follows a notify.
-        state.notify()
+        model.notify()
     }
 
     /// Going live on `bigCastThreshold`+ screens arms an auto-off unless the user says
@@ -111,7 +111,7 @@ final class Arranger {
     private func armFeedGuardIfBigCast() {
         guard NSScreen.screens.count >= Self.bigCastThreshold else { return }
         let seconds = 12
-        state.armCountdown(.feedGuard, seconds: seconds) { [weak self] in self?.setFeed(false) }
+        model.armCountdown(.feedGuard, seconds: seconds) { [weak self] in self?.setFeed(false) }
 
         feedWatchdog?.cancel()
         let capture = self.capture
@@ -131,7 +131,7 @@ final class Arranger {
 
     /// Show an arranger on every screen and refresh the shared plane from the OS.
     func show(displays: [DisplaySnapshot]) {
-        state.update(with: displays)
+        model.update(with: displays)
         rebuild()
         stages.forEach { $0.refresh() }
         NSApp.activate(ignoringOtherApps: true)
@@ -146,7 +146,7 @@ final class Arranger {
         events?.startKeyMonitors()
         activeDisplayID = nil
         mouseDidMove()   // seed the active screen + render the ghost
-        if state.feedEnabled { scheduleFeedLoadCheck() }
+        if model.feedEnabled { scheduleFeedLoadCheck() }
     }
 
     /// One follow-up CPU check ~½s after going live (the reading at open predates the
@@ -157,7 +157,7 @@ final class Arranger {
             let pegged = (SystemLoad.systemCPUUsage() ?? 0) > 0.85
             guard pegged else { return }
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.isVisible, self.state.feedEnabled else { return }
+                guard let self, self.isVisible, self.model.feedEnabled else { return }
                 self.setFeed(false)
             }
         }
@@ -165,7 +165,7 @@ final class Arranger {
 
     /// Make the arranger window on the main display key (falling back to any window).
     private func makeMainWindowKey() {
-        let mainID = state.displays.first(where: { $0.isMain })?.id
+        let mainID = model.displays.first(where: { $0.isMain })?.id
         let window = mainID.flatMap { windows[$0] } ?? windows.values.first
         window?.makeKeyAndOrderFront(nil)
     }
@@ -191,8 +191,8 @@ final class Arranger {
     private func mouseDidMove() {
         guard isVisible else { return }
         let cursor = CGEvent(source: nil)?.location ?? .zero
-        let activeID = GlobalMap.hostDisplayID(cursor: cursor, planeFirst: state.planeDisplays,
-                                               all: state.displays)
+        let activeID = GlobalMap.hostDisplayID(cursor: cursor, planeFirst: model.planeDisplays,
+                                               all: model.displays)
         let active = activeID.flatMap { id in stages.first { $0.centerID == id } }
         // The cursor in the active stage's view coords, derived from the same CGEvent
         // sample as `cursor` so the ghost and beacon can't disagree about where it is.
@@ -206,10 +206,10 @@ final class Arranger {
             activeDisplayID = activeID
             // The selected tile follows the cursor's screen (crossing screens overrides a
             // manual pick; a click still selects within a screen).
-            if let activeID, state.plane[activeID] != nil, state.selectedID != activeID {
-                state.selectedID = activeID
-                state.activeV = nil; state.activeH = nil   // drop stale alignment anchors
-                state.notify()
+            if let activeID, model.plane[activeID] != nil, model.selectedID != activeID {
+                model.selectedID = activeID
+                model.activeV = nil; model.activeH = nil   // drop stale alignment anchors
+                model.notify()
             }
             for stage in stages { stage.renderChrome(active: stage === active ? nil : active) }
         }
@@ -226,18 +226,18 @@ final class Arranger {
     /// `force` re-reads the plane even when it already matches (e.g. after Reset).
     func refresh(displays: [DisplaySnapshot], force: Bool = false) {
         guard isVisible else { return }
-        state.update(with: displays, force: force)
+        model.update(with: displays, force: force)
         rebuild()   // screens may have changed
         stages.forEach { $0.refresh() }
         rerenderChrome()
     }
 
-    /// Refresh the unified chrome metrics (see `ArrangerState`).
+    /// Refresh the unified chrome metrics (see `ArrangerModel`).
     private func updateChromeMetrics() {
         let insets = GlobalMap.uniformInsets()
-        state.uniformDockInset = insets.dock
-        state.uniformMenuBarInset = insets.menuBar
-        state.minScreenExtent = insets.minExtent
+        model.uniformDockInset = insets.dock
+        model.uniformMenuBarInset = insets.menuBar
+        model.minScreenExtent = insets.minExtent
     }
 
     private func rebuild() {
@@ -250,7 +250,7 @@ final class Arranger {
         // Backdrop: native Liquid Glass on macOS 26, behind-window blur below. The
         // stage (with its own dim wash) sits on top.
         let fullFrame = CGRect(origin: .zero, size: window.frame.size)
-        let stage = Stage(state: state, frame: fullFrame)
+        let stage = Stage(model: model, frame: fullFrame)
         stage.centerID = centerID
         stage.autoresizingMask = [.width, .height]
         stage.onLayout = { [weak self] in self?.rerenderChrome() }

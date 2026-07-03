@@ -56,7 +56,7 @@ extension Stage {
     func drawSchematic(in ctx: GraphicsContext, size: CGSize) {
         // The backdrop wash. If this screen's own tile is being dragged (from any
         // stage), brighten it — a real-world "you're dragging me" cue.
-        let beingDragged = centerID != nil && state.draggingDisplayID == centerID
+        let beingDragged = centerID != nil && model.draggingDisplayID == centerID
         let wash: Color = beingDragged
             ? Color(nsColor: NSColor.systemPink.blended(withFraction: 0.2, of: .black) ?? .systemPink).opacity(0.75)
             : Color.black.opacity(0.55)
@@ -69,17 +69,17 @@ extension Stage {
                      at: CGPoint(x: size.width / 2, y: size.height / 2))
             return
         }
-        let bars = state.currentBars()
-        let seamColor = state.seamColors(bars)   // color per seam; both its bars share it
-        if state.showAlignGhosts { minimap.drawAlignGhosts(ctx, t: t) }   // under the tiles
+        let bars = model.currentBars()
+        let seamColor = model.seamColors(bars)   // color per seam; both its bars share it
+        if model.showAlignGhosts { minimap.drawAlignGhosts(ctx, t: t) }   // under the tiles
         // Selection halo before the tiles, so it reads under the lifted tile.
         if let sel = selectedID, let r = rects[sel] { minimap.drawSelectedShadow(ctx, t.viewRect(r)) }
         for d in displays where rects[d.id] != nil { minimap.drawTile(ctx, for: d, in: t.viewRect(rects[d.id]!)) }
         // Predicted Dock strip. With the live feed on the tiles already show the real
         // Dock, so only surface it when informative (Dock would move / mid menu-bar drag).
-        if let dockID = state.predictedDockDisplay(), let r = rects[dockID] {
-            let dockWouldMove = dockID != state.currentDockDisplay()
-            let showDock = !state.feedEnabled || dockWouldMove || draggingMenuBar != nil
+        if let dockID = model.predictedDockDisplay(), let r = rects[dockID] {
+            let dockWouldMove = dockID != model.currentDockDisplay()
+            let showDock = !model.feedEnabled || dockWouldMove || draggingMenuBar != nil
             if showDock {
                 minimap.drawDockIndicator(ctx, in: t.viewRect(r), edge: DockPredictor.edge())
             }

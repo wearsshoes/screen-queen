@@ -14,7 +14,7 @@ enum RevertPolicy {
 }
 
 /// Every display command the arranger can issue, executed at app level. One reference
-/// (`ArrangerState.commander`) replaces the old per-command closure wiring; a SwiftUI
+/// (`ArrangerModel.commander`) replaces the old per-command closure wiring; a SwiftUI
 /// model can hold the same reference.
 @MainActor
 protocol DisplayCommanding: AnyObject {
@@ -65,7 +65,7 @@ extension AppDelegate: DisplayCommanding {
     func setMainDisplay(_ id: CGDirectDisplayID) {
         let snapshot = DisplayManager.snapshot()
         guard snapshot.first(where: { $0.id == id })?.isMain == false,
-              let origins = arranger.state.originsMakingMain(id) else { return }
+              let origins = arranger.model.originsMakingMain(id) else { return }
         isLiveDragging = false
         let before = originMap(of: snapshot)
         applyRevertable(apply: { DisplayManager.applyOrigins(origins, permanent: true) },
@@ -210,16 +210,16 @@ extension AppDelegate: DisplayCommanding {
     func dismissArranger() {
         // Dismissing is an intentional act — someone who can find Done/Esc can see
         // their screens, so any live countdown resolves as "keep".
-        arranger.state.resolveCountdown(.revertModes, keep: true)
-        arranger.state.resolveCountdown(.feedGuard, keep: true)
+        arranger.model.resolveCountdown(.revertModes, keep: true)
+        arranger.model.resolveCountdown(.feedGuard, keep: true)
         arranger.hide()
     }
 
     /// Restore positions, resolutions, and main to the baseline captured on open.
     func resetToBaseline() {
-        arranger.state.pendingRevert = nil
-        arranger.state.resolveCountdown(.revertModes, keep: true)   // Reset outranks it
-        arranger.state.clearUndo()
+        arranger.model.pendingRevert = nil
+        arranger.model.resolveCountdown(.revertModes, keep: true)   // Reset outranks it
+        arranger.model.clearUndo()
         preservingCursor {
             for (id, mode) in baselineModes { DisplayManager.applyMode(mode, to: id) }
             return DisplayManager.applyOrigins(baselineOrigins, permanent: true)
@@ -241,13 +241,13 @@ extension AppDelegate: DisplayCommanding {
         // A new change retires any counting-down predecessor as kept: `pendingRevert`
         // is about to point at *this* change, and an old countdown firing it would
         // revert the wrong thing.
-        arranger.state.resolveCountdown(.revertModes, keep: true)
+        arranger.model.resolveCountdown(.revertModes, keep: true)
         guard preservingCursor(apply) else { refresh(); return false }
         refresh()
-        arranger.state.pendingRevert = { [weak self] in
+        arranger.model.pendingRevert = { [weak self] in
             self?.preservingCursor { revert(); return true }; self?.refresh()
         }
-        arranger.state.notify()
+        arranger.model.notify()
         return true
     }
 
@@ -264,13 +264,13 @@ extension AppDelegate: DisplayCommanding {
     /// the user says keep, the pending revert fires itself. 12 seconds, like the old
     /// modal `confirmKeep` this replaces — but nothing blocks and nothing steals focus.
     private func armRevertCountdown(seconds: Int = 12) {
-        arranger.state.armCountdown(.revertModes, seconds: seconds) { [weak self] in
+        arranger.model.armCountdown(.revertModes, seconds: seconds) { [weak self] in
             guard let self else { return }
             // The notify() fan-out marks the session live, which gates `refresh()`;
             // this *is* the session's safety net, so let the refresh through.
             self.isLiveDragging = false
-            guard let revert = self.arranger.state.pendingRevert else { return }
-            self.arranger.state.pendingRevert = nil
+            guard let revert = self.arranger.model.pendingRevert else { return }
+            self.arranger.model.pendingRevert = nil
             revert()
         }
     }

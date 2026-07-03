@@ -7,7 +7,7 @@ import Observation
 /// SwiftUI islands whose body reads this state repaint via Observation, and
 /// `changed()` still fans out to the AppKit-side work (frames, layers, the schematic).
 @Observable @MainActor
-final class ArrangerState {
+final class ArrangerModel {
 
     /// The app-level executor for every display command (set once by the AppDelegate) —
     /// one reference instead of a closure per command.
@@ -75,7 +75,7 @@ final class ArrangerState {
 
     /// "Show the Full Wardrobe": reveal extended/off-native-aspect modes. Persisted.
     static let extendedModesKey = "showFullWardrobe"
-    var extendedBuiltinModes = UserDefaults.standard.bool(forKey: ArrangerState.extendedModesKey) {
+    var extendedBuiltinModes = UserDefaults.standard.bool(forKey: ArrangerModel.extendedModesKey) {
         didSet { UserDefaults.standard.set(extendedBuiltinModes, forKey: Self.extendedModesKey) }
     }
 

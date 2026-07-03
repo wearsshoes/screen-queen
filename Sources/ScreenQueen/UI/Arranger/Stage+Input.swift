@@ -18,7 +18,7 @@ struct ModifierKeys {
 }
 
 /// Interaction: mouse dragging and keyboard nudge/align/selection. All mutate the shared
-/// `state` and broadcast a redraw. (Resolution/mode handling lives in
+/// `model` and broadcast a redraw. (Resolution/mode handling lives in
 /// Stage+Resolution; the context menu in Stage+Menu.) Framework-free: events
 /// arrive pre-decoded (KeyInput/ModifierKeys, gesture points, the option flag).
 extension Stage {
@@ -48,17 +48,17 @@ extension Stage {
         // Grabbing the main tile's menu-bar strip starts a "move main" drag.
         if mainMenuBarViewRect()?.contains(p) == true {
             draggingMenuBar = p
-            state.pendingMainID = displays.first { $0.isMain }?.id
-            state.notify()   // repaint every stage so the Dock indicator shows everywhere
+            model.pendingMainID = displays.first { $0.isMain }?.id
+            model.notify()   // repaint every stage so the Dock indicator shows everywhere
             return
         }
         guard let d = display(at: p), plane[d.id] != nil else { return }
         draggedID = d.id
         selectedID = d.id
         // Option-drag mirrors: dropping onto another tile mirrors this display onto it.
-        optionMirrorDrag = option && state.planeDisplays.count > 1
-        state.draggingDisplayID = d.id   // brighten the grabbed display's screen from click
-        state.beginDragLock()            // freeze unmoved displays' point positions for the drag
+        optionMirrorDrag = option && model.planeDisplays.count > 1
+        model.draggingDisplayID = d.id   // brighten the grabbed display's screen from click
+        model.beginDragLock()            // freeze unmoved displays' point positions for the drag
         dragStartMouse = p
         dragTransform = transform(plane)      // freeze so the cursor mapping is stable
         dragStartPhys = plane[d.id]?.origin ?? .zero
@@ -72,8 +72,8 @@ extension Stage {
             draggingMenuBar = p
             // Would-be main follows the strip, so the Dock prediction updates live.
             let over = display(at: p)
-            state.pendingMainID = over?.id ?? displays.first { $0.isMain }?.id
-            state.notify()
+            model.pendingMainID = over?.id ?? displays.first { $0.isMain }?.id
+            model.notify()
             return
         }
         // Option-mirror drag: don't move the plane; just track the drop target.
@@ -87,8 +87,8 @@ extension Stage {
                                                  free: free, scale: t.scale, snap: true, plane: plane)
         activeV = snap.activeV; activeH = snap.activeH
         guard snap.origin != plane[id]?.origin else { return }
-        if !dragMoved { state.pushUndo() }   // snapshot before the drag's first move
-        state.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(dragged)), for: id)
+        if !dragMoved { model.pushUndo() }   // snapshot before the drag's first move
+        model.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(dragged)), for: id)
         dragMoved = true
         repaintSchematic()
         emitPreview()
@@ -97,8 +97,8 @@ extension Stage {
     func mouseEnded(at p: CGPoint) {
         defer { mouseGestureActive = false
                 draggedID = nil; dragMoved = false; dragTransform = nil; draggingMenuBar = nil
-                optionMirrorDrag = false; mirrorDragPoint = nil; state.pendingMainID = nil
-                state.draggingDisplayID = nil; state.endDragLock(); state.notify() }
+                optionMirrorDrag = false; mirrorDragPoint = nil; model.pendingMainID = nil
+                model.draggingDisplayID = nil; model.endDragLock(); model.notify() }
         // Dropped the menu-bar strip: whichever tile it's over becomes main.
         if let strip = draggingMenuBar {
             repaintSchematic()
@@ -169,7 +169,7 @@ extension Stage {
         shiftHeld = mods.shift   // the nudge timer reads this for its fast rate
         // Ghost the ⌘⇧ alignment destinations on every display while ⌘⇧ is held.
         let ghosts = mods.cmd && mods.shift && selectedID != nil && !zoomPending
-        if ghosts != state.showAlignGhosts { state.showAlignGhosts = ghosts; emitPreview() }
+        if ghosts != model.showAlignGhosts { model.showAlignGhosts = ghosts; emitPreview() }
         if alignPending, !(mods.cmd && mods.shift) {
             alignPending = false
             emitPreview()
@@ -201,7 +201,7 @@ extension Stage {
 
     private func beginContinuousMoveIfNeeded() {
         guard moveTimer == nil, let id = selectedID else { return }
-        state.pushUndo()   // snapshot before a nudge run
+        model.pushUndo()   // snapshot before a nudge run
         nudgeAccum = plane[id]?.origin ?? .zero
         activeV = nil; activeH = nil
         lastTick = ProcessInfo.processInfo.systemUptime
@@ -229,7 +229,7 @@ extension Stage {
                                                  free: nudgeAccum, scale: drawTransform(plane)?.scale ?? 1,
                                                  snap: true, plane: plane)
         activeV = snap.activeV; activeH = snap.activeH
-        state.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel)), for: id)
+        model.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel)), for: id)
         repaintSchematic()
         emitPreview()
     }
@@ -268,7 +268,7 @@ extension Stage {
     /// Apply one ⌘⇧ alignment step to the selected tile.
     private func stepAlignment(_ dir: MoveDirection) {
         guard let id = selectedID else { return }
-        state.pushUndo()   // snapshot before each alignment step
+        model.pushUndo()   // snapshot before each alignment step
         guard SchematicSnapping.currentJoin(id, plane: plane) != nil else {
             // Not docked yet: dock to the nearest neighbor (a join for the next press).
             if let sel = displays.first(where: { $0.id == id }) {
@@ -276,14 +276,14 @@ extension Stage {
                                                          free: plane[id]?.origin ?? .zero,
                                                          scale: drawTransform(plane)?.scale ?? 1, snap: true, plane: plane)
                 activeV = snap.activeV; activeH = snap.activeH
-                state.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel)), for: id)
+                model.setPlaneRect(CGRect(origin: snap.origin, size: SchematicLayout.physSize(sel)), for: id)
             }
             emitPreview()
             return
         }
         // Same source the ghost preview reads, so what was previewed is what applies.
         guard let o = SchematicSnapping.plannedMoves(id, plane: plane, activeV: activeV, activeH: activeH)[dir] else { return }
-        state.setPlaneRect(CGRect(origin: o, size: plane[id]!.size), for: id)
+        model.setPlaneRect(CGRect(origin: o, size: plane[id]!.size), for: id)
         let m = SchematicSnapping.markerForJoin(id, plane: plane)
         activeV = m.v; activeH = m.h
         emitPreview()

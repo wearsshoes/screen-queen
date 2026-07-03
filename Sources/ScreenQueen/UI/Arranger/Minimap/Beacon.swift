@@ -74,11 +74,11 @@ extension Minimap {
     /// Cursor → fraction of the host display's bounds → its plane rect → this stage's
     /// transform. A mirrored display maps through its master; no plane rect ⇒ nil.
     private func beaconViewPoint(cursor: CGPoint, hostID: CGDirectDisplayID?) -> CGPoint? {
-        guard let hostID, let t = stage.drawTransform(state.plane) else { return nil }
-        let planeID = state.plane[hostID] != nil
+        guard let hostID, let t = stage.drawTransform(model.plane) else { return nil }
+        let planeID = model.plane[hostID] != nil
             ? hostID
-            : state.displays.first(where: { $0.id == hostID })?.mirrorMaster ?? hostID
-        guard let planeRect = state.plane[planeID],
+            : model.displays.first(where: { $0.id == hostID })?.mirrorMaster ?? hostID
+        guard let planeRect = model.plane[planeID],
               let pp = ArrangerGeometry.planePoint(cursor: cursor,
                                                    displayBounds: CGDisplayBounds(hostID),
                                                    planeRect: planeRect) else { return nil }

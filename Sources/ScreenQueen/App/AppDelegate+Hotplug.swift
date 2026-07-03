@@ -99,8 +99,8 @@ extension AppDelegate {
     private func selectNewcomer(_ newcomerIDs: Set<CGDirectDisplayID>, in displays: [DisplaySnapshot]) {
         guard let id = newcomerIDs.first, displays.contains(where: { $0.id == id }) else { return }
         if !arranger.isVisible { showWindow() }
-        arranger.state.selectedID = id
-        arranger.state.notify()
+        arranger.model.selectedID = id
+        arranger.model.notify()
     }
 
     /// Apply a saved profile to the matching connected displays: set each present

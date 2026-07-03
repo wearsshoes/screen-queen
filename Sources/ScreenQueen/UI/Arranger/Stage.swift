@@ -17,11 +17,11 @@ final class Stage: NSView {
     /// SwiftUI Canvas and gestures are y-down, so the view is too — no flip gates.
     override var isFlipped: Bool { true }
 
-    /// Shared editing state — one instance across every per-screen stage.
-    let state: ArrangerState
+    /// Shared editing model — one instance across every per-screen stage.
+    let model: ArrangerModel
 
     /// The bottom button bar — a SwiftUI island (see ButtonBarView), hosted per
-    /// stage and rebuilt from state in `updateBar`.
+    /// stage and rebuilt from model in `updateBar`.
     var barHost: NSHostingView<ButtonBarView>?
     /// The chromeTileScale the bar last rendered at (set by renderChrome's pass).
     var barScale: CGFloat = 1
@@ -89,8 +89,8 @@ final class Stage: NSView {
         schematicHost.rootView = SchematicCanvasView(stage: self, generation: schematicGeneration)
     }
 
-    init(state: ArrangerState, frame: NSRect) {
-        self.state = state
+    init(model: ArrangerModel, frame: NSRect) {
+        self.model = model
         super.init(frame: frame)
         let host = SchematicCanvasHost(rootView: SchematicCanvasView(stage: self, generation: 0))
         host.frame = bounds
@@ -128,7 +128,7 @@ final class Stage: NSView {
     /// The floating "what she sees" panel (see SolvePanel), on its own layer above the
     /// seam layers. Draggable; body click-through.
     private(set) lazy var solvePanel: SolvePanelHost = {
-        let p = SolvePanelHost(rootView: SolvePanelView(state: state))
+        let p = SolvePanelHost(rootView: SolvePanelView(model: model))
         p.frame = NSRect(origin: .zero, size: NSSize(width: 240, height: 166))
         p.wantsLayer = true
         p.layer?.zPosition = 3
@@ -137,10 +137,10 @@ final class Stage: NSView {
         p.onMoved = { [weak self] origin in
             guard let self, let t = self.drawTransform(self.currentRects()), t.scale > 0 else { return }
             let centre = CGPoint(x: origin.x + p.frame.width / 2, y: origin.y + p.frame.height / 2)
-            self.state.solvePanelCenterOffsetInches = CGPoint(
+            self.model.solvePanelCenterOffsetInches = CGPoint(
                 x: (centre.x - self.bounds.midX) / t.scale,
                 y: (centre.y - self.bounds.midY) / t.scale)
-            self.state.notify()
+            self.model.notify()
         }
         addSubview(p)
         return p
@@ -172,7 +172,7 @@ final class Stage: NSView {
 
     /// The granny panel's rect — its centre-relative state through `chromeViewRect`.
     func panelViewRect() -> CGRect? {
-        chromeViewRect(naturalSize: Self.panelNaturalSize, centreOffsetInches: state.solvePanelCenterOffsetInches)
+        chromeViewRect(naturalSize: Self.panelNaturalSize, centreOffsetInches: model.solvePanelCenterOffsetInches)
     }
 
     /// The chrome pass: re-render bar/footer at this stage's own tile scale, in normal
@@ -233,15 +233,15 @@ final class Stage: NSView {
         if window == nil { seamEmitters.clear(); seamGlow.clear() }
     }
 
-    // Forwarding accessors so this view's methods read/write the shared state.
-    var displays: [DisplaySnapshot] { get { state.displays } set { state.displays = newValue } }
-    var selectedID: CGDirectDisplayID? { get { state.selectedID } set { state.selectedID = newValue } }
-    var plane: [CGDirectDisplayID: CGRect] { state.plane }
-    var activeV: AnchorMarker? { get { state.activeV } set { state.activeV = newValue } }
-    var activeH: AnchorMarker? { get { state.activeH } set { state.activeH = newValue } }
+    // Forwarding accessors so this view's methods read/write the shared model.
+    var displays: [DisplaySnapshot] { get { model.displays } set { model.displays = newValue } }
+    var selectedID: CGDirectDisplayID? { get { model.selectedID } set { model.selectedID = newValue } }
+    var plane: [CGDirectDisplayID: CGRect] { model.plane }
+    var activeV: AnchorMarker? { get { model.activeV } set { model.activeV = newValue } }
+    var activeH: AnchorMarker? { get { model.activeH } set { model.activeH = newValue } }
 
     /// The app-level command executor (see `DisplayCommanding`).
-    var commander: (any DisplayCommanding)? { state.commander }
+    var commander: (any DisplayCommanding)? { model.commander }
 
     // Mouse drag state (local to the stage handling the gesture).
     var draggedID: CGDirectDisplayID?
@@ -251,13 +251,13 @@ final class Stage: NSView {
     var dragMoved = false
 
     /// This stage's transform, frozen while a tile drag is live on ANY stage
-    /// (`state.draggingDisplayID`), so no screen's map recenters mid-drag.
+    /// (`model.draggingDisplayID`), so no screen's map recenters mid-drag.
     var sharedDragTransform: Transform?
 
     /// The transform to render with — frozen for the duration of a tile drag anywhere,
     /// live otherwise. All drawing and mouse-overlay placement goes through this.
     func drawTransform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
-        guard state.draggingDisplayID != nil else {
+        guard model.draggingDisplayID != nil else {
             sharedDragTransform = nil
             return transform(rects)
         }
@@ -317,14 +317,14 @@ final class Stage: NSView {
     /// Re-place the overlays once bounds settle (the layout() counterpart of refresh()).
     override func layout() {
         super.layout()
-        bannerTop?.constant = state.uniformMenuBarInset + 12
+        bannerTop?.constant = model.uniformMenuBarInset + 12
         minimap.layoutLabelCards()   // overlays track a bounds change (draw never places them)
         layoutMirrorColumn()
         updateSeamEffects()
         onLayout?()          // re-render chrome now that bounds/frames are settled
     }
 
-    /// Called by the state after a mutation: place the overlay subviews and feed the
+    /// Called by the model after a mutation: place the overlay subviews and feed the
     /// effect layers (`draw(_:)` never mutates the view tree or layers), then repaint.
     /// (The bar is NOT rebuilt here — every `changed` broadcast is followed by the
     /// deferred chrome pass, the one bar path, so each mutation renders it once.)
@@ -333,7 +333,7 @@ final class Stage: NSView {
         if let rect = panelViewRect(), solvePanel.frame != rect {
             solvePanel.frame = rect
         }
-        solvePanel.isHidden = state.planeDisplays.count < 2   // nothing to say about a solo girl
+        solvePanel.isHidden = model.planeDisplays.count < 2   // nothing to say about a solo girl
         minimap.layoutLabelCards()
         layoutMirrorColumn()
         updateSeamEffects()
@@ -343,10 +343,10 @@ final class Stage: NSView {
     func currentRects() -> [CGDirectDisplayID: CGRect] { plane }
 
     /// Commit the plane, then broadcast so every stage redraws.
-    func commitPlane() { state.commit() }
+    func commitPlane() { model.commit() }
 
     /// Broadcast a plane change so every per-screen stage redraws.
-    func emitPreview() { state.notify() }
+    func emitPreview() { model.notify() }
 
     // MARK: - View transform (fit the physical plane into the window)
 

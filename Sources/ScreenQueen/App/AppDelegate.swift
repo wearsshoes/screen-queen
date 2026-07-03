@@ -113,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupArranger() {
-        let s = arranger.state
+        let s = arranger.model
         s.commander = self   // every display command executes in AppDelegate+Commands
         // A live plane change (drag / nudge / align) marks the session live so the
         // reconfig callback doesn't clobber the working plane.

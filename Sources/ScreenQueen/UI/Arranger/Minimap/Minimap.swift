@@ -6,7 +6,7 @@ import SwiftUI
 /// own storage — the caches, the card hosts, the beacon layer.
 ///
 /// The stage stays the input owner and supplies the view-local facts (bounds, the
-/// drag-frozen transform, gesture state); shared editing state comes from `state`.
+/// drag-frozen transform, gesture state); the shared editing model comes from `model`.
 /// Paint order still lives in the stage's render pass (`Stage.drawSchematic`),
 /// which interleaves these subjects with the glass-anchored ones.
 @MainActor
@@ -14,7 +14,7 @@ final class Minimap {
 
     /// The stage this minimap draws for (the stage strongly owns the minimap).
     unowned let stage: Stage
-    var state: ArrangerState { stage.state }
+    var model: ArrangerModel { stage.model }
 
     init(stage: Stage) {
         self.stage = stage

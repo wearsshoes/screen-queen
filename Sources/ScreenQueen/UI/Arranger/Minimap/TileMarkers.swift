@@ -55,7 +55,7 @@ extension Minimap {
     /// center, or the center of its overlap with the current tile, or (if that overlap
     /// is too small) just outside the current tile in the move direction.
     func drawAlignGhosts(_ ctx: GraphicsContext, t: Transform) {
-        guard let selID = state.selectedID, let cur = state.plane[selID] else { return }
+        guard let selID = model.selectedID, let cur = model.plane[selID] else { return }
         let curView = t.viewRect(cur)
         for (dir, rect) in stage.alignGhosts() {
             let g = t.viewRect(rect)
@@ -114,14 +114,14 @@ extension Minimap {
     /// Markers for the active alignment, read from the stored anchor pair; the
     /// facing side comes from the rendered rects.
     func activeMarkers(_ rects: [CGDirectDisplayID: CGRect]) -> [CGDirectDisplayID: (pos: AnchorPos, dir: CGVector)] {
-        guard let selID = state.selectedID, let sR = rects[selID] else { return [:] }
-        if let a = state.activeV, let oR = rects[a.otherID] {
+        guard let selID = model.selectedID, let sR = rects[selID] else { return [:] }
+        if let a = model.activeV, let oR = rects[a.otherID] {
             let selLeft = sR.midX < oR.midX
             let sp = vPos(facingRight: selLeft, level: a.selfA), op = vPos(facingRight: !selLeft, level: a.otherA)
             return [selID: (sp, dirV(sp, corner: a.selfA != .center, partner: a.otherA)),
                     a.otherID: (op, dirV(op, corner: a.otherA != .center, partner: a.selfA))]
         }
-        if let a = state.activeH, let oR = rects[a.otherID] {
+        if let a = model.activeH, let oR = rects[a.otherID] {
             let selAbove = sR.midY < oR.midY
             let sp = hPos(facingBelow: selAbove, level: a.selfA), op = hPos(facingBelow: !selAbove, level: a.otherA)
             return [selID: (sp, dirH(sp, corner: a.selfA != .center, partner: a.otherA)),

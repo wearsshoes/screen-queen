@@ -16,7 +16,7 @@ extension Minimap {
 
     func drawTile(_ ctx: GraphicsContext, for display: DisplaySnapshot, in rect: NSRect) {
         // Tiles stay neutral — color lives on the seams; selection gets the accent wash.
-        let selected = display.id == state.selectedID
+        let selected = display.id == model.selectedID
         let color = Color(nsColor: selected
             ? NSColor.systemPink.blended(withFraction: 0.75, of: .white) ?? .white
             : NSColor(white: 0.72, alpha: 0.85))
@@ -105,7 +105,7 @@ extension Minimap {
     /// on, else the static wallpaper. A mirrored slave shows its master's content.
     private func drawWallpaper(_ ctx: GraphicsContext, for display: DisplaySnapshot, in tile: NSRect, selected: Bool) {
         let sourceID = display.mirrorMaster ?? display.id
-        let live = state.feedEnabled ? state.capture?.frames[sourceID] : nil
+        let live = model.feedEnabled ? model.capture?.frames[sourceID] : nil
         let image = live ?? wallpaper(for: display)?.asCGImage
         guard let image else { return }
 
@@ -152,7 +152,7 @@ extension Minimap {
     /// When the (previewed) mode's aspect doesn't match the panel's, outline the actual
     /// image area and hatch the letter-/pillar-box bars.
     private func drawBoxing(_ ctx: GraphicsContext, for display: DisplaySnapshot, in tile: NSRect) {
-        let pending = state.pendingMode(for: display.id)
+        let pending = model.pendingMode(for: display.id)
         let imgW = Double(pending?.pixelWidth ?? Int(display.pixelSize.width))
         let imgH = Double(pending?.pixelHeight ?? Int(display.pixelSize.height))
         guard imgW > 0, imgH > 0, let panAspect = nativeAspect(display.id) else { return }
@@ -212,23 +212,23 @@ extension Minimap {
     /// the plane this pass. Subview work, so it lives on the refresh path — `draw(_:)`
     /// must not mutate the view tree (a Canvas port can't).
     func layoutLabelCards() {
-        let rects = state.plane
+        let rects = model.plane
         guard let t = stage.drawTransform(rects) else {
             labelCards.values.forEach { $0.isHidden = true }
             return
         }
         var placed = Set<CGDirectDisplayID>()
-        for d in state.displays {
+        for d in model.displays {
             guard let r = rects[d.id] else { continue }
             placed.insert(d.id)
             layoutLabelCard(for: d, in: t.viewRect(r).insetBy(dx: 1.5, dy: 1.5),
-                            selected: d.id == state.selectedID, viewScale: t.scale)
+                            selected: d.id == model.selectedID, viewScale: t.scale)
         }
         for (id, card) in labelCards where !placed.contains(id) { card.isHidden = true }
     }
 
     private func layoutLabelCard(for display: DisplaySnapshot, in rect: NSRect, selected: Bool, viewScale: CGFloat) {
-        let effPPI = state.effectivePPI(display)
+        let effPPI = model.effectivePPI(display)
 
         // True-size preview: the faithful on-tile font scale is `viewScale / ppi`, so
         // sliding the resolution grows/shrinks the text just as macOS will. A constant
@@ -246,7 +246,7 @@ extension Minimap {
 
         // Drag name (hot-pink script), government name (fine print — work names go in
         // baby letters), resolution, diagonal·ppi.
-        let stats = state.statLines(for: display)
+        let stats = model.statLines(for: display)
         var lines: [LabelCardContent.Line] = []
         lines.append(.init(text: display.nickname, font: .script(size: (26 * fontScale).rounded()), color: .pink))
         lines.append(.init(text: display.name, font: f(10), color: Color(nsColor: tertiary)))

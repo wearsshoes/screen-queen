@@ -46,10 +46,10 @@ final class SeamColorBook {
     }
 }
 
-extension ArrangerState {
+extension ArrangerModel {
     /// Colors keyed by seam (unordered display pair) — via the shared `SeamColorBook` so
     /// the arranger and the always-on seam lights agree. Lives here (not in the
-    /// framework-free state file) because NSColor is AppKit vocabulary.
+    /// framework-free model file) because NSColor is AppKit vocabulary.
     func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] {
         SeamColorBook.shared.colors(for: bars.map { ($0.aID, $0.bID) })
     }
@@ -80,8 +80,8 @@ extension Stage {
     func updateSeamEffects() {
         let rects = currentRects()
         guard let t = drawTransform(rects) else { return }
-        let bars = state.currentBars()
-        let seamColor = state.seamColors(bars)
+        let bars = model.currentBars()
+        let seamColor = model.seamColors(bars)
         seamEmitters.begin()
         seamGlow.begin()
         for e in minimap.miniBarEdges(bars, t: t, seamColor: seamColor) {

@@ -9,14 +9,14 @@ struct SolvePanelContent {
     var ghost = false
 
     /// The *actual* origins the seam detection uses (the locked solve during a drag),
-    /// so the panel shows the truth. Everything comes from state — no Stage involved;
+    /// so the panel shows the truth. Everything comes from model — no Stage involved;
     /// the refresh path feeds this to the host.
-    @MainActor init(state: ArrangerState) {
-        let origins = state.pointOrigins()
-        let seamColor = state.seamColors(state.currentBars(origins: origins))
-        let trace = SchematicLayout.solveTrace(rects: state.plane, displays: state.sizedDisplays())
+    @MainActor init(model: ArrangerModel) {
+        let origins = model.pointOrigins()
+        let seamColor = model.seamColors(model.currentBars(origins: origins))
+        let trace = SchematicLayout.solveTrace(rects: model.plane, displays: model.sizedDisplays())
         let ambiguousIDs = Set(trace.pointRects.filter(\.ambiguous).map(\.id))
-        for d in state.sizedDisplays() {
+        for d in model.sizedDisplays() {
             guard let o = origins[d.id] else { continue }
             rects.append((d.id, CGRect(origin: o, size: d.bounds.size), ambiguousIDs.contains(d.id)))
         }
@@ -37,17 +37,17 @@ struct SolvePanelContent {
 /// seams draw in their palette color over the outlines — the seam is the shared edge,
 /// so its color wins there.
 ///
-/// Observes the shared state directly: the content builder's reads (plane, displays,
+/// Observes the shared model directly: the content builder's reads (plane, displays,
 /// pending modes, the drag lock) happen in `body`, so Observation repaints the panel
 /// on exactly those changes — no rootView rebuilds from the refresh path.
 struct SolvePanelView: View {
-    let state: ArrangerState
+    let model: ArrangerModel
     var ghost = false
 
     private static let titleBarHeight: CGFloat = 16
 
     var body: some View {
-        var content = SolvePanelContent(state: state)
+        var content = SolvePanelContent(model: model)
         content.ghost = ghost
         return Canvas { ctx, size in
             let bounds = CGRect(origin: .zero, size: size)
@@ -123,7 +123,7 @@ struct SolvePanelView: View {
 final class SolvePanelHost: NSHostingView<SolvePanelView> {
 
     /// Dragging reports the desired origin here instead of moving the panel itself —
-    /// the stage stores it as a centre-relative inch offset in shared state, and every
+    /// the stage stores it as a centre-relative inch offset in shared model, and every
     /// stage repositions on the resulting notify.
     var onMoved: ((CGPoint) -> Void)?
 

@@ -94,7 +94,7 @@ extension Stage {
             return
         }
 
-        state.pendingModes.removeAll()
+        model.pendingModes.removeAll()
         for (id, mode) in targets { previewMode(mode, on: id, replacing: false) }
         zoomPending = true
     }
@@ -103,13 +103,13 @@ extension Stage {
     /// around `ResolutionLadder`, supplying the catalog modes, notch flag, and current mode.
     func sortedModes(for d: DisplaySnapshot) -> [DisplayMode] {
         ResolutionLadder.sortedModes(all: ModeCatalog.menuModes(for: d.id), isBuiltin: d.isBuiltin,
-                                     notched: isNotched(d), extended: state.extendedBuiltinModes,
+                                     notched: isNotched(d), extended: model.extendedBuiltinModes,
                                      current: CGDisplayCopyDisplayMode(d.id))
     }
 
     /// Index of `d`'s current (or pending) mode within `sortedModes`, if present.
     func currentModeIndex(for d: DisplaySnapshot, in modes: [DisplayMode]) -> Int? {
-        let key = state.pendingMode(for: d.id)?.key ?? CGDisplayCopyDisplayMode(d.id).map(ModeKey.init)
+        let key = model.pendingMode(for: d.id)?.key ?? CGDisplayCopyDisplayMode(d.id).map(ModeKey.init)
         return key.flatMap { k in modes.firstIndex { $0.key == k } }
     }
 
@@ -117,7 +117,7 @@ extension Stage {
     /// directly). Live-system wrapper around `ResolutionLadder.modesList`.
     func modesList(for d: DisplaySnapshot) -> [DisplayMode] {
         ResolutionLadder.modesList(all: ModeCatalog.menuModes(for: d.id), isBuiltin: d.isBuiltin,
-                                   notched: isNotched(d), extended: state.extendedBuiltinModes,
+                                   notched: isNotched(d), extended: model.extendedBuiltinModes,
                                    current: CGDisplayCopyDisplayMode(d.id))
     }
 
@@ -126,8 +126,8 @@ extension Stage {
     /// single-display path (⌘± keys, `.one` slider); `false` adds to the set for the
     /// `.all` slider, which previews several displays at once.
     func previewMode(_ mode: DisplayMode, on id: CGDirectDisplayID, replacing: Bool = true) {
-        if replacing { state.pendingModes.removeAll() }
-        state.pendingModes[id] = mode
+        if replacing { model.pendingModes.removeAll() }
+        model.pendingModes[id] = mode
         repaintSchematic()
         emitPreview()
     }
@@ -137,10 +137,10 @@ extension Stage {
     /// every pending display in one batch so a multi-display zoom is a single undo.
     func commitPendingResolution() {
         zoomPending = false
-        let modes = state.pendingModes
+        let modes = model.pendingModes
         guard !modes.isEmpty else { return }
-        let origins = SchematicLayout.toPoints(rects: plane, displays: state.sizedDisplays())
-        state.pendingModes.removeAll()
+        let origins = SchematicLayout.toPoints(rects: plane, displays: model.sizedDisplays())
+        model.pendingModes.removeAll()
         commander?.setResolutions(modes.mapValues(\.cgMode), origins)
     }
 
