@@ -118,15 +118,6 @@ extension Arranger {
         }
     }
 
-    /// Re-tune the unified chrome metrics (same values on every canvas) once bounds settle.
-    override func layout() {
-        super.layout()
-        bannerTop?.constant = state.uniformMenuBarInset + 12
-        layoutLabelCards()   // overlays track a bounds change (draw never places them)
-        updateSeamEffects()
-        onLayout?()          // re-render chrome now that bounds/frames are settled
-    }
-
     /// Place the bar through `chromeViewRect` — the same positioning code as the granny
     /// viewer. Width capped so the bar never overflows a narrow screen: the clamped
     /// hosting frame makes SwiftUI propose the capped width and the slider compresses,

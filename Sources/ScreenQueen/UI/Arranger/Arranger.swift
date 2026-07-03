@@ -278,6 +278,15 @@ final class Arranger: NSView {
         return super.resignFirstResponder()
     }
 
+    /// Re-place the overlays once bounds settle (the layout() counterpart of refresh()).
+    override func layout() {
+        super.layout()
+        bannerTop?.constant = state.uniformMenuBarInset + 12
+        layoutLabelCards()   // overlays track a bounds change (draw never places them)
+        updateSeamEffects()
+        onLayout?()          // re-render chrome now that bounds/frames are settled
+    }
+
     /// Called by the state after a mutation: place the overlay subviews and feed the
     /// effect layers (`draw(_:)` never mutates the view tree or layers), then repaint.
     func refresh() {
