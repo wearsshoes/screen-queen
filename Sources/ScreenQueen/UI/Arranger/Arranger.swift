@@ -20,9 +20,9 @@ final class Arranger: NSView {
     /// Shared editing state — one instance across every per-screen canvas.
     let state: ArrangerState
 
-    /// The bottom button bar — a SwiftUI island (see ArrangerBarView), hosted per
+    /// The bottom button bar — a SwiftUI island (see ButtonBarView), hosted per
     /// canvas and rebuilt from state in `updateBar`.
-    var barHost: NSHostingView<ArrangerBarView>?
+    var barHost: NSHostingView<ButtonBarView>?
     /// The chromeTileScale the bar last rendered at (set by renderChrome's pass).
     var barScale: CGFloat = 1
     /// Each bar control's frame in the bar's own top-left space, reported by the
@@ -69,7 +69,7 @@ final class Arranger: NSView {
     /// The fun tooltip bubble — shown on *every* canvas at the mirrored cursor position.
     var tooltipBubble: TooltipHost?
 
-    /// The top-of-screen countdown banner — built on demand in Arranger+Banner.swift.
+    /// The top-of-screen countdown banner — built on demand in CountdownBanner.swift.
     /// The first SwiftUI island: an NSHostingView subview on the canvas.
     var banner: NSHostingView<CountdownBannerView>?
     /// The banner's top constraint, re-tuned in `layout()` to clear the menu bar.
