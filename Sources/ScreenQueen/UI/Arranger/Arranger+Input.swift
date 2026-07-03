@@ -106,47 +106,55 @@ extension Arranger {
         commitPlane()
     }
 
-    // MARK: - Keyboard
+    // MARK: - Keyboard (entered via EventPlumbing's monitors, not the responder chain;
+    // ArrangerWindows routes events to the key window's canvas)
 
-    override func keyDown(with event: NSEvent) {
+    /// Returns true to consume; false lets dispatch continue (the bar's
+    /// .keyboardShortcut equivalents, text fields elsewhere).
+    func handleKeyDown(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags
         let cmd = flags.contains(.command), shift = flags.contains(.shift)
 
         // Escape / Return / ⌘Return = Done (commit & exit).
-        if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 { commander?.dismissArranger(); return }
+        if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 {
+            commander?.dismissArranger(); return true
+        }
 
         if cmd, let ch = event.charactersIgnoringModifiers, "+=-_0".contains(ch) {
             if !event.isARepeat {
                 if shift { handleGlobalResolutionKey(ch) } else { handleResolutionKey(ch) }
             }
-            return
+            return true
         }
-        guard let dir = direction(event) else { super.keyDown(with: event); return }
+        guard let dir = direction(event) else { return false }
 
         if cmd && shift {
-            guard !event.isARepeat else { return }
-            guard selectedID != nil else { NSSound.beep(); return }
+            guard !event.isARepeat else { return true }
+            guard selectedID != nil else { NSSound.beep(); return true }
             stepAlignment(dir)
             alignPending = true
             emitPreview()
         } else if cmd {
             moveSelection(dir)
         } else {
-            guard selectedID != nil else { NSSound.beep(); return }
+            guard selectedID != nil else { NSSound.beep(); return true }
             beginContinuousMoveIfNeeded()
             heldDirections.insert(dir)
         }
+        return true
     }
 
-    override func keyUp(with event: NSEvent) {
-        guard let dir = direction(event) else { return }
+    func handleKeyUp(_ event: NSEvent) -> Bool {
+        guard let dir = direction(event) else { return false }
         if heldDirections.remove(dir) != nil, heldDirections.isEmpty {
             stopMoveTimer()
             commitPlane()
         }
+        return true
     }
 
-    override func flagsChanged(with event: NSEvent) {
+    /// Observes modifier changes (never consumes them).
+    func handleFlagsChanged(_ event: NSEvent) {
         let f = event.modifierFlags
         // Ghost the ⌘⇧ alignment destinations on every display while ⌘⇧ is held.
         let ghosts = f.contains(.command) && f.contains(.shift) && selectedID != nil && !zoomPending
@@ -159,7 +167,6 @@ extension Arranger {
         if zoomPending, !f.contains(.command) {
             commitPendingResolution()
         }
-        super.flagsChanged(with: event)
     }
 
     override func resignFirstResponder() -> Bool {

@@ -17,7 +17,23 @@ final class ArrangerWindows {
     /// The shared event plumbing (set by the AppDelegate): mouse monitors + the
     /// slider-drag timer live there; this class consumes cursor samples.
     weak var events: EventPlumbing? {
-        didSet { events?.onMouseSample = { [weak self] in self?.mouseDidMove() } }
+        didSet {
+            events?.onMouseSample = { [weak self] in self?.mouseDidMove() }
+            // Keyboard rides monitors, not the responder chain: route to the key
+            // window's canvas — the same window AppKit would have dispatched to.
+            events?.onArrangerKeyDown = { [weak self] e in self?.keyCanvas()?.handleKeyDown(e) ?? false }
+            events?.onArrangerKeyUp = { [weak self] e in self?.keyCanvas()?.handleKeyUp(e) ?? false }
+            events?.onArrangerFlagsChanged = { [weak self] e in self?.keyCanvas()?.handleFlagsChanged(e) }
+        }
+    }
+
+    /// The canvas that owns keyboard input right now: the key window's, and only when
+    /// the key window is one of ours — calibration panels and the Backstage Pass keep
+    /// their own keys even while the arranger is up behind them.
+    private func keyCanvas() -> Arranger? {
+        guard isVisible, let key = NSApp.keyWindow,
+              windows.values.contains(key) else { return nil }
+        return canvases.first { $0.window === key }
     }
     /// The display the cursor is on. The chrome is re-rendered only when this changes;
     /// the ghost mouse moves every event.
@@ -108,6 +124,7 @@ final class ArrangerWindows {
         let bigCast = NSScreen.screens.count >= Self.bigCastThreshold
         setFeed(!busy && !bigCast)
         if VirtualMouse.ghostMouseEnabled { events?.startMouseMonitors() }
+        events?.startKeyMonitors()
         activeDisplayID = nil
         mouseDidMove()   // seed the active screen + render the ghost
         if state.feedEnabled { scheduleFeedLoadCheck() }
@@ -147,6 +164,7 @@ final class ArrangerWindows {
         capture.stop()
         cancelFeedWatchdog()
         events?.stopMouseMonitors()
+        events?.stopKeyMonitors()
         activeDisplayID = nil
         windows.values.forEach { $0.orderOut(nil) }
         windows.removeAll()

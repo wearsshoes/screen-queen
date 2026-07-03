@@ -44,6 +44,40 @@ final class EventPlumbing {
         }
     }
 
+    // MARK: - Arranger keyboard (monitors, not the responder chain)
+
+    /// The arranger's keyboard, entered through local monitors while it's up — no
+    /// first-responder dependence, and one place decides routing (the key canvas).
+    /// Handlers return true to consume the event; false lets normal dispatch continue
+    /// (so the bar's .keyboardShortcut equivalents still fire).
+    var onArrangerKeyDown: ((NSEvent) -> Bool)?
+    var onArrangerKeyUp: ((NSEvent) -> Bool)?
+    /// Modifier changes are observed, never consumed (the return value is ignored).
+    var onArrangerFlagsChanged: ((NSEvent) -> Void)?
+    private var keyMonitors: [Any] = []
+
+    /// Install the arranger's key monitors (idempotent). Local only — keys should
+    /// reach the arranger exactly when one of its windows is key, which the router
+    /// checks; other apps' keys are none of our business.
+    func startKeyMonitors() {
+        guard keyMonitors.isEmpty else { return }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
+            self?.onArrangerKeyDown?(e) == true ? nil : e
+        }) { keyMonitors.append(m) }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .keyUp, handler: { [weak self] e in
+            self?.onArrangerKeyUp?(e) == true ? nil : e
+        }) { keyMonitors.append(m) }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { [weak self] e in
+            self?.onArrangerFlagsChanged?(e)
+            return e
+        }) { keyMonitors.append(m) }
+    }
+
+    func stopKeyMonitors() {
+        keyMonitors.forEach { NSEvent.removeMonitor($0) }
+        keyMonitors.removeAll()
+    }
+
     // MARK: - Cursor samples (the ghost-mouse feed)
 
     /// Fired on every mouse move/drag while the mouse monitors run (and by the
@@ -139,6 +173,7 @@ final class EventPlumbing {
         hotkeyMonitors.forEach { NSEvent.removeMonitor($0) }
         hotkeyMonitors.removeAll()
         stopMouseMonitors()
+        stopKeyMonitors()
         focusTimer?.invalidate(); focusTimer = nil
     }
 }
