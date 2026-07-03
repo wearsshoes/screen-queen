@@ -58,6 +58,11 @@
     👑 capsule): Stage Pass, seam lights, wardrobe, debug, version, Quit.
     MenuBarExtra still isn't it — it can't run an action on click, only show
     content — but with the menu living in the bar there's nothing left to port.
+    Also probed (July 2026): MenuBarExtra(.window) can't *be* the overlays —
+    it's one popover-anchored window on the menu-bar screen that dismisses on
+    outside click, with no NSWindow access to re-frame/re-level; the arranger
+    is five exact-frame full-screen windows at mainMenuWindow−1 where clicking
+    "outside" is the interaction.
 * Portable to SwiftUI (was AppKit by choice, not necessity):
   - Menu-bar 👑 item + menu → `MenuBarExtra` (first-class now; supports `.window` style for
     rich content). Replaces `NSStatusItem`. Caveat: no programmatic open/close and less
