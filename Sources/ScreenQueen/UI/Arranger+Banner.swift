@@ -12,11 +12,11 @@ final class CountdownBanner: NSVisualEffectView {
     /// banner clears them all. `keep` = bless the new state; `!keep` = act right now.
     var onResolve: ((ArrangerState.CountdownKind, _ keep: Bool) -> Void)?
 
-    /// A row button's role, for the ghost's twin lookup (see `GhostTarget`).
+    /// A row button's role, for projecting its ghost image (see VirtualMouse.swift).
     enum Role { case keep, act }
 
     /// The frame (in this banner's coords) of a live row's button, or nil when that
-    /// countdown isn't showing — the ghost's per-canvas twin rect source.
+    /// countdown isn't showing — a source rect the ghost projects.
     func buttonRect(kind: ArrangerState.CountdownKind, role: Role) -> CGRect? {
         guard let row = rows[kind], !row.isHidden else { return nil }
         let button = role == .keep ? row.keepButton : row.actButton

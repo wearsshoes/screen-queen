@@ -188,6 +188,7 @@ extension Arranger {
         g.cornerRadius = height / 2
         g.style = .clear
         g.contentView = pad
+        sliderPillView = g   // the ghost lights the whole pill, not the bare track
         return g
     }
 

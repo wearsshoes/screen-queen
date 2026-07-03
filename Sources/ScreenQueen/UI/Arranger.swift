@@ -61,20 +61,18 @@ final class Arranger: NSView {
     /// canvases (see VirtualMouse.swift).
     weak var barContainer: NSView?
 
-    /// Virtual-mouse overlay layers (built on demand in VirtualMouse.swift; nil while
-    /// unused or when their feature flags are off).
-    var planeMarkerLayer: PlaneMouseMarkerLayer?
-    var ghostCursorLayer: GhostCursorLayer?
-    /// The halo brightening the ghost of the control the cursor is on (VirtualMouse.swift).
-    var ghostHighlightLayer: GhostHighlightLayer?
-    /// Per-control pink ghost overlays (the buttons wear the ghost), driven by the
-    /// cursor's distance from this screen. Keyed so each control's layer persists.
-    var ghostElementLayers: [GhostElementKey: GhostElementLayer] = [:]
+    /// Projected pink ghost images of the *other* screens' controls (VirtualMouse.swift),
+    /// keyed by (source display, control) so each layer persists across redraws.
+    var ghostLayers: [GhostKey: GhostElementLayer] = [:]
 
     /// The bar's controls by role, for the ghost's twin lookup (same six controls on
     /// every canvas). On macOS 26 the circle capsules stand in for their buttons —
     /// they're the visible click surface the halo should wrap.
     var barCapsules: [BarControl: NSView] = [:]
+
+    /// The glass pill wrapping the slider + scope toggle (macOS 26 only; nil pre-26),
+    /// so the ghost lights the whole pill rather than the bare slider track.
+    weak var sliderPillView: NSView?
 
     /// The top-of-screen countdown banner (auto-revert / feed guard) — built on demand
     /// and driven in Arranger+Banner.swift. nil until a countdown first appears.
@@ -133,11 +131,13 @@ final class Arranger: NSView {
         return p
     }()
 
-    /// Clamp a solve-panel origin so the shared position is fully on-screen on *every*
-    /// canvas — against the smallest screen extents, not this canvas's own bounds.
+    /// Clamp a solve-panel drag to *this* canvas's own bounds — the screen you're
+    /// dragging on keeps it fully in view. Other canvases render the shared origin
+    /// raw (see `refresh`), so a ghost panel mirrors the real one's position exactly,
+    /// even where that runs partly or fully off a smaller/differently-shaped screen.
     func clampedPanelOrigin(_ o: CGPoint, size: NSSize) -> CGPoint {
-        let maxX = max(0, min(bounds.width, state.minScreenExtent.width) - size.width)
-        let maxY = max(0, min(bounds.height, state.minScreenExtent.height) - size.height)
+        let maxX = max(0, bounds.width - size.width)
+        let maxY = max(0, bounds.height - size.height)
         return CGPoint(x: min(max(0, o.x), maxX), y: min(max(0, o.y), maxY))
     }
 
@@ -261,10 +261,12 @@ final class Arranger: NSView {
     /// Called by the state after a mutation so this view repaints.
     func refresh() {
         syncButtons(); syncBanner()
-        // Keep every canvas's panel at the shared anchor origin (a drag on any
-        // canvas moved it for all of them).
-        let origin = clampedPanelOrigin(state.solvePanelOrigin, size: solvePanel.frame.size)
-        if solvePanel.frame.origin != origin { solvePanel.setFrameOrigin(origin) }
+        // Every canvas's panel sits at the shared origin *raw* — a drag on any canvas
+        // moved it for all of them, and a ghost panel must mirror the real one's spot
+        // exactly, clipping off-screen if that's where it truly is.
+        if solvePanel.frame.origin != state.solvePanelOrigin {
+            solvePanel.setFrameOrigin(state.solvePanelOrigin)
+        }
         needsDisplay = true
     }
 
