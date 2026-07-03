@@ -32,8 +32,8 @@ extension Stage {
     func updateSeamEffects() {
         let rects = currentRects()
         guard let t = drawTransform(rects) else { return }
-        let bars = currentBars()
-        let seamColor = seamColors(bars)
+        let bars = state.currentBars()
+        let seamColor = state.seamColors(bars)
         seamEmitters.begin()
         seamGlow.begin()
         for e in miniBarEdges(bars, t: t, seamColor: seamColor) {

@@ -56,7 +56,7 @@ extension Stage {
         draggedID = d.id
         selectedID = d.id
         // Option-drag mirrors: dropping onto another tile mirrors this display onto it.
-        optionMirrorDrag = option && planeDisplays.count > 1
+        optionMirrorDrag = option && state.planeDisplays.count > 1
         state.draggingDisplayID = d.id   // brighten the grabbed display's screen from click
         state.beginDragLock()            // freeze unmoved displays' point positions for the drag
         dragStartMouse = p
@@ -169,7 +169,7 @@ extension Stage {
         shiftHeld = mods.shift   // the nudge timer reads this for its fast rate
         // Ghost the ⌘⇧ alignment destinations on every display while ⌘⇧ is held.
         let ghosts = mods.cmd && mods.shift && selectedID != nil && !zoomPending
-        if ghosts != showAlignGhosts { showAlignGhosts = ghosts; emitPreview() }
+        if ghosts != state.showAlignGhosts { state.showAlignGhosts = ghosts; emitPreview() }
         if alignPending, !(mods.cmd && mods.shift) {
             alignPending = false
             emitPreview()

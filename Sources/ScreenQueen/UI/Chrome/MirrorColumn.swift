@@ -105,14 +105,14 @@ extension Stage {
 
     /// Width of the right-hand column overlay (0 when it holds nothing).
     var mirrorColumnWidth: CGFloat {
-        mirroredDisplays.isEmpty && airplaySession == nil ? 0 : 360
+        state.mirroredDisplays.isEmpty && state.airplaySession == nil ? 0 : 360
     }
 
     /// Rebuild + place the column against the right edge (refresh path); hidden when
     /// it holds nothing.
     func layoutMirrorColumn() {
-        let mirrored = mirroredDisplays
-        guard !mirrored.isEmpty || airplaySession != nil else {
+        let mirrored = state.mirroredDisplays
+        guard !mirrored.isEmpty || state.airplaySession != nil else {
             mirrorColumn?.isHidden = true
             return
         }
@@ -121,7 +121,7 @@ extension Stage {
         let cardW = colW - pad * 2       // fixed width; height follows each screen's aspect
         var content = MirrorColumnContent()
         for d in mirrored {
-            let sz = pointSize(d)
+            let sz = state.pointSize(d)
             let aspect = sz.height > 0 ? sz.width / sz.height : 16.0 / 9
             let stats = state.statLines(for: d)
             let master = displays.first { $0.id == d.mirrorMaster }?.name ?? Copy.unknownDisplayName
@@ -131,8 +131,8 @@ extension Stage {
                 detail: stats.detail, mirrors: Copy.mirrorsLine(master),
                 height: min(max(cardW / max(aspect, 0.1), 120), 260)))
         }
-        if airplaySession != nil {
-            content.airplayName = airplaySession?.receiverName ?? Copy.unknownAirPlayReceiver
+        if state.airplaySession != nil {
+            content.airplayName = state.airplaySession?.receiverName ?? Copy.unknownAirPlayReceiver
         }
         let host = ensureMirrorColumn()
         host.rootView = MirrorColumnView(

@@ -103,7 +103,7 @@ extension Stage {
     /// around `ResolutionLadder`, supplying the catalog modes, notch flag, and current mode.
     func sortedModes(for d: DisplaySnapshot) -> [DisplayMode] {
         ResolutionLadder.sortedModes(all: ModeCatalog.menuModes(for: d.id), isBuiltin: d.isBuiltin,
-                                     notched: isNotched(d), extended: extendedBuiltinModes,
+                                     notched: isNotched(d), extended: state.extendedBuiltinModes,
                                      current: CGDisplayCopyDisplayMode(d.id))
     }
 
@@ -117,7 +117,7 @@ extension Stage {
     /// directly). Live-system wrapper around `ResolutionLadder.modesList`.
     func modesList(for d: DisplaySnapshot) -> [DisplayMode] {
         ResolutionLadder.modesList(all: ModeCatalog.menuModes(for: d.id), isBuiltin: d.isBuiltin,
-                                   notched: isNotched(d), extended: extendedBuiltinModes,
+                                   notched: isNotched(d), extended: state.extendedBuiltinModes,
                                    current: CGDisplayCopyDisplayMode(d.id))
     }
 
@@ -139,7 +139,7 @@ extension Stage {
         zoomPending = false
         let modes = state.pendingModes
         guard !modes.isEmpty else { return }
-        let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
+        let origins = SchematicLayout.toPoints(rects: plane, displays: state.sizedDisplays())
         state.pendingModes.removeAll()
         commander?.setResolutions(modes.mapValues(\.cgMode), origins)
     }

@@ -130,7 +130,7 @@ final class Stage: NSView {
     /// The floating "what she sees" panel (see SolvePanel), on its own layer above the
     /// seam layers. Draggable; body click-through.
     private(set) lazy var solvePanel: SolvePanelHost = {
-        let p = SolvePanelHost(rootView: SolvePanelView(content: SolvePanelContent()))
+        let p = SolvePanelHost(rootView: SolvePanelView(state: state))
         p.frame = NSRect(origin: .zero, size: NSSize(width: 240, height: 166))
         p.wantsLayer = true
         p.layer?.zPosition = 3
@@ -241,12 +241,9 @@ final class Stage: NSView {
     var plane: [CGDirectDisplayID: CGRect] { state.plane }
     var activeV: AnchorMarker? { get { state.activeV } set { state.activeV = newValue } }
     var activeH: AnchorMarker? { get { state.activeH } set { state.activeH = newValue } }
-    var extendedBuiltinModes: Bool { get { state.extendedBuiltinModes } set { state.extendedBuiltinModes = newValue } }
 
     /// The app-level command executor (see `DisplayCommanding`).
     var commander: (any DisplayCommanding)? { state.commander }
-
-    var airplaySession: AirPlaySession? { state.airplaySession }
 
     // Mouse drag state (local to the stage handling the gesture).
     var draggedID: CGDirectDisplayID?
@@ -294,8 +291,6 @@ final class Stage: NSView {
     // while the level rises, then rejoin proportionally as it falls. Reset each run.
     var globalZoomLevel: Double = 1
     var globalZoomStartPPI: [CGDirectDisplayID: Double] = [:]
-
-    var showAlignGhosts: Bool { get { state.showAlignGhosts } set { state.showAlignGhosts = newValue } }
 
     /// The display this stage's window sits on. nil ⇒ center the main display.
     var centerID: CGDirectDisplayID?
@@ -347,21 +342,14 @@ final class Stage: NSView {
         if let rect = panelViewRect(), solvePanel.frame != rect {
             solvePanel.frame = rect
         }
-        solvePanel.update(SolvePanelContent(state: state))
+        solvePanel.isHidden = state.planeDisplays.count < 2   // nothing to say about a solo girl
         layoutLabelCards()
         layoutMirrorColumn()
         updateSeamEffects()
         repaintSchematic()
     }
 
-    func pointSize(_ d: DisplaySnapshot) -> CGSize { state.pointSize(d) }
-    func sizedDisplays() -> [DisplaySnapshot] { state.sizedDisplays() }
     func currentRects() -> [CGDirectDisplayID: CGRect] { plane }
-    func currentBars() -> [SeamBar] { state.currentBars() }
-    func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] { state.seamColors(bars) }
-    func predictedDockDisplay() -> CGDirectDisplayID? { state.predictedDockDisplay() }
-    var mirroredDisplays: [DisplaySnapshot] { state.mirroredDisplays }
-    var planeDisplays: [DisplaySnapshot] { state.planeDisplays }
 
     /// Commit the plane, then broadcast so every stage redraws.
     func commitPlane() { state.commit() }

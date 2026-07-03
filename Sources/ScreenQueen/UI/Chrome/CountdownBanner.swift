@@ -8,16 +8,17 @@ struct CountdownBannerView: View {
     struct Row {
         let message: String, keepTitle: String, actTitle: String
     }
-    /// The message is composed by the stage (system facts like the screen count are
-    /// model inputs, not something the view goes and reads).
-    let countdowns: [ArrangerState.CountdownKind: Row]
-    let resolve: (ArrangerState.CountdownKind, _ keep: Bool) -> Void
+    /// Observes the state directly (the `countdowns` read in `body` tracks the ticks).
+    /// The screen count is a model input, frozen at stage creation — a reconfig
+    /// rebuilds every stage anyway.
+    let state: ArrangerState
+    let screenCount: Int
 
     var body: some View {
         VStack(spacing: 8) {
             ForEach(ArrangerState.CountdownKind.allCases, id: \.self) { kind in
-                if let c = countdowns[kind] {
-                    row(kind, c)
+                if let c = state.countdowns[kind] {
+                    row(kind, remaining: c.remaining)
                 }
             }
         }
@@ -28,16 +29,28 @@ struct CountdownBannerView: View {
             .strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
     }
 
+    private func copyRow(_ kind: ArrangerState.CountdownKind, remaining: Int) -> Row {
+        switch kind {
+        case .revertModes:
+            Row(message: Copy.revertCountdown(remaining),
+                keepTitle: Copy.revertKeep, actTitle: Copy.revertNow)
+        case .feedGuard:
+            Row(message: Copy.feedGuardCountdown(screenCount, remaining),
+                keepTitle: Copy.feedKeep, actTitle: Copy.feedCutNow)
+        }
+    }
+
     /// One countdown's line: message · Keep (pink — she wants you to commit) · act-now.
-    private func row(_ kind: ArrangerState.CountdownKind, _ c: Row) -> some View {
-        HStack(spacing: 12) {
+    private func row(_ kind: ArrangerState.CountdownKind, remaining: Int) -> some View {
+        let c = copyRow(kind, remaining: remaining)
+        return HStack(spacing: 12) {
             Text(c.message)
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
-            Button(c.keepTitle) { resolve(kind, true) }
+            Button(c.keepTitle) { state.resolveCountdown(kind, keep: true) }
                 .buttonStyle(.borderedProminent)
                 .tint(Color.pink.opacity(0.85))
-            Button(c.actTitle) { resolve(kind, false) }
+            Button(c.actTitle) { state.resolveCountdown(kind, keep: false) }
         }
     }
 }
@@ -47,36 +60,20 @@ struct CountdownBannerView: View {
 extension Stage {
 
     /// Reflect `state.countdowns` in this stage's banner. Built lazily on the first
-    /// countdown (most sessions never see one); called from `refresh()`.
+    /// countdown (most sessions never see one); content then updates itself via
+    /// Observation — this only manages existence and visibility.
     func syncBanner() {
         if banner == nil {
             guard !state.countdowns.isEmpty else { return }
             banner = makeBanner()
             needsLayout = true
         }
-        banner?.rootView = bannerView()
         banner?.isHidden = state.countdowns.isEmpty
     }
 
-    private func bannerView() -> CountdownBannerView {
-        var rows: [ArrangerState.CountdownKind: CountdownBannerView.Row] = [:]
-        for (kind, c) in state.countdowns {
-            switch kind {
-            case .revertModes:
-                rows[kind] = .init(message: Copy.revertCountdown(c.remaining),
-                                   keepTitle: Copy.revertKeep, actTitle: Copy.revertNow)
-            case .feedGuard:
-                rows[kind] = .init(message: Copy.feedGuardCountdown(NSScreen.screens.count, c.remaining),
-                                   keepTitle: Copy.feedKeep, actTitle: Copy.feedCutNow)
-            }
-        }
-        return CountdownBannerView(countdowns: rows) { [weak self] kind, keep in
-            self?.state.resolveCountdown(kind, keep: keep)
-        }
-    }
-
     private func makeBanner() -> NSHostingView<CountdownBannerView> {
-        let b = NSHostingView(rootView: bannerView())
+        let b = NSHostingView(rootView: CountdownBannerView(state: state,
+                                                            screenCount: NSScreen.screens.count))
         b.wantsLayer = true
         b.layer?.zPosition = 5   // above the schematic layers, below the ghost mouse (z6)
         b.translatesAutoresizingMaskIntoConstraints = false

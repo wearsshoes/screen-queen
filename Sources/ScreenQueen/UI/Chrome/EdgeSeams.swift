@@ -17,7 +17,7 @@ extension Stage {
         let thickness: CGFloat = mine?.pointsPerInch.map { thicknessInches * CGFloat($0) } ?? 9
         // Bar offsets/lengths are in *previewed* point space but drawn against the real
         // window bounds — scale them across, or spacing drifts during a zoom preview.
-        let previewed = mine.map { pointSize($0) }
+        let previewed = mine.map { state.pointSize($0) }
         var edges: [SeamEdgeGlow] = []
         for bar in bars where bar.aID == me || bar.bID == me {
             let weAreA = (bar.aID == me)

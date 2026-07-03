@@ -8,8 +8,6 @@ struct SolvePanelContent {
     var seams: [(a: CGDirectDisplayID, b: CGDirectDisplayID, vertical: Bool, color: Color)] = []
     var ghost = false
 
-    init() {}
-
     /// The *actual* origins the seam detection uses (the locked solve during a drag),
     /// so the panel shows the truth. Everything comes from state — no Stage involved;
     /// the refresh path feeds this to the host.
@@ -38,13 +36,20 @@ struct SolvePanelContent {
 /// Point rects are outlined (red = resolved through an ambiguous >1-preimage inverse);
 /// seams draw in their palette color over the outlines — the seam is the shared edge,
 /// so its color wins there.
+///
+/// Observes the shared state directly: the content builder's reads (plane, displays,
+/// pending modes, the drag lock) happen in `body`, so Observation repaints the panel
+/// on exactly those changes — no rootView rebuilds from the refresh path.
 struct SolvePanelView: View {
-    var content: SolvePanelContent
+    let state: ArrangerState
+    var ghost = false
 
     private static let titleBarHeight: CGFloat = 16
 
     var body: some View {
-        Canvas { ctx, size in
+        var content = SolvePanelContent(state: state)
+        content.ghost = ghost
+        return Canvas { ctx, size in
             let bounds = CGRect(origin: .zero, size: size)
             let ink: Color = content.ghost ? ChromeMetrics.ghostPink : .white
             let plateColor: Color = content.ghost
@@ -112,29 +117,15 @@ struct SolvePanelView: View {
     }
 }
 
-/// The panel's hosting view: draggable (the whole panel is the handle), hidden when
-/// there's nothing to say about a solo girl, ghost-tinted via the content model.
+/// The panel's hosting view: draggable (the whole panel is the handle), hidden (by
+/// the stage's refresh) when there's nothing to say about a solo girl. The content
+/// updates itself via Observation; only the ghost flag arrives from outside.
 final class SolvePanelHost: NSHostingView<SolvePanelView> {
 
     /// Dragging reports the desired origin here instead of moving the panel itself —
     /// the stage stores it as a centre-relative inch offset in shared state, and every
     /// stage repositions on the resulting notify.
     var onMoved: ((CGPoint) -> Void)?
-
-    private var content = SolvePanelContent()
-    private var ghost = false
-
-    func update(_ content: SolvePanelContent) {
-        self.content = content
-        apply()
-    }
-
-    private func apply() {
-        var c = content
-        c.ghost = ghost
-        rootView = SolvePanelView(content: c)
-        isHidden = content.rects.count < 2   // nothing to say about a solo girl
-    }
 
     /// The whole panel is the drag handle (and nothing outside it).
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -160,8 +151,7 @@ final class SolvePanelHost: NSHostingView<SolvePanelView> {
 
     /// Repaint the panel in pink (or restore) for the inactive-display ghost.
     func setGhost(_ on: Bool) {
-        guard ghost != on else { return }
-        ghost = on
-        apply()
+        guard rootView.ghost != on else { return }
+        rootView.ghost = on
     }
 }

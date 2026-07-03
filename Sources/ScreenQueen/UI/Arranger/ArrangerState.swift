@@ -1,32 +1,34 @@
 import CoreGraphics
 import Foundation
+import Observation
 
 /// The editing state shared by every per-screen `Stage`: the physical plane plus
-/// selection/preview state and app callbacks. A mutation on any stage writes here and
-/// calls `changed()` so all stages redraw from the same source of truth.
-@MainActor
+/// selection/preview state and app callbacks. A mutation on any stage writes here;
+/// SwiftUI islands whose body reads this state repaint via Observation, and
+/// `changed()` still fans out to the AppKit-side work (frames, layers, the schematic).
+@Observable @MainActor
 final class ArrangerState {
 
     /// The app-level executor for every display command (set once by the AppDelegate) —
     /// one reference instead of a closure per command.
-    weak var commander: (any DisplayCommanding)?
+    @ObservationIgnored weak var commander: (any DisplayCommanding)?
 
     /// Resolution-slider drag began/ended — Arranger drives the ghost aids from a
     /// timer while held (the modal tracking loop starves the mouse monitors).
-    var onSliderDragChanged: ((Bool) -> Void)?
+    @ObservationIgnored var onSliderDragChanged: ((Bool) -> Void)?
 
     /// Called after any mutation so every stage redraws.
-    var changed: (() -> Void)?
+    @ObservationIgnored var changed: (() -> Void)?
 
     var displays: [DisplaySnapshot] = []
     var selectedID: CGDirectDisplayID?
 
     /// Live per-display screen capture (nil when unavailable / not started).
-    var capture: ScreenCaptureManager?
+    @ObservationIgnored var capture: ScreenCaptureManager?
 
     /// Whether the live video feed is on (tiles show live content vs. static wallpaper).
     var feedEnabled = false
-    var onToggleFeed: ((Bool) -> Void)?
+    @ObservationIgnored var onToggleFeed: ((Bool) -> Void)?
 
     /// A live macOS-managed AirPlay visual session (nil when none) — detected via a
     /// power assertion, so it catches even the "Window or App" mode with no display ID.
@@ -82,7 +84,7 @@ final class ArrangerState {
 
     /// A pending revert for the last main/resolution change (nil ⇒ none). Applied by
     /// Undo once the plane-edit stack is exhausted; set by the AppDelegate.
-    var pendingRevert: (() -> Void)?
+    @ObservationIgnored var pendingRevert: (() -> Void)?
 
     // MARK: - Chrome anchor space (unified across screens)
 
@@ -111,9 +113,9 @@ final class ArrangerState {
 
     /// Live countdowns by kind (empty ⇒ no banner).
     private(set) var countdowns: [CountdownKind: Countdown] = [:]
-    private var countdownTimer: Timer?
+    @ObservationIgnored private var countdownTimer: Timer?
     /// Fires whenever a countdown leaves the table for any reason (keep, act-now, expiry).
-    var onCountdownResolved: ((CountdownKind) -> Void)?
+    @ObservationIgnored var onCountdownResolved: ((CountdownKind) -> Void)?
 
     /// Start (or restart) a countdown. `onExpire` runs exactly once.
     func armCountdown(_ kind: CountdownKind, seconds: Int, onExpire: @escaping () -> Void) {
