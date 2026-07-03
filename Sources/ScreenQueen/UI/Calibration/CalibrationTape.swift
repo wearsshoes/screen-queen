@@ -1,4 +1,4 @@
-import AppKit
+import SwiftUI
 
 /// A seamstress's measuring tape hugging the seam: a soft cream ribbon ruled in
 /// inches along one edge (down to eighths) and centimeters along the other —
@@ -13,7 +13,12 @@ import AppKit
 /// one being measured. Reports its live length so the controller can infer the
 /// target's PPI. Purely an affordance — the readout and Save/Cancel live in the
 /// floating panel.
-final class TapeView: NSView {
+///
+/// `Tape` is the model + CoreGraphics draw pass (y-up, run under the Canvas shim);
+/// `TapeHost` is the hosting view that owns input (hit-carving so two overlapping
+/// tapes share a window, drag classification, cursor rects, arrow keys).
+@MainActor
+final class Tape {
     var onResize: ((CGFloat) -> Void)?
     /// ⏎ pressed while this tape has keys: save the calibration.
     var onCommit: (() -> Void)?
@@ -22,17 +27,31 @@ final class TapeView: NSView {
     /// The perpendicular tape sharing this screen: its length is echoed onto this
     /// tape in its chalk color (see `drawChalk`), and linked resizes arrive from
     /// it via the controller.
-    weak var partner: TapeView?
+    weak var partner: Tape?
+
+    /// Host wiring (set by TapeHost): repaint, fade on invalid, cursor-rect refresh.
+    var onNeedsRepaint: (() -> Void)?
+    var onInvalidChanged: ((Bool) -> Void)?
+    var onGrabRectsChanged: (() -> Void)?
+
+    /// The host view's size (orientation-free, so no flip questions).
+    var bounds: CGRect = .zero
+
+    /// Whether arrow keys would land here right now, per the host's key/responder
+    /// status — drives the far-tip glow.
+    var keyboardIsLive: Bool = false {
+        didSet { if keyboardIsLive != oldValue { onNeedsRepaint?() } }
+    }
 
     /// A linked resize pushed this tape past its screen edge — it can't be
     /// trusted for measuring until the pair shrinks back. Shown, but faded.
     private(set) var isInvalid = false {
-        didSet { if isInvalid != oldValue { alphaValue = isInvalid ? 0.3 : 1 } }
+        didSet { if isInvalid != oldValue { onInvalidChanged?(isInvalid) } }
     }
 
     private var length: CGFloat
     private var offset: CGFloat = 0        // slide of the bar's center along the seam
-    private let anchor: BarPlacement
+    let anchor: BarPlacement
     /// Tick pitch in points: the reference's true points-per-inch on the honest
     /// tape, but the *EDID-claimed* pitch on the liar's — so at a physical match
     /// the two ribbons read different numbers. Her inches, as told by her.
@@ -102,43 +121,14 @@ final class TapeView: NSView {
         self.length = length; self.anchor = anchor
         self.pointsPerInch = pointsPerInch; self.unitLabel = unitLabel
         self.brand = brand; self.finePrint = finePrint; self.palette = palette
-        super.init(frame: .zero)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    override var acceptsFirstResponder: Bool { true }
-
-    /// True while the floating panel is key and routing its arrow keys to this
-    /// tape (the controller keeps it in sync with the panel's key status).
-    var externallyActive = false {
-        didSet { if externallyActive != oldValue { needsDisplay = true } }
     }
 
-    /// Whether arrow keys would land on this tape right now — either directly
-    /// (its window is key and it holds first responder) or via the panel.
-    private var keyboardIsLive: Bool {
-        externallyActive || (window?.isKeyWindow == true && window?.firstResponder === self)
-    }
-
-    // Keep the active-tip glow honest as focus moves between the two tape
-    // windows and the panel.
-    override func becomeFirstResponder() -> Bool { needsDisplay = true; return super.becomeFirstResponder() }
-    override func resignFirstResponder() -> Bool { needsDisplay = true; return super.resignFirstResponder() }
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard let w = window else { return }
-        let nc = NotificationCenter.default
-        nc.addObserver(self, selector: #selector(redrawKeyState), name: NSWindow.didBecomeKeyNotification, object: w)
-        nc.addObserver(self, selector: #selector(redrawKeyState), name: NSWindow.didResignKeyNotification, object: w)
-    }
-    @objc private func redrawKeyState() { needsDisplay = true }
-
-    private var lengthIsVertical: Bool { anchor.lengthIsVertical }
+    var lengthIsVertical: Bool { anchor.lengthIsVertical }
 
     /// The bar's anchored center along the seam (before `offset`).
     private func anchorAlong() -> CGFloat { anchor.along }
 
-    private func rect() -> NSRect {
+    func rect() -> NSRect {
         CalibrationMath.barRect(length: length, offset: offset, thickness: Self.thickness, anchor: anchor, in: bounds)
     }
 
@@ -146,9 +136,9 @@ final class TapeView: NSView {
     private func along(_ p: CGPoint) -> CGFloat { lengthIsVertical ? p.y : p.x }
     private var maxAlong: CGFloat { lengthIsVertical ? bounds.height : bounds.width }
 
-    /// Grab regions in view coordinates: a metal tab at each end (drag to let tape
-    /// out or take it in) and the ribbon between them (slide the whole tape).
-    private func grabRects(_ r: NSRect) -> (lowTip: NSRect, highTip: NSRect, ribbon: NSRect) {
+    /// Grab regions in (y-up) view coordinates: a metal tab at each end (drag to let
+    /// tape out or take it in) and the ribbon between them (slide the whole tape).
+    func grabRects(_ r: NSRect) -> (lowTip: NSRect, highTip: NSRect, ribbon: NSRect) {
         let tipSpan = Self.tipAlong + 28      // the tab plus a forgiving halo
         let tipCross = Self.thickness + 30
         if lengthIsVertical {
@@ -165,14 +155,15 @@ final class TapeView: NSView {
         return (low, high, ribbon)
     }
 
-    // MARK: Mouse — the end tabs let tape out/in; the ribbon slides it
+    // MARK: Grabs — the end tabs let tape out/in; the ribbon slides it
 
-    private enum Grab { case none, lowTip, highTip, slide }
-    private var grab: Grab = .none
+    enum Grab { case none, lowTip, highTip, slide }
+    private(set) var grab: Grab = .none
     private var grabDelta: CGFloat = 0   // where in the grabbed part the drag started
 
-    override func mouseDown(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
+    /// Classify a press at `p` (y-up). Returns whether this tape claimed it.
+    @discardableResult
+    func beginGrab(at p: CGPoint) -> Bool {
         let r = rect()
         let (lowR, highR, ribbonR) = grabRects(r)
         let start = lengthIsVertical ? r.minY : r.minX
@@ -185,13 +176,25 @@ final class TapeView: NSView {
         } else {
             grab = .none
         }
-        if grab != .none { window?.makeFirstResponder(self); needsDisplay = true }
+        if grab != .none { onNeedsRepaint?() }
+        return grab != .none
     }
-    override func mouseDragged(with event: NSEvent) {
+
+    func moveGrab(to p: CGPoint) {
         guard grab != .none else { return }
-        apply(convert(event.locationInWindow, from: nil))
+        apply(p)
     }
-    override func mouseUp(with event: NSEvent) { grab = .none; needsDisplay = true }
+
+    func endGrab() {
+        grab = .none
+        onNeedsRepaint?()
+    }
+
+    /// Whether `p` (y-up) lands on any grab region — the host's hit-carving.
+    func claims(_ p: CGPoint) -> Bool {
+        let (lowR, highR, ribbonR) = grabRects(rect())
+        return lowR.contains(p) || highR.contains(p) || ribbonR.contains(p)
+    }
 
     /// Adopt the length a linked resize implies (the partner was dragged; the
     /// pair keeps the screen's aspect ratio). Never clamps and keeps the center
@@ -203,19 +206,9 @@ final class TapeView: NSView {
         length = newLength
         let start = anchorAlong() + offset - length / 2
         isInvalid = start < -0.5 || start + length > maxAlong + 0.5
-        window?.invalidateCursorRects(for: self)
-        needsDisplay = true
+        onGrabRectsChanged?()
+        onNeedsRepaint?()
     }
-
-    /// Two tapes share each screen as full-frame siblings; only claim clicks that
-    /// actually land on this tape's grab regions so the rest fall through to the
-    /// other tape.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let p = convert(point, from: superview)
-        let (lowR, highR, ribbonR) = grabRects(rect())
-        return (lowR.contains(p) || highR.contains(p) || ribbonR.contains(p)) ? self : nil
-    }
-
 
     private func apply(_ p: CGPoint) {
         let a = along(p)
@@ -240,22 +233,24 @@ final class TapeView: NSView {
         offset = (start + end) / 2 - anchorAlong()
         isInvalid = start < -0.5 || end > maxAlong + 0.5   // direct drags re-legitimize
         onResize?(length)
-        window?.invalidateCursorRects(for: self)
-        needsDisplay = true
-        partner?.needsDisplay = true   // its echo of this length just moved
+        onGrabRectsChanged?()
+        onNeedsRepaint?()
+        partner?.onNeedsRepaint?()   // its echo of this length just moved
     }
 
     // MARK: Keyboard — dragging is coarse exactly at the scale that matters
 
-    override func keyDown(with event: NSEvent) {
-        let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
-        switch event.keyCode {
+    /// Handle a key press (already routed here by the host). True = consumed.
+    func handleKey(code: UInt16, shift: Bool) -> Bool {
+        let step: CGFloat = shift ? 10 : 1
+        switch code {
         case 124, 126: nudge(step)     // → / ↑
         case 123, 125: nudge(-step)    // ← / ↓
         case 36, 76: onCommit?()       // ⏎ / keypad enter
         case 53: onCancel?()           // ⎋
-        default: super.keyDown(with: event)
+        default: return false
         }
+        return true
     }
 
     /// Let tape out (+) or take it in (−) by `delta` points at the far end. When
@@ -273,19 +268,9 @@ final class TapeView: NSView {
         commit(start: start, end: end)
     }
 
-    // MARK: Cursor
+    // MARK: Draw (y-up CoreGraphics, run under the Canvas shim)
 
-    override func resetCursorRects() {
-        let resize: NSCursor = lengthIsVertical ? .resizeUpDown : .resizeLeftRight
-        let (lowR, highR, ribbonR) = grabRects(rect())
-        addCursorRect(ribbonR, cursor: .openHand)
-        addCursorRect(lowR, cursor: resize)
-        addCursorRect(highR, cursor: resize)
-    }
-
-    // MARK: Draw
-
-    override func draw(_ dirtyRect: NSRect) {
+    func draw() {
         // (The soft scrim lives on the window — two sibling tapes shouldn't each
         // darken the screen again.)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
@@ -325,7 +310,7 @@ final class TapeView: NSView {
     private static let yChalk = NSColor(calibratedRed: 1.0, green: 0.35, blue: 0.66, alpha: 1)
 
     /// This tape's own chalk: yellow when it measures x, pink when it measures y.
-    private var chalkColor: NSColor { lengthIsVertical ? Self.yChalk : Self.xChalk }
+    var chalkColor: NSColor { lengthIsVertical ? Self.yChalk : Self.xChalk }
 
     /// Tailor's chalk lines struck perpendicular from both ends of the ribbon,
     /// all the way across the screen — she marks before she cuts. Does what the
@@ -574,5 +559,139 @@ final class TapeView: NSView {
         let gap: CGFloat = 14
         let y = centerSide > 0 ? Self.thickness + gap : -gap - size.height
         str.draw(at: CGPoint(x: length / 2 - size.width / 2, y: y))
+    }
+}
+
+/// The tape's Canvas: runs the y-up CoreGraphics pass under the same shim as the
+/// schematic (flip once, wrap in an NSGraphicsContext).
+struct TapeCanvasView: View {
+    weak var tape: Tape?
+    var generation: Int
+
+    var body: some View {
+        Canvas { ctx, size in
+            _ = generation
+            guard let tape else { return }
+            ctx.withCGContext { cg in
+                cg.translateBy(x: 0, y: size.height)
+                cg.scaleBy(x: 1, y: -1)
+                let ns = NSGraphicsContext(cgContext: cg, flipped: false)
+                let prev = NSGraphicsContext.current
+                NSGraphicsContext.current = ns
+                tape.draw()
+                NSGraphicsContext.current = prev
+            }
+        }
+    }
+}
+
+/// The tape's hosting view: hit-carving so two overlapping full-frame tapes share a
+/// window (only grab regions claim clicks), drag classification, cursor rects, and
+/// the arrow-key/⏎/⎋ routing. NSHostingView is flipped; the tape speaks y-up, so
+/// points flip at this boundary.
+final class TapeHost: NSHostingView<TapeCanvasView> {
+
+    let tape: Tape
+    private var generation = 0
+
+    init(tape: Tape) {
+        self.tape = tape
+        super.init(rootView: TapeCanvasView(tape: tape, generation: 0))
+        tape.onNeedsRepaint = { [weak self] in self?.repaint() }
+        tape.onInvalidChanged = { [weak self] faded in self?.alphaValue = faded ? 0.3 : 1 }
+        tape.onGrabRectsChanged = { [weak self] in
+            guard let self else { return }
+            self.window?.invalidateCursorRects(for: self)
+        }
+    }
+
+    @MainActor required init(rootView: TapeCanvasView) { fatalError("use init(tape:)") }
+    @MainActor required init?(coder: NSCoder) { fatalError() }
+
+    private func repaint() {
+        generation += 1
+        rootView = TapeCanvasView(tape: tape, generation: generation)
+    }
+
+    override func layout() {
+        super.layout()
+        if tape.bounds.size != bounds.size {
+            tape.bounds = CGRect(origin: .zero, size: bounds.size)
+            repaint()
+        }
+    }
+
+    /// This host is flipped (SwiftUI); the tape's geometry is y-up.
+    private func yUp(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x, y: bounds.height - p.y) }
+
+    /// Two tapes share each screen as full-frame siblings; only claim clicks that
+    /// actually land on this tape's grab regions so the rest fall through to the
+    /// other tape.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let sup = superview else { return nil }
+        let local = convert(point, from: sup)
+        return tape.claims(yUp(local)) ? self : nil
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        let p = yUp(convert(event.locationInWindow, from: nil))
+        if tape.beginGrab(at: p) { window?.makeFirstResponder(self) }
+    }
+    override func mouseDragged(with event: NSEvent) {
+        tape.moveGrab(to: yUp(convert(event.locationInWindow, from: nil)))
+    }
+    override func mouseUp(with event: NSEvent) { tape.endGrab() }
+
+    override func keyDown(with event: NSEvent) {
+        if !tape.handleKey(code: event.keyCode, shift: event.modifierFlags.contains(.shift)) {
+            super.keyDown(with: event)
+        }
+    }
+
+    // Keep the active-tip glow honest as focus moves between the two tape
+    // windows and the panel.
+    override func becomeFirstResponder() -> Bool { syncKeyboardLive(); return super.becomeFirstResponder() }
+    override func resignFirstResponder() -> Bool {
+        defer { syncKeyboardLive() }
+        return super.resignFirstResponder()
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let w = window else { return }
+        let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(keyStateChanged), name: NSWindow.didBecomeKeyNotification, object: w)
+        nc.addObserver(self, selector: #selector(keyStateChanged), name: NSWindow.didResignKeyNotification, object: w)
+    }
+    @objc private func keyStateChanged() { syncKeyboardLive() }
+
+    /// True while the floating panel is key and routing its arrow keys to this
+    /// tape (the controller keeps it in sync with the panel's key status).
+    var externallyActive = false {
+        didSet { if externallyActive != oldValue { syncKeyboardLive() } }
+    }
+
+    /// Whether arrow keys would land on this tape right now — either directly
+    /// (its window is key and it holds first responder) or via the panel.
+    private func syncKeyboardLive() {
+        // Defer a beat: first-responder/key state settles after the transition calls.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.tape.keyboardIsLive = self.externallyActive
+                || (self.window?.isKeyWindow == true && self.window?.firstResponder === self)
+        }
+    }
+
+    override func resetCursorRects() {
+        let resize: NSCursor = tape.lengthIsVertical ? .resizeUpDown : .resizeLeftRight
+        let (lowR, highR, ribbonR) = tape.grabRects(tape.rect())
+        // Cursor rects are in this (flipped) view's space; the tape's are y-up.
+        func flip(_ r: NSRect) -> NSRect {
+            NSRect(x: r.minX, y: bounds.height - r.maxY, width: r.width, height: r.height)
+        }
+        addCursorRect(flip(ribbonR), cursor: .openHand)
+        addCursorRect(flip(lowR), cursor: resize)
+        addCursorRect(flip(highR), cursor: resize)
     }
 }

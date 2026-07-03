@@ -35,7 +35,8 @@ final class CalibrationController {
     private var targetWindow: NSWindow?
     private var panels: [(screen: NSScreen, panel: CalibrationPanel)] = []   // one per screen, same controls
     private var target: DisplaySnapshot?
-    private weak var targetTape: TapeView?   // for arrow-key nudges routed via the panel
+    private weak var targetTape: Tape?       // for arrow-key nudges routed via the panel
+    private weak var targetHost: TapeHost?   // for the panel-key → tip-glow sync
     private var keyObservers: [NSObjectProtocol] = []   // panel key-status → tape glow
 
     private var refPPT: Double = 0             // trusted reference PPI (fallback pitch)
@@ -119,63 +120,67 @@ final class CalibrationController {
         // Both tapes wear the same look; the unit printed on the blade — "inches"
         // vs her "inches" — is what tells them apart. Reference tapes (trusted
         // screen): pure measuring affordances, no controls.
-        let refView = TapeView(length: CGFloat(refMeasure * refPrimaryPitch), anchor: refPlace,
-                              pointsPerInch: CGFloat(refPrimaryPitch), unitLabel: Copy.matchUnitReference,
-                              brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
-                              palette: .honest)
-        let refPerpView = TapeView(length: CGFloat(refMeasure * k * refPerpPitch), anchor: refPerpPlace,
-                                  pointsPerInch: CGFloat(refPerpPitch), unitLabel: Copy.matchUnitReference,
-                                  brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
-                                  palette: .honest)
-        refView.onResize = { [weak self, weak refPerpView] len in
+        let refTape = Tape(length: CGFloat(refMeasure * refPrimaryPitch), anchor: refPlace,
+                           pointsPerInch: CGFloat(refPrimaryPitch), unitLabel: Copy.matchUnitReference,
+                           brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
+                           palette: .honest)
+        let refPerpTape = Tape(length: CGFloat(refMeasure * k * refPerpPitch), anchor: refPerpPlace,
+                               pointsPerInch: CGFloat(refPerpPitch), unitLabel: Copy.matchUnitReference,
+                               brand: Copy.matchTapeBrandReference, finePrint: Copy.matchTapeFinePrintReference,
+                               palette: .honest)
+        refTape.onResize = { [weak self, weak refPerpTape] len in
             guard let self else { return }
             self.refMeasure = Double(len) / refPrimaryPitch
-            refPerpView?.setLength(CGFloat(self.refMeasure * k * refPerpPitch))
+            refPerpTape?.setLength(CGFloat(self.refMeasure * k * refPerpPitch))
             self.updateReadout()
         }
-        refPerpView.onResize = { [weak self, weak refView] len in
+        refPerpTape.onResize = { [weak self, weak refTape] len in
             guard let self else { return }
             self.refMeasure = Double(len) / refPerpPitch / k
-            refView?.setLength(CGFloat(self.refMeasure * refPrimaryPitch))
+            refTape?.setLength(CGFloat(self.refMeasure * refPrimaryPitch))
             self.updateReadout()
         }
-        refWindow = makeWindow(screen: refScreen, views: [refView, refPerpView])
+        refWindow = makeWindow(screen: refScreen,
+                               views: [TapeHost(tape: refTape), TapeHost(tape: refPerpTape)])
 
         // Target tapes (target screen). Their ribbons are ruled at the pitch the
         // display *claims* over EDID — even when a previous calibration knows
         // better — so when the two sides physically match, hers reads a different
         // number than the honest one. The lie, printed on the tape.
-        let calView = TapeView(length: CGFloat(f0) * targetFull, anchor: targetPlace,
-                              pointsPerInch: CGFloat(targetPrimaryPitch), unitLabel: Copy.matchUnitTarget,
-                              brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
-                              palette: .vanity)
-        let calPerpView = TapeView(length: CGFloat(f0) * targetPerpFull, anchor: targetPerpPlace,
-                                  pointsPerInch: CGFloat(targetPerpPitch), unitLabel: Copy.matchUnitTarget,
-                                  brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
-                                  palette: .vanity)
-        calView.onResize = { [weak self, weak calPerpView] len in
+        let calTape = Tape(length: CGFloat(f0) * targetFull, anchor: targetPlace,
+                           pointsPerInch: CGFloat(targetPrimaryPitch), unitLabel: Copy.matchUnitTarget,
+                           brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
+                           palette: .vanity)
+        let calPerpTape = Tape(length: CGFloat(f0) * targetPerpFull, anchor: targetPerpPlace,
+                               pointsPerInch: CGFloat(targetPerpPitch), unitLabel: Copy.matchUnitTarget,
+                               brand: Copy.matchTapeBrandTarget, finePrint: Copy.matchTapeFinePrintTarget,
+                               palette: .vanity)
+        calTape.onResize = { [weak self, weak calPerpTape] len in
             guard let self else { return }
             self.targetMeasure = Double(len) / targetPrimaryPitch
-            calPerpView?.setLength(len * targetPerpFull / targetFull)
+            calPerpTape?.setLength(len * targetPerpFull / targetFull)
             self.updateReadout()
         }
-        calPerpView.onResize = { [weak self, weak calView] len in
+        calPerpTape.onResize = { [weak self, weak calTape] len in
             guard let self else { return }
             let primaryLen = len * targetFull / targetPerpFull
             self.targetMeasure = Double(primaryLen) / targetPrimaryPitch
-            calView?.setLength(primaryLen)
+            calTape?.setLength(primaryLen)
             self.updateReadout()
         }
-        targetWindow = makeWindow(screen: targetScreen, views: [calView, calPerpView])
-        targetTape = calView
+        let calHost = TapeHost(tape: calTape)
+        targetWindow = makeWindow(screen: targetScreen,
+                                  views: [calHost, TapeHost(tape: calPerpTape)])
+        targetTape = calTape
+        targetHost = calHost
 
         // Each tape echoes its partner's length in the partner's chalk color —
-        // the flip-your-screen affordance (see BarView.drawChalk).
-        refView.partner = refPerpView; refPerpView.partner = refView
-        calView.partner = calPerpView; calPerpView.partner = calView
+        // the flip-your-screen affordance (see Tape.drawChalk).
+        refTape.partner = refPerpTape; refPerpTape.partner = refTape
+        calTape.partner = calPerpTape; calPerpTape.partner = calTape
 
         // ⏎ / ⎋ work from any tape, not just while the panel is key.
-        for tape in [refView, refPerpView, calView, calPerpView] {
+        for tape in [refTape, refPerpTape, calTape, calPerpTape] {
             tape.onCommit = { [weak self] in self?.save() }
             tape.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
         }
@@ -196,13 +201,13 @@ final class CalibrationController {
 
         // A panel being key routes its arrows to the liar's tape; keep her
         // active-tip glow in sync as key focus moves among panels and tapes.
-        calView.externallyActive = true
+        calHost.externallyActive = true
         let nc = NotificationCenter.default
         for (_, panel) in panels {
             for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
-                keyObservers.append(nc.addObserver(forName: name, object: panel, queue: .main) { [weak self, weak calView] _ in
+                keyObservers.append(nc.addObserver(forName: name, object: panel, queue: .main) { [weak self, weak calHost] _ in
                     MainActor.assumeIsolated {
-                        calView?.externallyActive = self?.panels.contains { $0.panel.isKeyWindow } ?? false
+                        calHost?.externallyActive = self?.panels.contains { $0.panel.isKeyWindow } ?? false
                     }
                 })
             }

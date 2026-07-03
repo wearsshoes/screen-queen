@@ -72,16 +72,16 @@ final class CalibrationPanel: NSPanel {
         var origin: NSPoint
         switch a.edge {
         case .right:
-            let barX = f.maxX - CalibrationMath.barEdgeInset - TapeView.thickness
+            let barX = f.maxX - CalibrationMath.barEdgeInset - Tape.thickness
             origin = NSPoint(x: barX - frame.width - gap, y: f.minY + a.along - frame.height / 2)
         case .left:
-            let barX = f.minX + CalibrationMath.barEdgeInset + TapeView.thickness
+            let barX = f.minX + CalibrationMath.barEdgeInset + Tape.thickness
             origin = NSPoint(x: barX + gap, y: f.minY + a.along - frame.height / 2)
         case .top:
-            let barY = f.maxY - CalibrationMath.barEdgeInset - TapeView.thickness
+            let barY = f.maxY - CalibrationMath.barEdgeInset - Tape.thickness
             origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY - frame.height - gap)
         case .bottom:
-            let barY = f.minY + CalibrationMath.barEdgeInset + TapeView.thickness
+            let barY = f.minY + CalibrationMath.barEdgeInset + Tape.thickness
             origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY + gap)
         }
 
