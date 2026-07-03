@@ -101,7 +101,7 @@ final class ArrangerWindows {
         // display's window key so shortcuts work immediately on hotkey-open.
         makeMainWindowKey()
         // Default the feed on unless the machine is already busy or the cast is big.
-        let busy = (ScreenCaptureManager.systemCPUUsage() ?? 0) > 0.5
+        let busy = (SystemLoad.systemCPUUsage() ?? 0) > 0.5
         let bigCast = NSScreen.screens.count >= Self.bigCastThreshold
         setFeed(!busy && !bigCast)
         installMouseMonitors()
@@ -115,7 +115,7 @@ final class ArrangerWindows {
     /// check — no continuous repolling.
     private func scheduleFeedLoadCheck() {
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            let pegged = (ScreenCaptureManager.systemCPUUsage() ?? 0) > 0.85
+            let pegged = (SystemLoad.systemCPUUsage() ?? 0) > 0.85
             guard pegged else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.isVisible, self.state.feedEnabled else { return }
