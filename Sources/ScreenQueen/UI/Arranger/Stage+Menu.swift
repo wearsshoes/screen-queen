@@ -38,7 +38,7 @@ extension Stage {
         let item = NSMenuItem(title: Copy.menuResolution, action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         let current = CGDisplayCopyDisplayMode(d.id).map(ModeKey.init)
-        for mode in modesList(for: d) {
+        for mode in model.modesList(for: d) {
             let mi = NSMenuItem(title: mode.label, action: #selector(setModeFromMenu(_:)), keyEquivalent: "")
             mi.target = self; mi.representedObject = ModeChoice(id: d.id, mode: mode.cgMode)
             if mode.key == current { mi.state = .on }

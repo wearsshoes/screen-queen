@@ -19,7 +19,7 @@ struct ModifierKeys {
 
 /// Interaction: mouse dragging and keyboard nudge/align/selection. All mutate the shared
 /// `model` and broadcast a redraw. (Resolution/mode handling lives in
-/// Stage+Resolution; the context menu in Stage+Menu.) Framework-free: events
+/// ArrangerModel+Resolution; the context menu in Stage+Menu.) Framework-free: events
 /// arrive pre-decoded (KeyInput/ModifierKeys, gesture points, the option flag).
 extension Stage {
 
@@ -133,7 +133,7 @@ extension Stage {
 
         if key.cmd, let ch = key.chars, "+=-_0".contains(ch) {
             if !key.isRepeat {
-                if key.shift { handleGlobalResolutionKey(ch) } else { handleResolutionKey(ch) }
+                if key.shift { model.handleGlobalResolutionKey(ch) } else { model.handleResolutionKey(ch) }
             }
             return true
         }
@@ -168,15 +168,15 @@ extension Stage {
     func handleFlagsChanged(_ mods: ModifierKeys) {
         shiftHeld = mods.shift   // the nudge timer reads this for its fast rate
         // Ghost the ⌘⇧ alignment destinations on every display while ⌘⇧ is held.
-        let ghosts = mods.cmd && mods.shift && selectedID != nil && !zoomPending
+        let ghosts = mods.cmd && mods.shift && selectedID != nil && !model.zoomPending
         if ghosts != model.showAlignGhosts { model.showAlignGhosts = ghosts; emitPreview() }
         if alignPending, !(mods.cmd && mods.shift) {
             alignPending = false
             emitPreview()
             commitPlane()
         }
-        if zoomPending, !mods.cmd {
-            commitPendingResolution()
+        if model.zoomPending, !mods.cmd {
+            model.commitPendingResolution()
         }
     }
 

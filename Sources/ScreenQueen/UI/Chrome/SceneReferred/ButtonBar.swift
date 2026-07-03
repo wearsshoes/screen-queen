@@ -350,17 +350,17 @@ extension Stage {
         m.version = Self.versionLine
 
         let selected = selectedID.flatMap { id in displays.first(where: { $0.id == id }) }
-        sliderModes = selected.map { sortedModes(for: $0) } ?? []
-        m.sliderEnabled = sliderModes.count > 1
+        model.sliderModes = selected.map { model.sortedModes(for: $0) } ?? []
+        m.sliderEnabled = model.sliderModes.count > 1
         if m.sliderEnabled, let d = selected {
-            let n = sliderModes.count
+            let n = model.sliderModes.count
             // Pending (mid-drag, any stage) wins; else the committed mode. One rule for
             // every stage — the ghosts mirror a live drag for free.
             if let pending = model.pendingMode(for: d.id),
-               let idx = sliderModes.firstIndex(of: pending) {
+               let idx = model.sliderModes.firstIndex(of: pending) {
                 m.sliderValue = Double(idx) / Double(n - 1)
             } else {
-                let idx = currentModeIndex(for: d, in: sliderModes) ?? (n - 1) / 2
+                let idx = model.currentModeIndex(for: d, in: model.sliderModes) ?? (n - 1) / 2
                 m.sliderValue = Double(idx) / Double(n - 1)
             }
         }
@@ -381,8 +381,8 @@ extension Stage {
                 self.model.sliderScope = self.model.sliderScope == .one ? .all : .one
                 self.model.notify()   // refresh every stage so the icon/tooltip update everywhere
             },
-            sliderChanged: { [weak self] raw in self?.barSliderChanged(raw) },
-            sliderEnded: { [weak self] in self?.barSliderEnded() },
+            sliderChanged: { [weak self] raw in self?.model.sliderChanged(raw) },
+            sliderEnded: { [weak self] in self?.model.sliderEnded() },
             showSetup: { [weak self] in self?.commander?.showSetup() },
             showDebug: { [weak self] in self?.commander?.showDebug() },
             toggleSeamLights: { [weak self] in
@@ -420,7 +420,7 @@ extension Stage {
     func barControlEnabled(_ control: BarControl) -> Bool {
         switch control {
         case .reset, .undo: return model.canUndo
-        case .slider:       return sliderModes.count > 1
+        case .slider:       return model.sliderModes.count > 1
         case .feed, .scope, .done: return true
         }
     }
@@ -455,47 +455,4 @@ extension Stage {
                               width: size.width, height: size.height)
     }
 
-    // MARK: - Slider preview/commit
-
-    /// Live-preview resolution as the slider moves (one display, or all by the same step
-    /// delta): snap the raw 0…1 position to a detent, preview, commit on release.
-    private func barSliderChanged(_ raw: Double) {
-        guard let id = selectedID, sliderModes.count > 1 else { return }
-        let n = sliderModes.count
-        let idx = max(0, min(n - 1, Int((Double(n - 1) * raw).rounded())))
-
-        if sliderDragStartIndex == nil {
-            sliderDragStartIndex = currentModeIndex(for: displays.first { $0.id == id }!, in: sliderModes)
-            model.onSliderDragChanged?(true)    // drive the ghost aids while held
-        }
-
-        switch model.sliderScope {
-        case .one:
-            previewMode(sliderModes[idx], on: id)
-        case .all:
-            let delta = idx - (sliderDragStartIndex ?? idx)
-            previewProportional(stepDelta: delta)
-        }
-    }
-
-    private func barSliderEnded() {
-        guard sliderDragStartIndex != nil else { return }
-        commitPendingResolution()
-        sliderDragStartIndex = nil
-        model.onSliderDragChanged?(false)
-    }
-
-    /// Preview every display shifted by `stepDelta` detents from its current mode
-    /// (clamped per display), for `.all` scope.
-    private func previewProportional(stepDelta: Int) {
-        model.pendingModes.removeAll()
-        for d in displays where !d.isMirrored {
-            let modes = sortedModes(for: d)
-            guard modes.count > 1, let base = currentModeIndex(for: d, in: modes) else { continue }
-            let target = max(0, min(modes.count - 1, base + stepDelta))
-            previewMode(modes[target], on: d.id, replacing: false)
-        }
-        repaintSchematic()
-        emitPreview()
-    }
 }

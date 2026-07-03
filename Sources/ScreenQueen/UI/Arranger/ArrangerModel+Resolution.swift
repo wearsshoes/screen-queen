@@ -2,10 +2,12 @@ import CoreGraphics
 import Foundation
 
 /// Resolution / display-mode *interaction*: the ⌘± single-display steps, the ⌘⇧± global
-/// proportional zoom, and previewing/committing pending modes. The pure ladder math (which
-/// modes to offer, ordering, default, PPI) lives in `ResolutionLadder`; the thin wrappers
-/// here supply the live system facts (catalog modes, notch, current mode, pending state).
-extension Stage {
+/// proportional zoom, the bar slider's detents, and previewing/committing pending modes.
+/// Model logic, not view logic — a run started from one screen's keyboard or slider
+/// continues correctly wherever focus lands. The pure ladder math (which modes to offer,
+/// ordering, default, PPI) lives in `ResolutionLadder`; the thin wrappers here supply the
+/// live system facts (catalog modes, notch, current mode, pending state).
+extension ArrangerModel {
 
     /// Step the selected display's resolution: preview via `pendingModes` (physical
     /// size is unchanged, so the plane and alignment are untouched), apply the mode
@@ -94,7 +96,7 @@ extension Stage {
             return
         }
 
-        model.pendingModes.removeAll()
+        pendingModes.removeAll()
         for (id, mode) in targets { previewMode(mode, on: id, replacing: false) }
         zoomPending = true
     }
@@ -103,13 +105,13 @@ extension Stage {
     /// around `ResolutionLadder`, supplying the catalog modes, notch flag, and current mode.
     func sortedModes(for d: DisplaySnapshot) -> [DisplayMode] {
         ResolutionLadder.sortedModes(all: ModeCatalog.menuModes(for: d.id), isBuiltin: d.isBuiltin,
-                                     notched: isNotched(d), extended: model.extendedBuiltinModes,
+                                     notched: isNotched(d), extended: extendedBuiltinModes,
                                      current: CGDisplayCopyDisplayMode(d.id))
     }
 
     /// Index of `d`'s current (or pending) mode within `sortedModes`, if present.
     func currentModeIndex(for d: DisplaySnapshot, in modes: [DisplayMode]) -> Int? {
-        let key = model.pendingMode(for: d.id)?.key ?? CGDisplayCopyDisplayMode(d.id).map(ModeKey.init)
+        let key = pendingMode(for: d.id)?.key ?? CGDisplayCopyDisplayMode(d.id).map(ModeKey.init)
         return key.flatMap { k in modes.firstIndex { $0.key == k } }
     }
 
@@ -117,7 +119,7 @@ extension Stage {
     /// directly). Live-system wrapper around `ResolutionLadder.modesList`.
     func modesList(for d: DisplaySnapshot) -> [DisplayMode] {
         ResolutionLadder.modesList(all: ModeCatalog.menuModes(for: d.id), isBuiltin: d.isBuiltin,
-                                   notched: isNotched(d), extended: model.extendedBuiltinModes,
+                                   notched: isNotched(d), extended: extendedBuiltinModes,
                                    current: CGDisplayCopyDisplayMode(d.id))
     }
 
@@ -126,10 +128,9 @@ extension Stage {
     /// single-display path (⌘± keys, `.one` slider); `false` adds to the set for the
     /// `.all` slider, which previews several displays at once.
     func previewMode(_ mode: DisplayMode, on id: CGDirectDisplayID, replacing: Bool = true) {
-        if replacing { model.pendingModes.removeAll() }
-        model.pendingModes[id] = mode
-        repaintSchematic()
-        emitPreview()
+        if replacing { pendingModes.removeAll() }
+        pendingModes[id] = mode
+        notify()
     }
 
     /// Apply the pending resolution(s): commit the point arrangement that reproduces the
@@ -137,11 +138,54 @@ extension Stage {
     /// every pending display in one batch so a multi-display zoom is a single undo.
     func commitPendingResolution() {
         zoomPending = false
-        let modes = model.pendingModes
+        let modes = pendingModes
         guard !modes.isEmpty else { return }
-        let origins = SchematicLayout.toPoints(rects: plane, displays: model.sizedDisplays())
-        model.pendingModes.removeAll()
+        let origins = SchematicLayout.toPoints(rects: plane, displays: sizedDisplays())
+        pendingModes.removeAll()
         commander?.setResolutions(modes.mapValues(\.cgMode), origins)
+    }
+
+    // MARK: - The bar slider (preview as it moves, commit on release)
+
+    /// Live-preview resolution as the slider moves (one display, or all by the same step
+    /// delta): snap the raw 0…1 position to a detent, preview, commit on release.
+    func sliderChanged(_ raw: Double) {
+        guard let id = selectedID, sliderModes.count > 1 else { return }
+        let n = sliderModes.count
+        let idx = max(0, min(n - 1, Int((Double(n - 1) * raw).rounded())))
+
+        if sliderDragStartIndex == nil {
+            sliderDragStartIndex = currentModeIndex(for: displays.first { $0.id == id }!, in: sliderModes)
+            onSliderDragChanged?(true)    // drive the ghost aids while held
+        }
+
+        switch sliderScope {
+        case .one:
+            previewMode(sliderModes[idx], on: id)
+        case .all:
+            let delta = idx - (sliderDragStartIndex ?? idx)
+            previewProportional(stepDelta: delta)
+        }
+    }
+
+    func sliderEnded() {
+        guard sliderDragStartIndex != nil else { return }
+        commitPendingResolution()
+        sliderDragStartIndex = nil
+        onSliderDragChanged?(false)
+    }
+
+    /// Preview every display shifted by `stepDelta` detents from its current mode
+    /// (clamped per display), for `.all` scope.
+    private func previewProportional(stepDelta: Int) {
+        pendingModes.removeAll()
+        for d in displays where !d.isMirrored {
+            let modes = sortedModes(for: d)
+            guard modes.count > 1, let base = currentModeIndex(for: d, in: modes) else { continue }
+            let target = max(0, min(modes.count - 1, base + stepDelta))
+            previewMode(modes[target], on: d.id, replacing: false)
+        }
+        notify()
     }
 
     /// Whether `d` is a notched built-in display — the live screen query lives in

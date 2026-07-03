@@ -30,12 +30,6 @@ final class Stage: NSView {
     /// stage's ghost tooltip.
     var hoveredBarControl: BarControl?
 
-    /// The selected display's sorted modes, cached while the slider drives them.
-    var sliderModes: [DisplayMode] = []
-
-    /// Mode index at slider-drag start, so `.all` scope applies the same step delta everywhere.
-    var sliderDragStartIndex: Int?
-
     /// Clearance above the screen bottom before the Dock inset is added.
     let baseBottomMargin: CGFloat = 40
 
@@ -280,15 +274,6 @@ final class Stage: NSView {
 
     // One alignment step per ⌘⇧ press; commits when ⌘⇧ is released.
     var alignPending = false
-
-    // Resolution preview flag (commits the pending mode when ⌘ is released).
-    var zoomPending = false
-
-    // Global (⌘⇧ ±) zoom run state: a continuous, *unclamped* scale on every display's
-    // starting PPI. Tracking the unclamped level lets a maxed-out display stay pinned
-    // while the level rises, then rejoin proportionally as it falls. Reset each run.
-    var globalZoomLevel: Double = 1
-    var globalZoomStartPPI: [CGDirectDisplayID: Double] = [:]
 
     /// The display this stage's window sits on. nil ⇒ center the main display.
     var centerID: CGDirectDisplayID?

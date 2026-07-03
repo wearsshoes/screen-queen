@@ -69,6 +69,22 @@ final class ArrangerModel {
     enum SliderScope { case one, all }
     var sliderScope: SliderScope = .one
 
+    // Resolution run state (see ArrangerModel+Resolution) — shared, so a run started on
+    // one screen survives focus following the cursor to another mid-run. Never rendered
+    // from, hence ignored by observation.
+
+    /// The selected display's sorted modes, cached while the slider drives them.
+    @ObservationIgnored var sliderModes: [DisplayMode] = []
+    /// Mode index at slider-drag start, so `.all` scope applies the same step delta everywhere.
+    @ObservationIgnored var sliderDragStartIndex: Int?
+    /// Resolution preview flag (commits the pending mode when ⌘ is released).
+    @ObservationIgnored var zoomPending = false
+    /// Global (⌘⇧ ±) zoom run state: a continuous, *unclamped* scale on every display's
+    /// starting PPI. Tracking the unclamped level lets a maxed-out display stay pinned
+    /// while the level rises, then rejoin proportionally as it falls. Reset each run.
+    @ObservationIgnored var globalZoomLevel: Double = 1
+    @ObservationIgnored var globalZoomStartPPI: [CGDirectDisplayID: Double] = [:]
+
     /// Active alignment anchors, for the tile arrow markers (V = vertical seam active).
     var activeV: AnchorMarker?
     var activeH: AnchorMarker?
