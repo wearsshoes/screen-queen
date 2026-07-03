@@ -23,12 +23,14 @@
   EventPlumbing key monitors + the schematic host's DragGesture (right-click
   forwards to `menu(for:)`). Display guts (`CGDirectDisplay`, CGEvent,
   ScreenCaptureKit, IOKit EDID) were never UI-framework code and are unchanged.
-* Remaining frontier: **CalibrationTape** — the last custom NSView draw+input
-  surface. Portable with the schematic's own pattern (Canvas + withCGContext
-  or native, DragGesture for tabs/ribbon, key monitors), but it's a full
-  campaign: grab-region hit tests, cursor rects, first-responder tip glow,
-  two overlapping tapes per window. CalibrationController keeps the window
-  shells either way.
+* ✅ Frontier closed: **CalibrationTape** ported (Tape model + Canvas via the
+  schematic's shim; TapeHost keeps hit-carving/cursor rects/key routing —
+  the tape art can go native GraphicsContext subject-by-subject if wanted).
+  Also gone since: the footer NSTextField, NSFont/NSString in the sidebar
+  (resolve().measure), Chime (AudioToolbox) for beeps, and the NSColor→Color
+  push. NSFont remains for off-Canvas text measurement (label-card sizing) +
+  DragFont's fallible lookup; NSColor remains where load-bearing: blended()
+  (Color.mix is macOS 15+) and the CALayer palette pipeline.
 * AppKit-import census (July 2026, after the framework diet): 16 files, all
   load-bearing — shells (main, AppDelegate ×2, ArrangerWindows,
   KeyableBorderlessWindow, CalibrationController, SeamLights' strip windows),

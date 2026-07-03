@@ -1,7 +1,6 @@
 import AppKit
 import CoreGraphics
 import IOKit
-import IOKit
 
 /// C callback for display hotplug / reconfiguration. Bounces back to the
 /// AppDelegate (carried via the `userInfo` context pointer) on the main queue.
