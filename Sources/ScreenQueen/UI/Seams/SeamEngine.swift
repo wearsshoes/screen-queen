@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// The machinery both seam depictions share — the tile-space bars (Arranger+TileSeams)
+/// The machinery both seam depictions share — the tile-space bars (Canvas+TileSeams)
 /// and the on-glass edge bars (Chrome/EdgeSeams): one seam's two depictions share
 /// color, glow rendering, and emitter registration.
 ///
 /// The edge set is computed once (`miniBarEdges`/`edgeBarEdges`, pure); the draw pass
 /// paints the behind-glows from it, and `updateSeamEffects()` (refresh path) feeds the
 /// same edges to the emitter/glow layers — the draw pass registers nothing.
-extension Arranger {
+extension Canvas {
 
     /// One seam edge: where a bar hugs a seam, which way it rounds/drifts, its color.
     struct SeamEdgeGlow {

@@ -103,7 +103,7 @@ final class MirrorColumnHost: NSHostingView<MirrorColumnView> {}
 
 // MARK: - Canvas plumbing
 
-extension Arranger {
+extension Canvas {
 
     /// Rebuild + place the column against the right edge (refresh path); hidden when
     /// it holds nothing.

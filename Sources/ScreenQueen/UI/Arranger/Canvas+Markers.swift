@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Alignment feedback: the eight per-tile anchor notches, the paired arrows for the
 /// active alignment (map and on-glass), and the ⌘⇧ align-destination ghosts.
-extension Arranger {
+extension Canvas {
 
     /// The eight perimeter anchor positions (corners + edge midpoints).
     enum AnchorPos: CaseIterable {

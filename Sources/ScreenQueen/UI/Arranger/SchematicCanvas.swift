@@ -1,19 +1,19 @@
 import SwiftUI
 
 /// The schematic, hosted in a SwiftUI `Canvas`. The render pass
-/// (`Arranger.drawSchematic(in:size:)`) draws natively into the GraphicsContext.
+/// (`Canvas.drawSchematic(in:size:)`) draws natively into the GraphicsContext.
 ///
 /// Mouse input lives here too (phase 2 of the input port): one DragGesture drives the
 /// canvas's began/moved/ended handlers — a plain click is a zero-distance drag, same as
 /// mouseDown/mouseUp. Gesture points pass straight through: the view is flipped, so
 /// gesture, Canvas, and view space are all the same y-down coordinates.
 struct SchematicCanvasView: View {
-    weak var canvas: Arranger?
+    weak var canvas: Canvas?
     /// Bumped by `repaintSchematic()` — the Canvas closure re-runs when inputs change.
     var generation: Int
 
     var body: some View {
-        Canvas { ctx, size in
+        SwiftUI.Canvas { ctx, size in
             _ = generation
             canvas?.drawSchematic(in: ctx, size: size)
         }

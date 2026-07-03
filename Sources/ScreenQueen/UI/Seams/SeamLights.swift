@@ -43,7 +43,7 @@ final class SeamLights {
         guard sig != signature else { return }   // layout unchanged → zero work
         signature = sig
         // Recreate rather than reposition: borderless overlays don't reliably land when
-        // `setFrame`-d across a reconfig (see ArrangerWindows.rebuild) — and these are
+        // `setFrame`-d across a reconfig (see Arranger.rebuild) — and these are
         // tiny windows on a rare, event-driven path.
         tearDown(clearSignature: false)
         windows = strips.map { makeStrip(frame: $0.frame, color: $0.color) }

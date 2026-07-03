@@ -14,7 +14,7 @@ enum ArrangerGeometry {
         let unionOrigin: CGPoint
 
         // The physical plane is y-down (top-left origin, from `CGDisplayBounds`), and so
-        // is the view (the Arranger NSView is flipped, like SwiftUI's Canvas and gesture
+        // is the view (the Canvas NSView is flipped, like SwiftUI's Canvas and gesture
         // space) — one shared orientation, no flip anywhere.
         func viewRect(_ r: CGRect) -> CGRect {
             CGRect(x: offset.x + (r.minX - unionOrigin.x) * scale,

@@ -3,7 +3,7 @@ import AppKit
 /// The per-tile right-click context menu: resolution submenu plus size-calibration
 /// entries, and the `@objc` actions they fire. Builds off the display under the cursor;
 /// the actions hand off to the `commander`.
-extension Arranger {
+extension Canvas {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let p = convert(event.locationInWindow, from: nil)

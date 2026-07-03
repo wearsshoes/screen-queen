@@ -59,9 +59,9 @@ final class GhostCursorLayer: CAShapeLayer {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-// MARK: - The ghost mouse (the `ghostPoint` projection lives in Arranger+Chrome)
+// MARK: - The ghost mouse (the `ghostPoint` projection lives in Canvas+Chrome)
 
-extension Arranger {
+extension Canvas {
 
     /// Move the ghost mouse — position only, the per-event path. Like a real cursor
     /// (and its own tooltip), the arrow never changes size.

@@ -4,7 +4,7 @@ import SwiftUI
 /// reference window shown on each side of a seam at its own physical size (the size
 /// jump a window makes crossing it). The on-glass half lives in Chrome/EdgeSeams.swift;
 /// the shared glow/emitter engine in Seams/SeamEngine.swift.
-extension Arranger {
+extension Canvas {
 
     /// The mini-map bars: two per seam (one each side), D-shaped, flush to the seam,
     /// rounding toward the owning display's center.

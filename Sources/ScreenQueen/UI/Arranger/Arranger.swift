@@ -1,397 +1,341 @@
 import AppKit
-import SwiftUI
 
-/// Interactive visualization + editor of the display arrangement.
-///
-/// The schematic is drawn at true physical sizes. While the user manipulates it, a
-/// **physical plane** (`plane`, a rect per display in inches) is the source of truth;
-/// only when the manipulation ends is the plane converted back to a macOS *point*
-/// arrangement (`SchematicLayout.toPoints`) and committed. The point↔physical map is
-/// applied at exactly those two boundaries, never per frame.
-///
-/// Keys: ⌘+arrows/WASD change selection; arrows/WASD nudge; ⌘⇧+arrows/WASD step
-/// alignment; ⌘ +/−/0 change resolution.
-final class Arranger: NSView {
+/// One full-screen borderless arranger window per display, all sharing a single
+/// `ArrangerState`. Each window's canvas centers on its own screen's tile; a mutation
+/// on any of them broadcasts through the state so all repaint.
+@MainActor
+final class Arranger {
 
-    /// One coordinate system everywhere: the plane is y-down (`CGDisplayBounds`), the
-    /// SwiftUI Canvas and gestures are y-down, so the view is too — no flip gates.
-    override var isFlipped: Bool { true }
+    let state = ArrangerState()
+    private var windows: [CGDirectDisplayID: NSWindow] = [:]
+    private var canvases: [Canvas] = []
 
-    /// Shared editing state — one instance across every per-screen canvas.
-    let state: ArrangerState
+    var isVisible: Bool { !windows.isEmpty }
 
-    /// The bottom button bar — a SwiftUI island (see ButtonBarView), hosted per
-    /// canvas and rebuilt from state in `updateBar`.
-    var barHost: NSHostingView<ButtonBarView>?
-    /// The chromeTileScale the bar last rendered at (set by renderChrome's pass).
-    var barScale: CGFloat = 1
-    /// The bar control under the real cursor, reported by the bar island's `.onHover`
-    /// (SwiftUI owns the hit-testing) — the active canvas's value drives every
-    /// canvas's ghost tooltip.
-    var hoveredBarControl: BarControl?
+    private let capture = ScreenCaptureManager()
 
-    /// The selected display's sorted modes, cached while the slider drives them.
-    var sliderModes: [DisplayMode] = []
-
-    /// Mode index at slider-drag start, so `.all` scope applies the same step delta everywhere.
-    var sliderDragStartIndex: Int?
-
-    /// Clearance above the screen bottom before the Dock inset is added.
-    let baseBottomMargin: CGFloat = 40
-
-    /// The cap rule: narrowest screen minus breathing room, floored so pathological
-    /// screens degrade to a slightly-overflowing bar instead of a constraint brawl.
-    static func barWidthCap(minScreenWidth: CGFloat) -> CGFloat {
-        max(320, minScreenWidth - 64)
-    }
-
-    /// The instruction line under the bar (see `FooterView`), scaled/positioned with it.
-    var footerHost: FooterHost?
-
-    /// Ghost-mapping state for `ghostPoint` (the ghost mouse + tooltip): this canvas's
-    /// minimap scale ÷ the active canvas's, and the active canvas's centre. Recomputed
-    /// in `renderChrome` on active-screen change.
-    var ghostArrow: GhostCursorLayer?
-    var ghostScale: CGFloat = 1
-    var ghostActiveCenter: CGPoint = .zero
-    /// True while this canvas shows the pink ghost chrome (cursor is on another screen).
-    var isGhost = false
-    /// The beacon: a pulsing pink map-pin at the cursor's location on this canvas's tiles.
-    var planeMarkerLayer: PlaneMouseMarkerLayer?
-
-    /// The frosted info card per display (see `LabelCard`) — a real backdrop-blur subview,
-    /// repositioned to the tile each frame; created on demand, hidden when untouched.
-    var labelCards: [CGDirectDisplayID: LabelCardHost] = [:]
-
-    /// The right-hand mirror/AirPlay column (see `MirrorColumn`); created on demand.
-    var mirrorColumn: MirrorColumnHost?
-
-    /// Fired at the end of `layout()`, once `bounds` is final, so the chrome re-renders
-    /// with the settled size.
-    var onLayout: (() -> Void)?
-
-    /// The fun tooltip bubble — shown on *every* canvas at the mirrored cursor position.
-    var tooltipBubble: TooltipHost?
-
-    /// The top-of-screen countdown banner — built on demand in CountdownBanner.swift.
-    /// The first SwiftUI island: an NSHostingView subview on the canvas.
-    var banner: NSHostingView<CountdownBannerView>?
-    /// The banner's top constraint, re-tuned in `layout()` to clear the menu bar.
-    var bannerTop: NSLayoutConstraint?
-
-    /// The schematic renderer — a SwiftUI Canvas island (see SchematicCanvas.swift),
-    /// below every effect layer/subview (added first, default z). Click-through; this
-    /// view keeps all input handling.
-    private(set) var schematicHost: SchematicCanvasHost!
-    private var schematicGeneration = 0
-
-    /// Repaint the schematic — the Canvas-era `needsDisplay = true`.
-    func repaintSchematic() {
-        schematicGeneration += 1
-        schematicHost.rootView = SchematicCanvasView(canvas: self, generation: schematicGeneration)
-    }
-
-    init(state: ArrangerState, frame: NSRect) {
-        self.state = state
-        super.init(frame: frame)
-        let host = SchematicCanvasHost(rootView: SchematicCanvasView(canvas: self, generation: 0))
-        host.frame = bounds
-        host.autoresizingMask = [.width, .height]
-        addSubview(host)   // first subview — everything else composites above
-        schematicHost = host
-        setupButtonBar()
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    /// GPU-backed seam particles (CAEmitterLayer) — no per-frame draw work or timer;
-    /// `draw(_:)` only repositions the emitters when the layout changes.
-    private(set) lazy var seamEmitters: SeamEmitters = {
-        wantsLayer = true
-        let host = CALayer()
-        host.frame = bounds
-        host.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        host.zPosition = 1               // particles above the schematic fill
-        layer?.addSublayer(host)
-        return SeamEmitters(host: host)
-    }()
-
-    /// The front seam glow — above the sparkle emitters (the wide soft glow is drawn
-    /// behind them, in `draw(_:)`).
-    private(set) lazy var seamGlow: SeamGlow = {
-        wantsLayer = true
-        let host = CALayer()
-        host.frame = bounds
-        host.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        host.zPosition = 2
-        layer?.addSublayer(host)
-        return SeamGlow(host: host)
-    }()
-
-    /// The floating "what she sees" panel (see SolvePanel), on its own layer above the
-    /// seam layers. Draggable; body click-through.
-    private(set) lazy var solvePanel: SolvePanelHost = {
-        let p = SolvePanelHost(rootView: SolvePanelView(content: SolvePanelContent()))
-        p.frame = NSRect(origin: .zero, size: NSSize(width: 240, height: 166))
-        p.wantsLayer = true
-        p.layer?.zPosition = 3
-        // A drag stores the panel's centre as an inch offset from the screen centre —
-        // its own state (moving a tile never moves it), scaling with the minimap.
-        p.onMoved = { [weak self] origin in
-            guard let self, let t = self.drawTransform(self.currentRects()), t.scale > 0 else { return }
-            let centre = CGPoint(x: origin.x + p.frame.width / 2, y: origin.y + p.frame.height / 2)
-            self.state.solvePanelCenterOffsetInches = CGPoint(
-                x: (centre.x - self.bounds.midX) / t.scale,
-                y: (centre.y - self.bounds.midY) / t.scale)
-            self.state.notify()
+    /// The shared event plumbing (set by the AppDelegate): mouse monitors + the
+    /// slider-drag timer live there; this class consumes cursor samples.
+    weak var events: EventPlumbing? {
+        didSet {
+            events?.onMouseSample = { [weak self] in self?.mouseDidMove() }
+            // Keyboard rides monitors, not the responder chain: route to the key
+            // window's canvas — the same window AppKit would have dispatched to.
+            // NSEvent is decoded HERE; the handlers speak KeyInput/ModifierKeys.
+            events?.onArrangerKeyDown = { [weak self] e in
+                self?.keyCanvas()?.handleKeyDown(Self.keyInput(e)) ?? false
+            }
+            events?.onArrangerKeyUp = { [weak self] e in
+                self?.keyCanvas()?.handleKeyUp(Self.keyInput(e)) ?? false
+            }
+            events?.onArrangerFlagsChanged = { [weak self] e in
+                let f = e.modifierFlags
+                self?.keyCanvas()?.handleFlagsChanged(
+                    ModifierKeys(cmd: f.contains(.command), shift: f.contains(.shift)))
+            }
         }
-        addSubview(p)
-        return p
-    }()
-
-    /// The granny panel's natural size in points, at `chromeTileScale == 1`.
-    static let panelNaturalSize = CGSize(width: 208, height: 144)
-
-    /// Place a *map-relative* chrome element: size = `naturalSize × chromeTileScale`
-    /// (rides the tiles), centre = `bounds.mid + offset × transform.scale`. The offset is
-    /// in **plane inches** (the schematic's physical unit, shown shrunk on the map) — NOT
-    /// real on-glass inches. Same map-relative spot on every canvas.
-    /// Places the granny viewer, the button bar, and the footer.
-    func chromeViewRect(naturalSize: CGSize, centreOffsetInches off: CGPoint) -> CGRect? {
-        guard let t = drawTransform(currentRects()), t.scale > 0 else { return nil }
-        let k = chromeTileScale(t)
-        return chromeViewRect(finalSize: CGSize(width: naturalSize.width * k,
-                                                height: naturalSize.height * k),
-                              centreOffsetInches: off, in: t)
     }
 
-    /// The `finalSize` variant, for chrome laid out at the tile scale (the button bar)
-    /// whose measured size is already final — only the centre needs mapping.
-    func chromeViewRect(finalSize size: CGSize, centreOffsetInches off: CGPoint,
-                        in t: Transform) -> CGRect {
-        ArrangerGeometry.chromeViewRect(finalSize: size, centreOffsetInches: off,
-                                        bounds: bounds, scale: t.scale)
+    /// The canvas that owns keyboard input right now: the key window's, and only when
+    /// the key window is one of ours — calibration panels and the Backstage Pass keep
+    /// their own keys even while the arranger is up behind them.
+    private func keyCanvas() -> Canvas? {
+        guard isVisible, let key = NSApp.keyWindow,
+              windows.values.contains(key) else { return nil }
+        return canvases.first { $0.window === key }
+    }
+    /// The display the cursor is on. The chrome is re-rendered only when this changes;
+    /// the ghost mouse moves every event.
+    private var activeDisplayID: CGDirectDisplayID?
+
+    /// At this many screens the live feed defaults off, and switching it on arms the
+    /// feed-guard countdown + watchdog.
+    static let bigCastThreshold = 4
+    /// Off-main insurance for the feed guard — see `armFeedGuardIfBigCast`.
+    private var feedWatchdog: DispatchWorkItem?
+
+    init() {
+        state.changed = { [weak self] in
+            self?.canvases.forEach { $0.refresh() }
+            self?.rerenderChrome()
+        }
+        state.onSliderDragChanged = { [weak self] dragging in self?.events?.setSliderDragging(dragging) }
+        state.capture = capture
+        capture.onFrame = { [weak self] in self?.canvases.forEach { $0.repaintSchematic() } }
+        state.onToggleFeed = { [weak self] on in self?.setFeed(on) }
+        state.onCountdownResolved = { [weak self] kind in
+            if kind == .feedGuard { self?.cancelFeedWatchdog() }
+        }
     }
 
-    /// The granny panel's rect — its centre-relative state through `chromeViewRect`.
-    func panelViewRect() -> CGRect? {
-        chromeViewRect(naturalSize: Self.panelNaturalSize, centreOffsetInches: state.solvePanelCenterOffsetInches)
+    /// Re-render every canvas's chrome, deferred a runloop turn so button-bar autolayout
+    /// has settled into real frames.
+    private func rerenderChrome() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let active = self.activeDisplayID.flatMap { id in self.canvases.first { $0.centerID == id } }
+            for canvas in self.canvases {
+                canvas.renderChrome(active: canvas === active ? nil : active)
+            }
+        }
     }
 
-    /// The chrome pass: re-render bar/footer at this canvas's own tile scale, in normal
-    /// or ghost dress. `active` is the canvas under the cursor (nil ⇒ this one is it).
-    func renderChrome(active: Arranger?) {
-        guard VirtualMouse.ghostChromeEnabled else { return }
-        let inactive = active != nil && active !== self
-        isGhost = inactive
-        let myT = drawTransform(currentRects())
-        if inactive, let myT, myT.scale > 0,
-           let actT = active!.drawTransform(active!.currentRects()), actT.scale > 0 {
-            // Ratio of the two minimap scales: a cursor beside a tile on the active
-            // screen lands beside the matching tile here.
-            ghostScale = myT.scale / actT.scale
-            ghostActiveCenter = CGPoint(x: active!.bounds.midX, y: active!.bounds.midY)
+    /// Turn the live per-display feed on or off.
+    private func setFeed(_ on: Bool) {
+        state.feedEnabled = on
+        if on {
+            capture.start()
+            armFeedGuardIfBigCast()
         } else {
-            ghostScale = 1
-            ghostActiveCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+            capture.stop()
+            // No-op unless a guard was running (its own expiry lands here too).
+            state.resolveCountdown(.feedGuard, keep: true)
         }
-        if let myT, myT.scale > 0 {
-            let k = chromeTileScale(myT)
-            updateBar(scale: k)
-            layoutBar(in: myT)
-            layoutFooter(scale: k)
+        canvases.forEach { $0.refresh() }
+    }
+
+    /// Going live on `bigCastThreshold`+ screens arms an auto-off unless the user says
+    /// keep. Belt: if the capture load wedges the main thread that Timer never fires, so
+    /// a detached watchdog stops the streams directly (`SCStream.stopCapture` is safe
+    /// off-main) a grace period later.
+    private func armFeedGuardIfBigCast() {
+        guard NSScreen.screens.count >= Self.bigCastThreshold else { return }
+        let seconds = 12
+        state.armCountdown(.feedGuard, seconds: seconds) { [weak self] in self?.setFeed(false) }
+
+        feedWatchdog?.cancel()
+        let capture = self.capture
+        let item = DispatchWorkItem { [weak self] in
+            for stream in capture.watchdogStreams { stream.stopCapture { _ in } }
+            DispatchQueue.main.async { self?.setFeed(false) }
+        }
+        feedWatchdog = item
+        DispatchQueue.global(qos: .userInitiated)
+            .asyncAfter(deadline: .now() + .seconds(seconds + 5), execute: item)
+    }
+
+    private func cancelFeedWatchdog() {
+        feedWatchdog?.cancel()
+        feedWatchdog = nil
+    }
+
+    /// Show an arranger on every screen and refresh the shared plane from the OS.
+    func show(displays: [DisplaySnapshot]) {
+        state.update(with: displays)
+        rebuild()
+        canvases.forEach { $0.refresh() }
+        NSApp.activate(ignoringOtherApps: true)
+        // Activating alone doesn't make a borderless overlay key; make the main
+        // display's window key so shortcuts work immediately on hotkey-open.
+        makeMainWindowKey()
+        // Default the feed on unless the machine is already busy or the cast is big.
+        let busy = (SystemLoad.systemCPUUsage() ?? 0) > 0.5
+        let bigCast = NSScreen.screens.count >= Self.bigCastThreshold
+        setFeed(!busy && !bigCast)
+        if VirtualMouse.ghostMouseEnabled { events?.startMouseMonitors() }
+        events?.startKeyMonitors()
+        activeDisplayID = nil
+        mouseDidMove()   // seed the active screen + render the ghost
+        if state.feedEnabled { scheduleFeedLoadCheck() }
+    }
+
+    /// One follow-up CPU check ~½s after going live (the reading at open predates the
+    /// streams). Sampled off-main (the sample blocks ~120ms). Deliberately a *single*
+    /// check — no continuous repolling.
+    private func scheduleFeedLoadCheck() {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            let pegged = (SystemLoad.systemCPUUsage() ?? 0) > 0.85
+            guard pegged else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isVisible, self.state.feedEnabled else { return }
+                self.setFeed(false)
+            }
+        }
+    }
+
+    /// Make the arranger window on the main display key (falling back to any window).
+    private func makeMainWindowKey() {
+        let mainID = state.displays.first(where: { $0.isMain })?.id
+        let window = mainID.flatMap { windows[$0] } ?? windows.values.first
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Key the canvas on `screen` (focus-follows-cursor). No-op when not visible or a
+    /// window on that screen is already key (don't-steal semantics).
+    func focusWindow(on screen: NSScreen) {
+        guard isVisible else { return }
+        let window = windows.values.first { $0.screen?.frame == screen.frame }
+        guard let window, !window.isKeyWindow else { return }
+        window.makeKey()
+    }
+
+    func hide() {
+        capture.stop()
+        cancelFeedWatchdog()
+        events?.stopMouseMonitors()
+        events?.stopKeyMonitors()
+        activeDisplayID = nil
+        windows.values.forEach { $0.orderOut(nil) }
+        windows.removeAll()
+        canvases.removeAll()
+    }
+
+    // MARK: - Ghost mouse feed (see VirtualMouse.swift)
+
+    /// Quartz/CG global point (y-down, top-left of primary) → Cocoa global (y-up),
+    /// flipped about the primary display's height.
+    private func cocoaGlobal(fromCG p: CGPoint) -> CGPoint {
+        let primaryHeight = NSScreen.screens.first { $0.frame.origin == .zero }?.frame.height
+            ?? NSScreen.main?.frame.height ?? p.y
+        return CGPoint(x: p.x, y: primaryHeight - p.y)
+    }
+
+    /// One cursor sample: reproject the chrome only when the active screen changed;
+    /// always move the ghost mouse / beacon / tooltip.
+    private func mouseDidMove() {
+        guard isVisible else { return }
+        let cursor = CGEvent(source: nil)?.location ?? .zero
+        let activeID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
+            ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
+        let active = activeID.flatMap { id in canvases.first { $0.centerID == id } }
+        // The cursor in the active canvas's view coords, derived from the same CGEvent
+        // sample as `cursor` so the ghost and beacon can't disagree about where it is.
+        var cursorActivePoint: CGPoint?
+        if let activeID, let window = windows[activeID] {
+            let up = cocoaGlobal(fromCG: cursor)
+            // The canvas is flipped (y-down from the window top).
+            cursorActivePoint = CGPoint(x: up.x - window.frame.minX, y: window.frame.maxY - up.y)
+        }
+        if activeID != activeDisplayID {
+            activeDisplayID = activeID
+            // The selected tile follows the cursor's screen (crossing screens overrides a
+            // manual pick; a click still selects within a screen).
+            if let activeID, state.plane[activeID] != nil, state.selectedID != activeID {
+                state.selectedID = activeID
+                state.activeV = nil; state.activeH = nil   // drop stale alignment anchors
+                state.notify()
+            }
+            for canvas in canvases { canvas.renderChrome(active: canvas === active ? nil : active) }
+        }
+        // The hovered control's tooltip trails the (ghost) cursor on every canvas.
+        let tip = active.flatMap { $0.hoveredTooltip() }
+        for canvas in canvases {
+            canvas.updateGhostArrow(cursorActivePoint: cursorActivePoint, isActive: canvas === active)
+            canvas.updatePlaneMarker(cursor: cursor, hostID: activeID)
+            canvas.updateTooltip(text: tip, cursorActivePoint: cursorActivePoint)
+        }
+    }
+
+    /// Re-interpret the OS layout into the shared plane and repaint (external change).
+    /// `force` re-reads the plane even when it already matches (e.g. after Reset).
+    func refresh(displays: [DisplaySnapshot], force: Bool = false) {
+        guard isVisible else { return }
+        state.update(with: displays, force: force)
+        rebuild()   // screens may have changed
+        canvases.forEach { $0.refresh() }
+        rerenderChrome()
+    }
+
+    /// Refresh the unified chrome metrics (see `ArrangerState`).
+    private func updateChromeMetrics() {
+        var dock: CGFloat = 0, menu: CGFloat = 0
+        var minW = CGFloat(100_000), minH = CGFloat(100_000)
+        for s in NSScreen.screens {
+            dock = max(dock, s.visibleFrame.minY - s.frame.minY)
+            menu = max(menu, s.frame.maxY - s.visibleFrame.maxY)
+            minW = min(minW, s.frame.width)
+            minH = min(minH, s.frame.height)
+        }
+        state.uniformDockInset = dock
+        state.uniformMenuBarInset = menu
+        state.minScreenExtent = CGSize(width: minW, height: minH)
+    }
+
+    private func rebuild() {
+        updateChromeMetrics()
+        let screens = screenMap()
+        var live: Set<CGDirectDisplayID> = []
+
+        for (id, screen) in screens {
+            live.insert(id)
+            // A borderless overlay doesn't reliably land when `setFrame`-d across a
+            // reconfig — recreate any window whose screen frame changed.
+            if let existing = windows[id], existing.frame != screen.frame {
+                existing.orderOut(nil)
+                canvases.removeAll { $0.centerID == id }
+                windows[id] = nil
+            }
+            let window = windows[id] ?? makeWindow(centerID: id, frame: screen.frame)
+            windows[id] = window
+            window.orderFrontRegardless()
+        }
+        for (id, window) in windows where !live.contains(id) {
+            window.orderOut(nil)
+            windows[id] = nil
+            canvases.removeAll { $0.centerID == id }
+        }
+    }
+
+    private func makeWindow(centerID: CGDirectDisplayID, frame: NSRect) -> NSWindow {
+        let window = KeyableBorderlessWindow(contentRect: frame, styleMask: .borderless,
+                                             backing: .buffered, defer: false)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        // Just below the system menu bar, so the menu bar and our status icon stay
+        // clickable on top. (Calibration/alerts sit above via the shielding level.)
+        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) - 1)
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        window.isReleasedWhenClosed = false
+
+        // Backdrop: native Liquid Glass on macOS 26, behind-window blur below. The
+        // canvas (with its own dim wash) sits on top.
+        let fullFrame = CGRect(origin: .zero, size: frame.size)
+        let canvas = Canvas(state: state, frame: fullFrame)
+        canvas.centerID = centerID
+        canvas.autoresizingMask = [.width, .height]
+        canvas.onLayout = { [weak self] in self?.rerenderChrome() }
+
+        if #available(macOS 26.0, *) {
+            // `NSGlassEffectView` draws a light rim at its edges, which reads as a white
+            // outline around the whole screen — oversize the glass past the window bounds
+            // so the rim falls outside the visible area.
+            let bleed: CGFloat = 24
+            let host = NSView(frame: fullFrame)
+            host.autoresizingMask = [.width, .height]
+            let glass = NSGlassEffectView(frame: fullFrame.insetBy(dx: -bleed, dy: -bleed))
+            glass.style = .clear
+            glass.cornerRadius = 0
+            glass.autoresizingMask = [.width, .height]
+            host.addSubview(glass)
+            host.addSubview(canvas)            // canvas on top, at the true full frame
+            window.contentView = host
         } else {
-            updateBar()   // no transform yet — still reflect the fresh ghost state
+            let blur = NSVisualEffectView(frame: fullFrame)
+            blur.material = .hudWindow
+            blur.blendingMode = .behindWindow
+            blur.state = .active
+            blur.autoresizingMask = [.width, .height]
+            blur.addSubview(canvas)
+            window.contentView = blur
         }
-        solvePanel.setGhost(inactive)
+        window.makeFirstResponder(canvas)
+        canvases.append(canvas)
+        return window
     }
 
-    /// Map a point from the active canvas's view coords onto this canvas (the ghost
-    /// mapping the mouse and tooltip ride). Identity when active.
-    func ghostPoint(_ p: CGPoint) -> CGPoint {
-        ArrangerGeometry.ghostPoint(p, ghostScale: ghostScale, activeCenter: ghostActiveCenter,
-                                    destCenter: CGPoint(x: bounds.midX, y: bounds.midY))
+    fileprivate static func keyInput(_ e: NSEvent) -> KeyInput {
+        let f = e.modifierFlags
+        return KeyInput(code: e.keyCode, chars: e.charactersIgnoringModifiers,
+                        cmd: f.contains(.command), shift: f.contains(.shift),
+                        isRepeat: e.isARepeat)
     }
 
-    /// Chrome size in proportion to this canvas's minimap tiles.
-    func chromeTileScale(_ t: Transform) -> CGFloat {
-        t.scale / ChromeMetrics.referenceMinimapScale
-    }
-
-    /// The current tile scale; 1 if the transform isn't ready. Inside a render pass
-    /// prefer `chromeTileScale(_:)` with the pass's one transform.
-    var chromeTileScale: CGFloat {
-        guard let t = drawTransform(currentRects()), t.scale > 0 else { return 1 }
-        return chromeTileScale(t)
-    }
-
-    /// Round to the nearest whole *device* pixel — a fractional origin smears content
-    /// across pixel boundaries.
-    func pixelSnap(_ v: CGFloat) -> CGFloat {
-        ArrangerGeometry.pixelSnap(v, backingScale: window?.backingScaleFactor ?? 2)
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if window == nil { seamEmitters.clear(); seamGlow.clear() }
-    }
-
-    // Forwarding accessors so this view's methods read/write the shared state.
-    var displays: [DisplaySnapshot] { get { state.displays } set { state.displays = newValue } }
-    var selectedID: CGDirectDisplayID? { get { state.selectedID } set { state.selectedID = newValue } }
-    var plane: [CGDirectDisplayID: CGRect] { state.plane }
-    var pendingSize: [CGDirectDisplayID: CGSize] { get { state.pendingSize } set { state.pendingSize = newValue } }
-    var pendingMode: (id: CGDirectDisplayID, mode: CGDisplayMode)? { get { state.pendingMode } set { state.pendingMode = newValue } }
-    var activeV: (selfA: VAnchor, otherA: VAnchor, otherID: CGDirectDisplayID)? { get { state.activeV } set { state.activeV = newValue } }
-    var activeH: (selfA: HAnchor, otherA: HAnchor, otherID: CGDirectDisplayID)? { get { state.activeH } set { state.activeH = newValue } }
-    var extendedBuiltinModes: Bool { get { state.extendedBuiltinModes } set { state.extendedBuiltinModes = newValue } }
-
-    /// The app-level command executor (see `DisplayCommanding`).
-    var commander: (any DisplayCommanding)? { state.commander }
-
-    var airplaySession: AirPlaySession? { state.airplaySession }
-
-    // Mouse drag state (local to the canvas handling the gesture).
-    var draggedID: CGDirectDisplayID?
-    var dragStartMouse: CGPoint = .zero
-    var dragStartPhys: CGPoint = .zero    // dragged tile's physical origin at grab
-    var dragTransform: Transform?         // frozen during a drag (stable cursor mapping)
-    var dragMoved = false
-
-    /// This canvas's transform, frozen while a tile drag is live on ANY canvas
-    /// (`state.draggingDisplayID`), so no screen's map recenters mid-drag.
-    var sharedDragTransform: Transform?
-
-    /// The transform to render with — frozen for the duration of a tile drag anywhere,
-    /// live otherwise. All drawing and mouse-overlay placement goes through this.
-    func drawTransform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
-        guard state.draggingDisplayID != nil else {
-            sharedDragTransform = nil
-            return transform(rects)
+    private func screenMap() -> [CGDirectDisplayID: NSScreen] {
+        var result: [CGDirectDisplayID: NSScreen] = [:]
+        for screen in NSScreen.screens {
+            if let id = screen.displayID { result[id] = screen }
         }
-        if sharedDragTransform == nil { sharedDragTransform = dragTransform ?? transform(rects) }
-        return sharedDragTransform
+        return result
     }
-
-    // Dragging the main display's menu-bar strip to move main to another tile.
-    var draggingMenuBar: CGPoint?         // current cursor point while dragging
-
-    // True while Option-dragging a tile: dropping onto another tile mirrors onto it.
-    var optionMirrorDrag = false
-    var mirrorDragPoint: CGPoint?         // cursor while Option-mirror dragging (drop target)
-
-    // Keyboard continuous-move (nudge) state.
-    var heldDirections: Set<MoveDirection> = []
-    var moveTimer: Timer?
-    var lastTick: CFTimeInterval = 0
-    var nudgeAccum: CGPoint = .zero        // physical accumulator, like a cursor
-
-    // One alignment step per ⌘⇧ press; commits when ⌘⇧ is released.
-    var alignPending = false
-
-    // Resolution preview flag (commits the pending mode when ⌘ is released).
-    var zoomPending = false
-
-    // Global (⌘⇧ ±) zoom run state: a continuous, *unclamped* scale on every display's
-    // starting PPI. Tracking the unclamped level lets a maxed-out display stay pinned
-    // while the level rises, then rejoin proportionally as it falls. Reset each run.
-    var globalZoomLevel: Double = 1
-    var globalZoomStartPPI: [CGDirectDisplayID: Double] = [:]
-
-    var showAlignGhosts: Bool { get { state.showAlignGhosts } set { state.showAlignGhosts = newValue } }
-
-    /// The display this canvas's window sits on. nil ⇒ center the main display.
-    var centerID: CGDirectDisplayID?
-
-    let outerPadding: CGFloat = 32
-    let tileCornerRadius: CGFloat = 8
-
-    /// Width of the right-hand column overlay (0 when it holds nothing).
-    var mirrorColumnWidth: CGFloat {
-        mirroredDisplays.isEmpty && airplaySession == nil ? 0 : 360
-    }
-
-    /// Cached native pixel aspect per display (fixed per panel; stale entries harmless).
-    var nativeAspectCache: [CGDirectDisplayID: Double?] = [:]
-
-    /// Cached desktop wallpaper per display, keyed by (id, image URL) so changes reload.
-    var wallpaperCache: [CGDirectDisplayID: (url: URL, image: NSImage)?] = [:]
-
-    override var acceptsFirstResponder: Bool { true }
-    // Handle clicks even when this window isn't key (no activate-first click).
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    /// True while the schematic host's DragGesture is live (its onChanged distinguishes
-    /// began from moved with this).
-    var mouseGestureActive = false
-
-    /// Shift state fed by handleFlagsChanged — the nudge timer's fast-rate flag
-    /// (kept here so Arranger+Input never reads NSEvent).
-    var shiftHeld = false
-
-    /// Commit any dangling keyboard manipulation when focus moves away.
-    override func resignFirstResponder() -> Bool {
-        if moveTimer != nil { stopMoveTimer(); commitPlane() }
-        if alignPending { alignPending = false; commitPlane() }
-        return super.resignFirstResponder()
-    }
-
-    /// Re-place the overlays once bounds settle (the layout() counterpart of refresh()).
-    override func layout() {
-        super.layout()
-        bannerTop?.constant = state.uniformMenuBarInset + 12
-        layoutLabelCards()   // overlays track a bounds change (draw never places them)
-        layoutMirrorColumn()
-        updateSeamEffects()
-        onLayout?()          // re-render chrome now that bounds/frames are settled
-    }
-
-    /// Called by the state after a mutation: place the overlay subviews and feed the
-    /// effect layers (`draw(_:)` never mutates the view tree or layers), then repaint.
-    func refresh() {
-        updateBar(); syncBanner()
-        if let rect = panelViewRect(), solvePanel.frame != rect {
-            solvePanel.frame = rect
-        }
-        updateSolvePanel()
-        layoutLabelCards()
-        layoutMirrorColumn()
-        updateSeamEffects()
-        repaintSchematic()
-    }
-
-    func pointSize(_ d: DisplaySnapshot) -> CGSize { state.pointSize(d) }
-    func sizedDisplays() -> [DisplaySnapshot] { state.sizedDisplays() }
-    func currentRects() -> [CGDirectDisplayID: CGRect] { plane }
-    func currentBars() -> [SeamBar] { state.currentBars() }
-    func seamColors(_ bars: [SeamBar]) -> [DisplayGraph.SeamKey: NSColor] { state.seamColors(bars) }
-    func predictedDockDisplay() -> CGDirectDisplayID? { state.predictedDockDisplay() }
-    var mirroredDisplays: [DisplaySnapshot] { state.mirroredDisplays }
-    var planeDisplays: [DisplaySnapshot] { state.planeDisplays }
-
-    /// Commit the plane, then broadcast so every canvas redraws.
-    func commitPlane() { state.commit() }
-
-    /// Broadcast a plane change so every per-screen canvas redraws.
-    func emitPreview() { state.notify() }
-
-    // MARK: - View transform (fit the physical plane into the window)
-
-    /// The plane↔view transform and the fit that chooses it live in `ArrangerGeometry`
-    /// (framework-free, tested); this canvas supplies its own bounds/padding.
-    typealias Transform = ArrangerGeometry.Transform
-
-    func transform(_ rects: [CGDirectDisplayID: CGRect]) -> Transform? {
-        ArrangerGeometry.fit(rects, in: bounds, padding: outerPadding)
-    }
-}
-
-/// Chrome sizing constants and shared tints.
-enum ChromeMetrics {
-    /// The minimap scale at which chrome renders at natural size — the one knob for
-    /// its absolute size (`chromeTileScale` = transform scale over this).
-    static let referenceMinimapScale: CGFloat = 40
-
-    /// The ghost tint as SwiftUI currency (the layer world takes its CGColor from
-    /// `SeamPalette.colors[0]` directly).
-    static var ghostPink: Color { Color(nsColor: SeamPalette.colors[0]) }
 }

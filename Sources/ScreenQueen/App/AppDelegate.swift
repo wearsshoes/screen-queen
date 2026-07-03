@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
     // Internal (not private): the command executor lives in AppDelegate+Commands.swift.
-    let arranger = ArrangerWindows()
+    let arranger = Arranger()
     let calibrationController = CalibrationController()
     /// The one owner of event monitors and cursor polling (hotkey, ghost-mouse feed,
     /// focus-follows-cursor).

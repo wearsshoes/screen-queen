@@ -29,7 +29,7 @@
   Also gone since: the footer NSTextField, NSFont/NSString in the sidebar
   (resolve().measure), Chime (AudioToolbox) for beeps, the NSColor→Color
   push, the y-up view space (everything is y-down now — Transform is a pure
-  scale+translate, the Arranger view is flipped, all yDown/flip gates
+  scale+translate, the Canvas view is flipped, all yDown/flip gates
   deleted), the DragFont bridge (ScriptFont registers via CoreText,
   `Font.script` wears it), and label-card NSString measurement (the card is
   a flex container; the canvas centers its fittingSize on the tile). NSFont
@@ -38,11 +38,11 @@
   fallible chain); NSColor remains where load-bearing: blended() (Color.mix
   is macOS 15+) and the CALayer palette pipeline.
 * AppKit-import census (July 2026, after the framework diet): 16 files, all
-  load-bearing — shells (main, AppDelegate ×2, ArrangerWindows,
+  load-bearing — shells (main, AppDelegate ×2, Arranger (the window fleet),
   KeyableBorderlessWindow, CalibrationController, SeamLights' strip windows),
   events (EventPlumbing; +Input now speaks decoded KeyInput/ModifierKeys),
   bridges (DisplayManager, NSScreen+DisplayID, DragFont, SeamPalette — the
-  one NSColor home; Chime covers beeps via AudioToolbox), the Arranger NSView
+  one NSColor home; Chime covers beeps via AudioToolbox), the Canvas NSView
   + its NSMenu, VirtualMouse (only for the footer NSTextField — would clear
   if the footer ever joins the bar's SwiftUI view), and the tape frontier.
   Layer files are QuartzCore-only (CGColor at the updateSeamEffects boundary);
@@ -59,7 +59,7 @@
     @Observable adoption is unblocked whenever an island wants to observe
     state directly.
 * Deliberate AppKit keepers (don't relitigate; each was probed):
-  - **Window shell** (ArrangerWindows): one borderless NSWindow per display,
+  - **Window shell** (Arranger): one borderless NSWindow per display,
     exact frames, `mainMenuWindow − 1`, canJoinAllSpaces/fullScreenAuxiliary.
     SwiftUI scenes can't express any of that; below NSWindow is private
     SkyLight/CGS (notarization risk).

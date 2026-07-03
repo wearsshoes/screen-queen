@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// The editing state shared by every per-screen `Arranger`: the physical plane plus
+/// The editing state shared by every per-screen `Canvas`: the physical plane plus
 /// selection/preview state and app callbacks. A mutation on any canvas writes here and
 /// calls `changed()` so all canvases redraw from the same source of truth.
 @MainActor
@@ -11,7 +11,7 @@ final class ArrangerState {
     /// one reference instead of a closure per command.
     weak var commander: (any DisplayCommanding)?
 
-    /// Resolution-slider drag began/ended — ArrangerWindows drives the ghost aids from a
+    /// Resolution-slider drag began/ended — Arranger drives the ghost aids from a
     /// timer while held (the modal tracking loop starves the mouse monitors).
     var onSliderDragChanged: ((Bool) -> Void)?
 
@@ -95,7 +95,7 @@ final class ArrangerState {
 
     /// Unified chrome metrics: the largest Dock / menu-bar claim anywhere and the
     /// smallest screen extents, identical on every canvas so chrome placed within them
-    /// is in-bounds everywhere. Recomputed by ArrangerWindows on every rebuild.
+    /// is in-bounds everywhere. Recomputed by Arranger on every rebuild.
     var uniformDockInset: CGFloat = 0
     var uniformMenuBarInset: CGFloat = 0
     var minScreenExtent = CGSize(width: 100_000, height: 100_000)

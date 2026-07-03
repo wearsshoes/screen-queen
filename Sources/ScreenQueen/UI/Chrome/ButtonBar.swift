@@ -308,7 +308,7 @@ private extension View {
 /// The bottom button bar's canvas-side wiring: the NSHostingView island, model
 /// building, slider preview/commit, and frame placement. The bar's look lives in
 /// ButtonBarView (SwiftUI); everything here is state plumbing.
-extension Arranger {
+extension Canvas {
 
     func setupButtonBar() {
         let host = NSHostingView(rootView: makeBarView())

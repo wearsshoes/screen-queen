@@ -44,7 +44,7 @@ final class EventPlumbing {
         }
     }
 
-    // MARK: - Arranger keyboard (monitors, not the responder chain)
+    // MARK: - Canvas keyboard (monitors, not the responder chain)
 
     /// The arranger's keyboard, entered through local monitors while it's up — no
     /// first-responder dependence, and one place decides routing (the key canvas).

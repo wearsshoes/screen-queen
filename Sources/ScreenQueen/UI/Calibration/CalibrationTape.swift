@@ -569,7 +569,7 @@ struct TapeCanvasView: View {
     var generation: Int
 
     var body: some View {
-        Canvas { ctx, size in
+        SwiftUI.Canvas { ctx, size in
             _ = generation
             guard let tape else { return }
             ctx.withCGContext { cg in

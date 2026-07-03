@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// A key event, decoded at the routing boundary (ArrangerWindows) so this file never
+/// A key event, decoded at the routing boundary (Arranger) so this file never
 /// touches NSEvent — the handlers speak plain values.
 struct KeyInput {
     var code: UInt16
@@ -19,9 +19,9 @@ struct ModifierKeys {
 
 /// Interaction: mouse dragging and keyboard nudge/align/selection. All mutate the shared
 /// `state` and broadcast a redraw. (Resolution/mode handling lives in
-/// Arranger+Resolution; the context menu in Arranger+Menu.) Framework-free: events
+/// Canvas+Resolution; the context menu in Canvas+Menu.) Framework-free: events
 /// arrive pre-decoded (KeyInput/ModifierKeys, gesture points, the option flag).
-extension Arranger {
+extension Canvas {
 
     // MARK: - Mouse / dragging
 
@@ -121,7 +121,7 @@ extension Arranger {
     }
 
     // MARK: - Keyboard (entered via EventPlumbing's monitors, not the responder chain;
-    // ArrangerWindows routes events to the key window's canvas)
+    // Arranger routes events to the key window's canvas)
 
     /// Returns true to consume; false lets dispatch continue (the bar's
     /// .keyboardShortcut equivalents, text fields elsewhere).

@@ -20,7 +20,7 @@ struct SolvePanelView: View {
     private static let titleBarHeight: CGFloat = 16
 
     var body: some View {
-        Canvas { ctx, size in
+        SwiftUI.Canvas { ctx, size in
             let bounds = CGRect(origin: .zero, size: size)
             let ink: Color = content.ghost ? ChromeMetrics.ghostPink : .white
             let plateColor: Color = content.ghost

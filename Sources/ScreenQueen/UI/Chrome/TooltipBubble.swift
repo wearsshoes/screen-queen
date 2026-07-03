@@ -31,9 +31,9 @@ final class TooltipHost: NSHostingView<TooltipBubbleView> {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-// MARK: - Canvas plumbing (rides the `ghostPoint` mapping — see Arranger+Chrome)
+// MARK: - Canvas plumbing (rides the `ghostPoint` mapping — see Canvas+Chrome)
 
-extension Arranger {
+extension Canvas {
 
     /// The tooltip text for the hovered bar control (`hoveredBarControl`, reported by
     /// the bar island's `.onHover`), or nil. Read on the active canvas — the one under

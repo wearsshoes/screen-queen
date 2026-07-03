@@ -47,7 +47,7 @@ struct CountdownBannerView: View {
 
 // MARK: - The canvas's banner hosting
 
-extension Arranger {
+extension Canvas {
 
     /// Reflect `state.countdowns` in this canvas's banner. Built lazily on the first
     /// countdown (most sessions never see one); called from `refresh()`.

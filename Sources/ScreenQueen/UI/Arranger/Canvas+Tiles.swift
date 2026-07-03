@@ -11,7 +11,7 @@ extension NSImage {
 /// One tile: fill, wallpaper/live feed, letterbox hatching, menu-bar strip, Dock
 /// indicator, the selected halo, and the info-card feed. Native GraphicsContext,
 /// one y-down space throughout.
-extension Arranger {
+extension Canvas {
 
     func drawTile(_ ctx: GraphicsContext, for display: DisplaySnapshot, in rect: NSRect) {
         // Tiles stay neutral — color lives on the seams; selection gets the accent wash.

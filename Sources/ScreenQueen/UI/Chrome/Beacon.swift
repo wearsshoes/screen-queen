@@ -58,7 +58,7 @@ final class PlaneMouseMarkerLayer: CALayer {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-extension Arranger {
+extension Canvas {
 
     /// Move the beacon to the cursor's location on this canvas's schematic. Shows on
     /// every canvas; hidden if the host display has no tile.

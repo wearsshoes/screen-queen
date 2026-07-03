@@ -56,7 +56,7 @@ enum Copy {
     /// Close button. On first run this also raises the curtain (opens the arranger).
     static let setupDone = "Places!"
 
-    // MARK: - Arranger overlay chrome
+    // MARK: - Canvas overlay chrome
 
     /// One-line help footer centered at the bottom of every arranger screen.
     /// Keep the keyboard hints legible — flavor goes between them, not instead of them.
