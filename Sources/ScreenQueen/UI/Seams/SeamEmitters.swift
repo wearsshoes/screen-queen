@@ -1,4 +1,3 @@
-import AppKit
 import QuartzCore
 
 /// GPU-backed seam particles via `CAEmitterLayer` — colored dots born along each seam
@@ -66,7 +65,7 @@ final class SeamEmitters {
     /// is the drift direction; `sizeScale` enlarges dots + speed (edge bars vs
     /// mini-map bars); `travelBoost` stretches *only* how far sparkles drift — via
     /// longer lifetimes at the same speed — leaving size/spacing/density alone.
-    func add(edgeOf rect: NSRect, direction: Direction, color: NSColor, id: String,
+    func add(edgeOf rect: CGRect, direction: Direction, color: CGColor, id: String,
              sizeScale: CGFloat, travelBoost: CGFloat = 1) {
         // The seam runs along one axis; particles fire perpendicular inward via a global
         // `emissionLongitude` (y-up frame). `vertical` = seam runs along y.
@@ -109,8 +108,12 @@ final class SeamEmitters {
 
         // Each sparkle takes a random color between the full seam color and white,
         // plus a slight independent hue wander so the shimmer isn't monochrome.
-        let s = color.usingColorSpace(.sRGB) ?? color
-        let mid = ((s.redComponent + 1) / 2, (s.greenComponent + 1) / 2, (s.blueComponent + 1) / 2)
+        let srgb = CGColorSpace(name: CGColorSpace.sRGB).flatMap {
+            color.converted(to: $0, intent: .defaultIntent, options: nil)
+        } ?? color
+        let c = srgb.components ?? [1, 1, 1, 1]
+        let (r, g, b) = c.count >= 3 ? (c[0], c[1], c[2]) : (c[0], c[0], c[0])   // grayscale fallback
+        let mid = ((r + 1) / 2, (g + 1) / 2, (b + 1) / 2)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -285,7 +288,7 @@ final class SeamEmitters {
         // CA randomizes each channel symmetrically (base ± range): base at each channel's
         // seam→white midpoint spans exactly [seam, white]; a `hueJitter` floor keeps even
         // near-white channels wiggling independently so the hue drifts too.
-        dot.color = NSColor(srgbRed: mid.r, green: mid.g, blue: mid.b, alpha: 0.95).cgColor
+        dot.color = CGColor(srgbRed: mid.r, green: mid.g, blue: mid.b, alpha: 0.95)
         dot.redRange = Float(max(1 - mid.r, hueJitter))
         dot.greenRange = Float(max(1 - mid.g, hueJitter))
         dot.blueRange = Float(max(1 - mid.b, hueJitter))
@@ -294,7 +297,7 @@ final class SeamEmitters {
         dot.scaleRange = 0.16 * sizeScale            // wider spread → sizes vary more, twinklier
 
         let gold = configuredCell(layer, at: 1, speed: speed, angle: angle, life: travelBoost)
-        gold.color = NSColor(srgbRed: 1.0, green: 0.86, blue: 0.35, alpha: 0.95).cgColor
+        gold.color = CGColor(srgbRed: 1.0, green: 0.86, blue: 0.35, alpha: 0.95)
         gold.redRange = 0; gold.greenRange = 0.14; gold.blueRange = 0.2   // amber↔pale-gold wander
         gold.birthRate = segBirth * 0.12             // sparse — a rare warm glint
         gold.scale = 0.08 * sizeScale                // tinier than the main shimmer

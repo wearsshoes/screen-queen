@@ -1,4 +1,3 @@
-import AppKit
 import QuartzCore
 
 /// The tight, bright seam glow that sits *in front of* the sparkles. The sparkle emitters
@@ -33,7 +32,7 @@ final class SeamGlow {
     /// Register/refresh the front glow for one seam edge. `rect` is the bar; `inward` is the
     /// direction toward the display center (the fade direction). The glow is bright at the
     /// seam (flat, outward) edge and transparent at the inward edge.
-    func add(rect: NSRect, inward: Edge, color: NSColor, id: String) {
+    func add(rect: CGRect, inward: Edge, color: CGColor, id: String) {
         seen.insert(id)
         let layer = layers[id] ?? makeLayer(id: id)
 
@@ -54,7 +53,7 @@ final class SeamGlow {
         }
         // Bright core at the seam, quick fade to clear — this is the front highlight, so it
         // stays tight (fully faded by ~60% across the bar).
-        layer.colors = [color.cgColor, color.withAlphaComponent(0).cgColor]
+        layer.colors = [color, color.copy(alpha: 0) ?? color]
         layer.locations = [0, 0.6]
         // Taper the glow toward the two *ends* of the seam via an along-length alpha mask
         // (opaque middle → clear ends), so it fades out gently at the tips instead of stopping

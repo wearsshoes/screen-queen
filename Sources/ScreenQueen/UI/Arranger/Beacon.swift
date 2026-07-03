@@ -1,4 +1,4 @@
-import AppKit
+import QuartzCore
 
 /// The beacon: a pulsing map-pin at the cursor's location on the *schematic*, shown on
 /// every canvas — where you are on the map, from any screen. A map marker, not a
@@ -19,13 +19,13 @@ final class PlaneMouseMarkerLayer: CALayer {
         super.init()
         let side = Self.side
         bounds = CGRect(x: 0, y: 0, width: side, height: side)
-        let pink = SeamPalette.colors[0]
+        let pink = SeamPalette.pinkCG
 
         let pulse = CAShapeLayer()
         pulse.frame = bounds
         pulse.path = CGPath(ellipseIn: CGRect(x: side / 2 - 7, y: side / 2 - 7, width: 14, height: 14), transform: nil)
         pulse.fillColor = nil
-        pulse.strokeColor = pink.cgColor
+        pulse.strokeColor = pink
         pulse.lineWidth = 1.5
         addSublayer(pulse)
 
@@ -44,10 +44,10 @@ final class PlaneMouseMarkerLayer: CALayer {
         dot.frame = bounds
         let d = Self.dotDiameter
         dot.path = CGPath(ellipseIn: CGRect(x: (side - d) / 2, y: (side - d) / 2, width: d, height: d), transform: nil)
-        dot.fillColor = pink.cgColor
-        dot.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
+        dot.fillColor = pink
+        dot.strokeColor = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.9)
         dot.lineWidth = 1
-        dot.shadowColor = pink.cgColor
+        dot.shadowColor = pink
         dot.shadowOpacity = 0.9
         dot.shadowRadius = 5
         dot.shadowOffset = .zero

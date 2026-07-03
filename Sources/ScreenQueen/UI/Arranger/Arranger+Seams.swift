@@ -110,16 +110,16 @@ extension Arranger {
         seamGlow.begin()
         for e in miniBarEdges(bars, t: t, seamColor: seamColor) {
             let eid = barID(e.rect, e.inward)
-            seamEmitters.add(edgeOf: e.rect, direction: particleDirection(e.inward), color: e.color,
+            seamEmitters.add(edgeOf: e.rect, direction: particleDirection(e.inward), color: e.color.cgColor,
                              id: "mini-\(eid)", sizeScale: screenDensityScale)
-            seamGlow.add(rect: e.rect, inward: overlayEdge(e.inward), color: e.color, id: "mini-\(eid)")
+            seamGlow.add(rect: e.rect, inward: overlayEdge(e.inward), color: e.color.cgColor, id: "mini-\(eid)")
         }
         for e in edgeBarEdges(bars, seamColor: seamColor) {
             let eid = barID(e.rect, e.inward)
             // Full-screen scale → larger particles, deeper drift than the mini-map bars.
-            seamEmitters.add(edgeOf: e.rect, direction: particleDirection(e.inward), color: e.color,
+            seamEmitters.add(edgeOf: e.rect, direction: particleDirection(e.inward), color: e.color.cgColor,
                              id: "edge-\(eid)", sizeScale: 2 * screenDensityScale, travelBoost: 3)
-            seamGlow.add(rect: e.rect, inward: overlayEdge(e.inward), color: e.color, id: "edge-\(eid)")
+            seamGlow.add(rect: e.rect, inward: overlayEdge(e.inward), color: e.color.cgColor, id: "edge-\(eid)")
         }
         seamEmitters.commit()
         seamGlow.commit()
