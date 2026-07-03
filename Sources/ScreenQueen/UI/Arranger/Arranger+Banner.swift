@@ -1,120 +1,47 @@
-import AppKit
+import SwiftUI
 
 /// The top-of-screen countdown banner — the non-modal descendant of the old "Keep this
 /// arrangement?" alert. It never steals focus and sits under the menu bar on *every*
 /// screen, because the whole point is surviving the case where some screens went dark.
 /// One row per live countdown (`ArrangerState.countdowns`).
-final class CountdownBanner: NSVisualEffectView {
+struct CountdownBannerView: View {
+    let countdowns: [ArrangerState.CountdownKind: (remaining: Int, keepTitle: String, actTitle: String)]
+    let resolve: (ArrangerState.CountdownKind, _ keep: Bool) -> Void
 
-    /// Wired to `state.resolveCountdown`: `keep` = bless the new state; `!keep` = act now.
-    var onResolve: ((ArrangerState.CountdownKind, _ keep: Bool) -> Void)?
-
-    /// A row button's role, for projecting its ghost image (see VirtualMouse.swift).
-    enum Role { case keep, act }
-
-    /// The frame (banner coords) of a live row's button, or nil when it isn't showing.
-    func buttonRect(kind: ArrangerState.CountdownKind, role: Role) -> CGRect? {
-        guard let row = rows[kind], !row.isHidden else { return nil }
-        let button = role == .keep ? row.keepButton : row.actButton
-        return convert(button.bounds, from: button)
+    var body: some View {
+        VStack(spacing: 8) {
+            ForEach(ArrangerState.CountdownKind.allCases, id: \.self) { kind in
+                if let c = countdowns[kind] {
+                    row(kind, c)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 18)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
     }
 
-    private var rows: [ArrangerState.CountdownKind: Row] = [:]
-    private let stack = NSStackView()
-
-    init() {
-        super.init(frame: .zero)
-        material = .hudWindow
-        blendingMode = .withinWindow
-        state = .active
-        wantsLayer = true
-        layer?.cornerRadius = 18
-        layer?.cornerCurve = .continuous
-        layer?.borderWidth = 0.5
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
-
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
-        ])
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    /// Sync to the live countdown table (hides itself when the table is empty).
-    func update(_ countdowns: [ArrangerState.CountdownKind: ArrangerState.Countdown]) {
-        isHidden = countdowns.isEmpty
-        for kind in ArrangerState.CountdownKind.allCases {
-            guard let c = countdowns[kind] else { rows[kind]?.isHidden = true; continue }
-            let row = ensureRow(kind)
-            row.isHidden = false
-            row.label.stringValue = Self.message(for: kind, remaining: c.remaining)
+    /// One countdown's line: message · Keep (pink — she wants you to commit) · act-now.
+    private func row(_ kind: ArrangerState.CountdownKind,
+                     _ c: (remaining: Int, keepTitle: String, actTitle: String)) -> some View {
+        HStack(spacing: 12) {
+            Text(Self.message(for: kind, remaining: c.remaining))
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+            Button(c.keepTitle) { resolve(kind, true) }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(nsColor: .systemPink).opacity(0.85))
+            Button(c.actTitle) { resolve(kind, false) }
         }
     }
 
-    private static func message(for kind: ArrangerState.CountdownKind, remaining: Int) -> String {
+    static func message(for kind: ArrangerState.CountdownKind, remaining: Int) -> String {
         switch kind {
         case .revertModes: return Copy.revertCountdown(remaining)
         case .feedGuard: return Copy.feedGuardCountdown(NSScreen.screens.count, remaining)
         }
-    }
-
-    private func ensureRow(_ kind: ArrangerState.CountdownKind) -> Row {
-        if let row = rows[kind] { return row }
-        let keepTitle: String, actTitle: String
-        switch kind {
-        case .revertModes: keepTitle = Copy.revertKeep; actTitle = Copy.revertNow
-        case .feedGuard: keepTitle = Copy.feedKeep; actTitle = Copy.feedCutNow
-        }
-        let row = Row(keepTitle: keepTitle, actTitle: actTitle,
-                      onKeep: { [weak self] in self?.onResolve?(kind, true) },
-                      onAct: { [weak self] in self?.onResolve?(kind, false) })
-        rows[kind] = row
-        stack.addArrangedSubview(row)
-        return row
-    }
-
-    /// One countdown's line: message · Keep (pink — she wants you to commit) · act-now.
-    private final class Row: NSStackView {
-        let label = NSTextField(labelWithString: "")
-        let keepButton: NSButton
-        let actButton: NSButton
-        private let onKeep: () -> Void
-        private let onAct: () -> Void
-
-        init(keepTitle: String, actTitle: String,
-             onKeep: @escaping () -> Void, onAct: @escaping () -> Void) {
-            self.onKeep = onKeep; self.onAct = onAct
-            keepButton = NSButton(title: keepTitle, target: nil, action: nil)
-            actButton = NSButton(title: actTitle, target: nil, action: nil)
-            super.init(frame: .zero)
-            label.font = .systemFont(ofSize: 13, weight: .semibold)
-            label.textColor = .labelColor
-            label.lineBreakMode = .byTruncatingTail
-
-            keepButton.target = self; keepButton.action = #selector(keepTapped)
-            keepButton.bezelStyle = .push
-            keepButton.controlSize = .regular
-            keepButton.bezelColor = NSColor.systemPink.withAlphaComponent(0.85)
-            actButton.target = self; actButton.action = #selector(actTapped)
-            actButton.bezelStyle = .push
-            actButton.controlSize = .regular
-
-            orientation = .horizontal
-            alignment = .centerY
-            spacing = 12
-            setViews([label, keepButton, actButton], in: .center)
-        }
-        required init?(coder: NSCoder) { fatalError() }
-
-        @objc private func keepTapped() { onKeep() }
-        @objc private func actTapped() { onAct() }
     }
 }
 
@@ -130,12 +57,26 @@ extension Arranger {
             banner = makeBanner()
             needsLayout = true
         }
-        banner?.update(state.countdowns)
+        banner?.rootView = bannerView()
+        banner?.isHidden = state.countdowns.isEmpty
     }
 
-    private func makeBanner() -> CountdownBanner {
-        let b = CountdownBanner()
-        b.onResolve = { [weak self] kind, keep in self?.state.resolveCountdown(kind, keep: keep) }
+    private func bannerView() -> CountdownBannerView {
+        var rows: [ArrangerState.CountdownKind: (remaining: Int, keepTitle: String, actTitle: String)] = [:]
+        for (kind, c) in state.countdowns {
+            switch kind {
+            case .revertModes: rows[kind] = (c.remaining, Copy.revertKeep, Copy.revertNow)
+            case .feedGuard: rows[kind] = (c.remaining, Copy.feedKeep, Copy.feedCutNow)
+            }
+        }
+        return CountdownBannerView(countdowns: rows) { [weak self] kind, keep in
+            self?.state.resolveCountdown(kind, keep: keep)
+        }
+    }
+
+    private func makeBanner() -> NSHostingView<CountdownBannerView> {
+        let b = NSHostingView(rootView: bannerView())
+        b.wantsLayer = true
         b.layer?.zPosition = 7   // above the schematic layers, mouse aids included
         b.translatesAutoresizingMaskIntoConstraints = false
         addSubview(b)

@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// Interactive visualization + editor of the display arrangement.
 ///
@@ -96,7 +97,8 @@ final class Arranger: NSView {
     var ghostTintTargets: [GhostTintable] = []
 
     /// The top-of-screen countdown banner — built on demand in Arranger+Banner.swift.
-    var banner: CountdownBanner?
+    /// The first SwiftUI island: an NSHostingView subview on the canvas.
+    var banner: NSHostingView<CountdownBannerView>?
     /// The banner's top constraint, re-tuned in `layout()` to clear the menu bar.
     var bannerTop: NSLayoutConstraint?
 
