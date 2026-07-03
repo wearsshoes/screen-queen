@@ -76,7 +76,7 @@ extension Arranger {
         let origins = state.pointOrigins()
         let trace = SchematicLayout.solveTrace(rects: state.plane, displays: state.sizedDisplays())
         let ambiguousIDs = Set(trace.pointRects.filter(\.ambiguous).map(\.id))
-        var content = SolvePanel.Content()
+        var content = SolvePanelContent()
         for d in state.sizedDisplays() {
             guard let o = origins[d.id] else { continue }
             content.rects.append((d.id, CGRect(origin: o, size: d.bounds.size), ambiguousIDs.contains(d.id)))

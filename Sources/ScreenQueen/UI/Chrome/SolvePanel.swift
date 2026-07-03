@@ -1,40 +1,118 @@
-import AppKit
+import SwiftUI
 
-/// "What she sees": a small floating panel showing the live reconstructed *point*
-/// arrangement — the actual solve `seamBars` uses. Point rects are outlined (red =
-/// resolved through an ambiguous >1-preimage inverse); seams draw in their palette
-/// color. Draggable; on its own layer above the seam layers.
-final class SolvePanel: NSView {
+/// What the "what she sees" panel shows: the live reconstructed *point* arrangement —
+/// the actual solve `seamBars` uses — plus the ghost flag (inactive canvases repaint
+/// in pink).
+struct SolvePanelContent {
+    var rects: [(id: CGDirectDisplayID, rect: CGRect, ambiguous: Bool)] = []
+    var seams: [(a: CGDirectDisplayID, b: CGDirectDisplayID, vertical: Bool, color: NSColor)] = []
+    var ghost = false
+}
 
-    struct Content {
-        var rects: [(id: CGDirectDisplayID, rect: CGRect, ambiguous: Bool)] = []
-        var seams: [(a: CGDirectDisplayID, b: CGDirectDisplayID, vertical: Bool, color: NSColor)] = []
+/// "What she sees", drawn in a SwiftUI `Canvas` — the dry run for the big schematic
+/// Canvas port. Point space is y-down like Canvas itself, so the old y-flip is gone.
+/// Point rects are outlined (red = resolved through an ambiguous >1-preimage inverse);
+/// seams draw in their palette color over the outlines — the seam is the shared edge,
+/// so its color wins there.
+struct SolvePanelView: View {
+    var content: SolvePanelContent
+
+    private static let titleBarHeight: CGFloat = 16
+
+    var body: some View {
+        Canvas { ctx, size in
+            let bounds = CGRect(origin: .zero, size: size)
+            let ink: Color = content.ghost ? Color(nsColor: VirtualMouse.pink) : .white
+            let plateColor: Color = content.ghost
+                ? Color(nsColor: (VirtualMouse.pink.blended(withFraction: 0.55, of: .black) ?? .black))
+                : .black
+
+            // Dark rounded plate with a lighter title strip; ghosting tints it toward pink.
+            let plate = Path(roundedRect: bounds, cornerRadius: 6)
+            ctx.fill(plate, with: .color(plateColor.opacity(0.6)))
+            var strip = ctx
+            strip.clip(to: plate)
+            strip.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: Self.titleBarHeight)),
+                       with: .color(ink.opacity(0.12)))
+
+            let ambiguous = content.rects.contains { $0.ambiguous }
+            let title = Copy.solvePanelTitle + (ambiguous ? Copy.solvePanelAmbiguous : "")
+            ctx.draw(Text(title).font(.system(size: 9, weight: .bold)).foregroundStyle(ink.opacity(0.8)),
+                     at: CGPoint(x: 6, y: Self.titleBarHeight / 2), anchor: .leading)
+
+            // Fit the point-rect union into the body.
+            guard content.rects.count >= 2 else { return }
+            var uni = content.rects[0].rect
+            for e in content.rects.dropFirst() { uni = uni.union(e.rect) }
+            guard uni.width > 0, uni.height > 0 else { return }
+            let area = CGRect(x: 0, y: Self.titleBarHeight,
+                              width: size.width, height: size.height - Self.titleBarHeight)
+                .insetBy(dx: 10, dy: 10)
+            let s = min(area.width / uni.width, area.height / uni.height)
+            func map(_ r: CGRect) -> CGRect {
+                CGRect(x: area.minX + (r.minX - uni.minX) * s,
+                       y: area.minY + (r.minY - uni.minY) * s,
+                       width: r.width * s, height: r.height * s)
+            }
+
+            for e in content.rects {
+                let vr = map(e.rect)
+                let stroke: Color = e.ambiguous ? Color(nsColor: .systemRed) : ink
+                ctx.stroke(Path(vr), with: .color(stroke), lineWidth: e.ambiguous ? 2 : 1)
+                ctx.draw(Text("\(e.id % 1000)").font(.system(size: 9)).foregroundStyle(stroke),
+                         at: CGPoint(x: vr.minX + 2, y: vr.midY), anchor: .leading)
+            }
+
+            // The seam pair arrives in arbitrary order, so sort the two view rects
+            // geometrically — the line must sit on the shared edge, not wherever (a, b)
+            // happened to fall.
+            let byID = Dictionary(content.rects.map { ($0.id, $0.rect) }, uniquingKeysWith: { a, _ in a })
+            for seam in content.seams {
+                guard let ra = byID[seam.a], let rb = byID[seam.b] else { continue }
+                let va = map(ra), vb = map(rb)
+                var line = Path()
+                if seam.vertical {
+                    let (l, r) = va.midX <= vb.midX ? (va, vb) : (vb, va)   // left tile by center
+                    let x = (l.maxX + r.minX) / 2
+                    line.move(to: CGPoint(x: x, y: max(va.minY, vb.minY)))
+                    line.addLine(to: CGPoint(x: x, y: min(va.maxY, vb.maxY)))
+                } else {
+                    let (t, b) = va.midY <= vb.midY ? (va, vb) : (vb, va)   // upper tile (y-down)
+                    let y = (t.maxY + b.minY) / 2
+                    line.move(to: CGPoint(x: max(va.minX, vb.minX), y: y))
+                    line.addLine(to: CGPoint(x: min(va.maxX, vb.maxX), y: y))
+                }
+                ctx.stroke(line, with: .color(Color(nsColor: seam.color)), lineWidth: 3)
+            }
+        }
     }
+}
 
-    private var content = Content()
-    private let titleBarHeight: CGFloat = 16
-
-    /// Ghost mode (inactive display): plate and outlines redraw in pink.
-    private var ghost = false
+/// The panel's hosting view: draggable (the whole panel is the handle), hidden when
+/// there's nothing to say about a solo girl, ghost-tinted via the content model.
+final class SolvePanelHost: NSHostingView<SolvePanelView> {
 
     /// Dragging reports the desired origin here instead of moving the panel itself —
     /// the canvas stores it as a centre-relative inch offset in shared state, and every
     /// canvas repositions on the resulting notify.
     var onMoved: ((CGPoint) -> Void)?
 
-    func update(_ content: Content) {
+    private var content = SolvePanelContent()
+    private var ghost = false
+
+    func update(_ content: SolvePanelContent) {
         self.content = content
+        apply()
+    }
+
+    private func apply() {
+        var c = content
+        c.ghost = ghost
+        rootView = SolvePanelView(content: c)
         isHidden = content.rects.count < 2   // nothing to say about a solo girl
-        needsDisplay = true
     }
 
-    // MARK: - Dragging (grab anywhere on the panel)
-
-    private var titleBar: NSRect {
-        NSRect(x: 0, y: bounds.height - titleBarHeight, width: bounds.width, height: titleBarHeight)
-    }
-
-    /// The whole panel is the drag handle.
+    /// The whole panel is the drag handle (and nothing outside it).
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, let sup = superview else { return nil }
         return bounds.contains(convert(point, from: sup)) ? self : nil
@@ -55,80 +133,13 @@ final class SolvePanel: NSView {
     }
 
     override func mouseUp(with event: NSEvent) { dragOffset = nil }
-
-    // MARK: - Drawing
-
-    override func draw(_ dirtyRect: NSRect) {
-        let ink = ghost ? VirtualMouse.pink : NSColor.white
-        // Dark rounded plate with a lighter title strip; ghosting tints it toward pink.
-        let plate = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
-        (ghost ? VirtualMouse.pink.blended(withFraction: 0.55, of: .black) ?? .black : .black)
-            .withAlphaComponent(0.6).setFill()
-        plate.fill()
-        NSGraphicsContext.saveGraphicsState()
-        plate.addClip()
-        ink.withAlphaComponent(0.12).setFill()
-        titleBar.fill()
-        NSGraphicsContext.restoreGraphicsState()
-
-        let ambiguous = content.rects.contains { $0.ambiguous }
-        let title = Copy.solvePanelTitle + (ambiguous ? Copy.solvePanelAmbiguous : "")
-        let ta: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 9),
-                                                 .foregroundColor: ink.withAlphaComponent(0.8)]
-        (title as NSString).draw(at: CGPoint(x: 6, y: bounds.height - titleBarHeight + 3), withAttributes: ta)
-
-        // Fit the point-rect union into the body (point space is y-down; the view is y-up).
-        guard content.rects.count >= 2 else { return }
-        var uni = content.rects[0].rect
-        for e in content.rects.dropFirst() { uni = uni.union(e.rect) }
-        guard uni.width > 0, uni.height > 0 else { return }
-        let area = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - titleBarHeight)
-            .insetBy(dx: 10, dy: 10)
-        let s = min(area.width / uni.width, area.height / uni.height)
-        func map(_ r: CGRect) -> NSRect {
-            let x = area.minX + (r.minX - uni.minX) * s
-            let h = r.height * s
-            let y = area.maxY - (r.minY - uni.minY) * s - h       // flip: point-top → view-top
-            return NSRect(x: x, y: y, width: r.width * s, height: h)
-        }
-
-        // Rects + labels first, then the seams stroke *over* the white outlines — the seam is
-        // the shared edge, so its color wins there.
-        for e in content.rects {
-            let vr = map(e.rect)
-            (e.ambiguous ? NSColor.systemRed : ink).setStroke()
-            let path = NSBezierPath(rect: vr); path.lineWidth = e.ambiguous ? 2 : 1; path.stroke()
-            let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 9),
-                                                    .foregroundColor: e.ambiguous ? NSColor.systemRed : ink]
-            ("\(e.id % 1000)" as NSString).draw(at: CGPoint(x: vr.minX + 2, y: vr.midY - 5), withAttributes: a)
-        }
-        // The seam pair arrives in arbitrary order, so sort the two view rects geometrically —
-        // the line must sit on the shared edge, not wherever (a, b) happened to fall.
-        let byID = Dictionary(content.rects.map { ($0.id, $0.rect) }, uniquingKeysWith: { a, _ in a })
-        for seam in content.seams {
-            guard let ra = byID[seam.a], let rb = byID[seam.b] else { continue }
-            seam.color.setStroke()
-            let va = map(ra), vb = map(rb)
-            let p = NSBezierPath(); p.lineWidth = 3
-            if seam.vertical {
-                let (l, r) = va.midX <= vb.midX ? (va, vb) : (vb, va)   // left tile by center
-                let x = (l.maxX + r.minX) / 2
-                p.move(to: CGPoint(x: x, y: max(va.minY, vb.minY))); p.line(to: CGPoint(x: x, y: min(va.maxY, vb.maxY)))
-            } else {
-                let (t, b) = va.midY >= vb.midY ? (va, vb) : (vb, va)   // upper tile (view y-up)
-                let y = (t.minY + b.maxY) / 2
-                p.move(to: CGPoint(x: max(va.minX, vb.minX), y: y)); p.line(to: CGPoint(x: min(va.maxX, vb.maxX), y: y))
-            }
-            p.stroke()
-        }
-    }
 }
 
-extension SolvePanel: GhostTintable {
+extension SolvePanelHost: GhostTintable {
     /// Repaint the panel in pink (or restore) for the inactive-display ghost.
     func setGhost(_ on: Bool) {
         guard ghost != on else { return }
         ghost = on
-        needsDisplay = true
+        apply()
     }
 }

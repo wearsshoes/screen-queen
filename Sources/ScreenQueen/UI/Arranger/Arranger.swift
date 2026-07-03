@@ -104,8 +104,9 @@ final class Arranger: NSView {
 
     /// The floating "what she sees" panel (see SolvePanel), on its own layer above the
     /// seam layers. Draggable; body click-through.
-    private(set) lazy var solvePanel: SolvePanel = {
-        let p = SolvePanel(frame: NSRect(origin: .zero, size: NSSize(width: 240, height: 166)))
+    private(set) lazy var solvePanel: SolvePanelHost = {
+        let p = SolvePanelHost(rootView: SolvePanelView(content: SolvePanelContent()))
+        p.frame = NSRect(origin: .zero, size: NSSize(width: 240, height: 166))
         p.wantsLayer = true
         p.layer?.zPosition = 3
         // A drag stores the panel's centre as an inch offset from the screen centre —
