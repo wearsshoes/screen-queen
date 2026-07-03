@@ -34,14 +34,21 @@
   ✅ the schematic itself (SchematicCanvas: draw(_:) → drawSchematic() inside
   Canvas/withCGContext with one y-flip at the seam; needsDisplay funnels through
   repaintSchematic(); subjects can go native GraphicsContext incrementally).
-  ✅ PORT COMPLETE — the input layer is the final deliberate keeper (verdict
-  below), so nothing portable remains.
-  - Input stays AppKit: the commit semantics live in flagsChanged (⌘⇧-release
-    commits alignment, ⌘-release commits resolution) and SwiftUI's
-    onModifierKeysChanged is macOS 15+ against our 14 floor; mouseDown does
-    window-keying across the per-screen borderless windows (NSWindow-shell
-    territory); the held-key 60fps nudge machine and resignFirstResponder
-    commit-on-blur have no clean SwiftUI counterpart.
+  ✅ PORT COMPLETE for the render/chrome layer. Input verdict, REVISED
+  (Rachel's challenge was right): input CAN leave the NSView responder chain
+  without macOS 15 —
+  - keys: onKeyPress(phases:) is macOS 14+, covers arrows/WASD down/up/repeat;
+    shortcuts already ride .keyboardShortcut;
+  - modifier-release commits (⌘⇧ align, ⌘ resolution): not keypresses, but
+    EventPlumbing already owns NSEvent monitors — a flagsChanged monitor there
+    is *lower*-level than the responder chain, matching where the weird mouse
+    stuff (CGEvent cursor sampling, cursor warping) already lives;
+  - drags (tile / menu-bar strip / option-mirror): SwiftUI gestures on the
+    schematic host; window-keying stays in ArrangerWindows (focus-follows-
+    cursor already keys on hover, mouseDown's makeKey is nearly redundant).
+  What keeps it parked is RISK, not feasibility: undo-snapshot timing,
+  drag-lock windows, and commit ordering are the app's most regression-prone
+  semantics. Sequenced post-launch; don't fold it into the Show HN push.
   Other pieces that stay AppKit *deliberately*:
   - LabelCard: its text supersamples at 2× backing scale because the script
     hairlines go mushy at 1× on non-Retina panels, and SwiftUI text can't
