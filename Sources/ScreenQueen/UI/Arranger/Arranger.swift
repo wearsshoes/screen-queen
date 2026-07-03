@@ -63,7 +63,7 @@ final class Arranger: NSView {
     var onLayout: (() -> Void)?
 
     /// The fun tooltip bubble — shown on *every* canvas at the mirrored cursor position.
-    var tooltipBubble: TooltipBubble?
+    var tooltipBubble: TooltipHost?
 
     /// The top-of-screen countdown banner — built on demand in Arranger+Banner.swift.
     /// The first SwiftUI island: an NSHostingView subview on the canvas.

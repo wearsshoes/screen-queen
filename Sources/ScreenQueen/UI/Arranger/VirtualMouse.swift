@@ -183,15 +183,26 @@ extension Arranger {
         return nil
     }
 
-    /// Show/hide this canvas's tooltip bubble at the ghost-mapped cursor. Both nil ⇒ hide.
+    /// Show/hide this canvas's tooltip bubble at the ghost-mapped cursor (below-and-right,
+    /// clamped on-canvas). Both nil ⇒ hide. The rootView is only swapped on a text change;
+    /// the per-event work is a frame move.
     func updateTooltip(text: String?, cursorActivePoint: CGPoint?) {
         guard let text, let p = cursorActivePoint else { tooltipBubble?.isHidden = true; return }
-        ensureTooltipBubble().show(text, at: ghostPoint(p), in: bounds)
+        let host = ensureTooltipBubble()
+        if host.rootView.text != text { host.rootView = TooltipBubbleView(text: text) }
+        let size = host.fittingSize
+        let cursor = ghostPoint(p)
+        let gap: CGFloat = 14
+        var origin = CGPoint(x: cursor.x + gap, y: cursor.y - gap - size.height)
+        origin.x = min(max(origin.x, 4), bounds.width - size.width - 4)
+        origin.y = min(max(origin.y, 4), bounds.height - size.height - 4)
+        host.frame = CGRect(origin: origin, size: size)
+        host.isHidden = false
     }
 
-    private func ensureTooltipBubble() -> TooltipBubble {
+    private func ensureTooltipBubble() -> TooltipHost {
         if let b = tooltipBubble { return b }
-        let b = TooltipBubble(frame: .zero)
+        let b = TooltipHost(rootView: TooltipBubbleView(text: ""))
         addSubview(b)
         tooltipBubble = b
         return b
