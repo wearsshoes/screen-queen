@@ -67,9 +67,9 @@ final class CalibrationController {
         // fall back to the perpendicular-edge convention for the primary too.
         let seam = SchematicLayout.seam(reference.bounds, target.bounds)
         let refIsA = seam.map { CalibrationMath.referenceIsA($0, reference.bounds) } ?? true
-        let refEdge = seam.map { BarPlacement(seam: $0, screen: reference.bounds, selfIsA: refIsA).edge }
+        let refEdge = seam.map { CalibrationMath.seamEdge($0, selfIsA: refIsA) }
             ?? deskEdge(for: reference)
-        let targetEdge = seam.map { BarPlacement(seam: $0, screen: target.bounds, selfIsA: !refIsA).edge }
+        let targetEdge = seam.map { CalibrationMath.seamEdge($0, selfIsA: !refIsA) }
             ?? deskEdge(for: target)
 
         // Two tapes per screen: the seam-facing edge, plus a perpendicular one —
@@ -83,9 +83,9 @@ final class CalibrationController {
         // Per-axis pitches: the trusted screen's true points-per-inch, and the
         // pitch the target *claims* over EDID — shape trusted, scale on trial.
         // When she won't even claim a size, assume the trusted pitch.
-        refPitch = axisPitches(bounds: reference.bounds, sizeMM: reference.physicalSizeMM)
+        refPitch = CalibrationMath.axisPitches(bounds: reference.bounds, sizeMM: reference.physicalSizeMM)
             ?? (x: refPPT, y: refPPT)
-        if let claimed = axisPitches(bounds: target.bounds, sizeMM: target.edidSizeMM) {
+        if let claimed = CalibrationMath.axisPitches(bounds: target.bounds, sizeMM: target.edidSizeMM) {
             targetPitch = claimed
             targetClaimedSize = CGSize(width: Double(target.edidSizeMM.width) / 25.4,
                                        height: Double(target.edidSizeMM.height) / 25.4)
@@ -139,7 +139,7 @@ final class CalibrationController {
             refView?.setLength(CGFloat(self.refMeasure * refPrimaryPitch))
             self.updateReadout()
         }
-        refWindow = makeWindow(screen: refScreen, views: [refView, refPerpView], interactive: true)
+        refWindow = makeWindow(screen: refScreen, views: [refView, refPerpView])
 
         // Target tapes (target screen). Their ribbons are ruled at the pitch the
         // display *claims* over EDID — even when a previous calibration knows
@@ -166,7 +166,7 @@ final class CalibrationController {
             calView?.setLength(primaryLen)
             self.updateReadout()
         }
-        targetWindow = makeWindow(screen: targetScreen, views: [calView, calPerpView], interactive: true)
+        targetWindow = makeWindow(screen: targetScreen, views: [calView, calPerpView])
         targetBar = calView
 
         // Each tape echoes its partner's length in the partner's chalk color —
@@ -237,24 +237,9 @@ final class CalibrationController {
         target = nil
     }
 
-    /// Per-axis points-per-inch for a screen, or nil when the physical size is
-    /// missing or implausible.
-    private func axisPitches(bounds: CGRect, sizeMM: CGSize) -> (x: Double, y: Double)? {
-        let w = Double(sizeMM.width) / 25.4, h = Double(sizeMM.height) / 25.4
-        guard w > 0.5, h > 0.5 else { return nil }
-        return (x: Double(bounds.width) / w, y: Double(bounds.height) / h)
-    }
-
-    /// The target's physical size in inches: her claimed (EDID) shape scaled by
-    /// the one number the match determines — how many true inches her "inch"
-    /// actually is. Every matched pairing of tapes yields this same factor,
-    /// which is the point: one measurement per screen, nothing to disagree.
     private func inferredSizeInches() -> CGSize? {
-        guard refMeasure > 0, targetMeasure > 0,
-              targetClaimedSize.width > 0, targetClaimedSize.height > 0 else { return nil }
-        let scale = refMeasure / targetMeasure
-        return CGSize(width: targetClaimedSize.width * scale,
-                      height: targetClaimedSize.height * scale)
+        CalibrationMath.inferredSize(claimed: targetClaimedSize,
+                                     refMeasure: refMeasure, targetMeasure: targetMeasure)
     }
 
     private func updateReadout() {
@@ -301,12 +286,9 @@ final class CalibrationController {
 
     // MARK: - Window/screen helpers
 
-    private func makeWindow(screen: NSScreen, views: [NSView], interactive: Bool) -> NSWindow {
-        let window = interactive
-            ? KeyableBorderlessWindow(contentRect: screen.frame, styleMask: .borderless,
-                                      backing: .buffered, defer: false)
-            : NSWindow(contentRect: screen.frame, styleMask: .borderless,
-                       backing: .buffered, defer: false)
+    private func makeWindow(screen: NSScreen, views: [NSView]) -> NSWindow {
+        let window = KeyableBorderlessWindow(contentRect: screen.frame, styleMask: .borderless,
+                                             backing: .buffered, defer: false)
         window.isOpaque = false
         // The soft scrim lives on the window so the tapes stacked in it don't
         // each darken the screen again.
@@ -314,7 +296,6 @@ final class CalibrationController {
         window.hasShadow = false
         // Above the menu bar so a bar hugging the top edge is still grabbable.
         window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-        window.ignoresMouseEvents = !interactive
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
         let container = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
@@ -479,32 +460,28 @@ final class CalibrationPanel: NSPanel {
     }
 
     /// Show the panel on `screen`, near the target bar (`anchor`) but inset toward the
-    /// screen's center so it doesn't cover the bar. Falls back to top-center when the
-    /// bar isn't anchored to a seam.
-    fileprivate func present(on screen: NSScreen, near anchor: BarPlacement?) {
+    /// screen's center so it doesn't cover the bar.
+    fileprivate func present(on screen: NSScreen, near a: BarPlacement) {
         let vis = screen.visibleFrame
         let gap: CGFloat = 40
-        var origin = NSPoint(x: vis.midX - frame.width / 2, y: vis.maxY - frame.height - 60)
-
-        if let a = anchor {
-            // `a.along` is the bar's center in the screen's local frame; convert to global.
-            // The bar hugs `a.edge` (inset from it); place the panel just inward of the bar,
-            // aligned to its midpoint.
-            let f = screen.frame
-            switch a.edge {
-            case .right:
-                let barX = f.maxX - CalibrationMath.barEdgeInset - BarView.thickness
-                origin = NSPoint(x: barX - frame.width - gap, y: f.minY + a.along - frame.height / 2)
-            case .left:
-                let barX = f.minX + CalibrationMath.barEdgeInset + BarView.thickness
-                origin = NSPoint(x: barX + gap, y: f.minY + a.along - frame.height / 2)
-            case .top:
-                let barY = f.maxY - CalibrationMath.barEdgeInset - BarView.thickness
-                origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY - frame.height - gap)
-            case .bottom:
-                let barY = f.minY + CalibrationMath.barEdgeInset + BarView.thickness
-                origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY + gap)
-            }
+        // `a.along` is the bar's center in the screen's local frame; convert to global.
+        // The bar hugs `a.edge` (inset from it); place the panel just inward of the bar,
+        // aligned to its midpoint.
+        let f = screen.frame
+        var origin: NSPoint
+        switch a.edge {
+        case .right:
+            let barX = f.maxX - CalibrationMath.barEdgeInset - BarView.thickness
+            origin = NSPoint(x: barX - frame.width - gap, y: f.minY + a.along - frame.height / 2)
+        case .left:
+            let barX = f.minX + CalibrationMath.barEdgeInset + BarView.thickness
+            origin = NSPoint(x: barX + gap, y: f.minY + a.along - frame.height / 2)
+        case .top:
+            let barY = f.maxY - CalibrationMath.barEdgeInset - BarView.thickness
+            origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY - frame.height - gap)
+        case .bottom:
+            let barY = f.minY + CalibrationMath.barEdgeInset + BarView.thickness
+            origin = NSPoint(x: f.minX + a.along - frame.width / 2, y: barY + gap)
         }
 
         // Keep the panel fully on the visible screen.
@@ -555,7 +532,7 @@ private final class BarView: NSView {
 
     private var length: CGFloat
     private var offset: CGFloat = 0        // slide of the bar's center along the seam
-    private let anchor: BarPlacement?
+    private let anchor: BarPlacement
     /// Tick pitch in points: the reference's true points-per-inch on the honest
     /// tape, but the *EDID-claimed* pitch on the liar's — so at a physical match
     /// the two ribbons read different numbers. Her inches, as told by her.
@@ -620,7 +597,7 @@ private final class BarView: NSView {
     /// The metal crimp tab at each end: its reach along the ribbon.
     private static let tipAlong: CGFloat = 13
 
-    init(length: CGFloat, anchor: BarPlacement?, pointsPerInch: CGFloat, unitLabel: String,
+    init(length: CGFloat, anchor: BarPlacement, pointsPerInch: CGFloat, unitLabel: String,
          brand: String, finePrint: String, palette: Palette) {
         self.length = length; self.anchor = anchor
         self.pointsPerInch = pointsPerInch; self.unitLabel = unitLabel
@@ -656,13 +633,10 @@ private final class BarView: NSView {
     }
     @objc private func redrawKeyState() { needsDisplay = true }
 
-    private var lengthIsVertical: Bool { anchor?.lengthIsVertical ?? false }
+    private var lengthIsVertical: Bool { anchor.lengthIsVertical }
 
     /// The bar's anchored center along the seam (before `offset`).
-    private func anchorAlong() -> CGFloat {
-        if let a = anchor { return a.along }
-        return lengthIsVertical ? bounds.midY : bounds.midX
-    }
+    private func anchorAlong() -> CGFloat { anchor.along }
 
     private func rect() -> NSRect {
         CalibrationMath.barRect(length: length, offset: offset, thickness: Self.thickness, anchor: anchor, in: bounds)
@@ -840,8 +814,8 @@ private final class BarView: NSView {
     /// local +y (above the blade), −1 below. The unit label goes on that side so it
     /// never crowds the screen edge the tape hugs.
     private var centerSide: CGFloat {
-        switch anchor?.edge {
-        case .bottom, .right, .none: return 1
+        switch anchor.edge {
+        case .bottom, .right: return 1
         case .top, .left: return -1
         }
     }

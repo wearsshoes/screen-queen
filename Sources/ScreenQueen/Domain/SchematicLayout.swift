@@ -662,15 +662,6 @@ enum SchematicLayout {
         let vertical: Bool     // true: a|b side by side; false: a stacked over b
         let line: CGFloat      // the seam coordinate (a.maxX or a.maxY)
         let lo: CGFloat, hi: CGFloat   // overlap interval along the seam
-
-        /// The overlap center as an offset from `r`'s leading edge along the seam
-        /// axis (its own local frame) — top for a vertical seam, left for a
-        /// horizontal one. No global-origin arithmetic, so callers can place a bar
-        /// on either screen without coordinate flips.
-        func localCenter(on r: CGRect) -> CGFloat {
-            let mid = (lo + hi) / 2
-            return vertical ? mid - r.minY : mid - r.minX
-        }
     }
 
     /// The seam shared by `a` and `b`, or nil if they aren't edge-adjacent.

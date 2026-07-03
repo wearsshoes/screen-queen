@@ -1,45 +1,21 @@
 import CoreGraphics
 
-/// Where a calibration bar sits on the screen it's drawn on: which edge it abuts and its
-/// center offset from that screen's leading edge along the seam axis. Derived from
-/// `SchematicLayout.Seam` so calibration and the arranger place bars from the same source.
+/// Where a calibration tape sits on the screen it's drawn on: which edge it hugs and its
+/// center offset from that screen's leading edge along that edge's axis.
 struct BarPlacement {
     enum Edge { case left, right, top, bottom }
     let edge: Edge
-    let along: CGFloat          // center along the seam, in this screen's local (view) frame
+    let along: CGFloat          // center along the edge, in this screen's local (y-up) frame
 
-    /// A vertical seam (left/right edge) runs the bar vertically; horizontal runs it across.
+    /// A vertical edge runs the tape vertically; horizontal runs it across.
     var lengthIsVertical: Bool { edge == .left || edge == .right }
-
-    /// A placement stated directly: hug `edge`, centered at `along` in the
-    /// screen's local (y-up) frame. For bars that aren't tied to a seam overlap —
-    /// e.g. a tape spanning a full screen edge.
-    init(edge: Edge, along: CGFloat) {
-        self.edge = edge
-        self.along = along
-    }
-
-    /// The bar's placement on `frame` for the seam `s` shared with a neighbor, where
-    /// `selfIsA` picks this screen's side (a = left/top). `SchematicLayout.Seam` is in the
-    /// OS's y-down space; the drawing frame is y-up, so a vertical seam's along-center is
-    /// mirrored within the screen height.
-    init(seam s: SchematicLayout.Seam, screen frame: CGRect, selfIsA: Bool) {
-        let along = s.localCenter(on: frame)
-        if s.vertical {
-            edge = selfIsA ? .right : .left
-            self.along = frame.height - along
-        } else {
-            edge = selfIsA ? .bottom : .top        // a is on top (CG maxY == b.minY)
-            self.along = along
-        }
-    }
 }
 
-/// Pure calibration geometry + the PPI-from-matched-bars inference. No AppKit views, no
-/// windows — just the math shared by the calibration overlay.
+/// Pure calibration geometry + the size inference. No AppKit views, no windows —
+/// just the math shared by the calibration overlay.
 enum CalibrationMath {
 
-    /// Distance a bar is inset from the screen edge it hugs, so it reads as a floating
+    /// Distance a tape is inset from the screen edge it hugs, so it reads as a floating
     /// control rather than glued to the bezel.
     static let barEdgeInset: CGFloat = 22
 
@@ -49,14 +25,16 @@ enum CalibrationMath {
         seam.vertical ? abs(bounds.maxX - seam.line) < 1 : abs(bounds.maxY - seam.line) < 1
     }
 
-    /// Rect for a bar of `length`, hugging an optional seam placement (or a horizontal bar
-    /// centered in `bounds` when there's no seam). `offset` slides the bar's center along
-    /// the seam from its anchor; `thickness` sets its cross size.
+    /// The screen edge facing the other display across `seam`, where `selfIsA` picks
+    /// this screen's side (a = left/top).
+    static func seamEdge(_ seam: SchematicLayout.Seam, selfIsA: Bool) -> BarPlacement.Edge {
+        seam.vertical ? (selfIsA ? .right : .left) : (selfIsA ? .bottom : .top)
+    }
+
+    /// Rect for a tape of `length` hugging its placement edge; `offset` slides the tape's
+    /// center along the edge from its anchor, `thickness` sets its cross size.
     static func barRect(length: CGFloat, offset: CGFloat, thickness t: CGFloat,
-                        anchor: BarPlacement?, in bounds: CGRect) -> CGRect {
-        guard let a = anchor else {
-            return CGRect(x: bounds.midX - length / 2, y: bounds.midY - t / 2, width: length, height: t)
-        }
+                        anchor a: BarPlacement, in bounds: CGRect) -> CGRect {
         let along = a.along + offset
         let inset = barEdgeInset
         switch a.edge {
@@ -67,19 +45,21 @@ enum CalibrationMath {
         }
     }
 
-    /// The target PPI implied by two matched bar lengths: the reference bar's known
-    /// physical length (points ÷ trusted PPI) equals the target bar's, so
-    /// `ppi_target = targetPoints / (refPoints / refPPI)`. 0 when undetermined.
-    static func inferredTargetPPI(refLengthPoints: CGFloat, refPPI: Double,
-                                  targetLengthPoints: CGFloat) -> Double {
-        let refInches = Double(refLengthPoints) / refPPI
-        return refInches > 0 ? Double(targetLengthPoints) / refInches : 0
+    /// Per-axis points-per-inch for a `bounds`-point screen of physical size `sizeMM`,
+    /// or nil when the physical size is missing or implausible.
+    static func axisPitches(bounds: CGRect, sizeMM: CGSize) -> (x: Double, y: Double)? {
+        let w = Double(sizeMM.width) / 25.4, h = Double(sizeMM.height) / 25.4
+        guard w > 0.5, h > 0.5 else { return nil }
+        return (x: Double(bounds.width) / w, y: Double(bounds.height) / h)
     }
 
-    /// Physical diagonal (inches) of a `pointSize` panel at `ppi`. 0 when undetermined.
-    static func diagonalInches(pointSize: CGSize, ppi: Double) -> Double {
-        guard ppi > 0 else { return 0 }
-        let w = Double(pointSize.width), h = Double(pointSize.height)
-        return (w * w + h * h).squareRoot() / ppi
+    /// The target's physical size in inches: her claimed (EDID) shape scaled by the one
+    /// number the match determines — how many true inches her "inch" actually is. Every
+    /// matched pairing of tapes yields this same factor, which is the point: one
+    /// measurement per screen, nothing to disagree. Nil when undetermined.
+    static func inferredSize(claimed: CGSize, refMeasure: Double, targetMeasure: Double) -> CGSize? {
+        guard refMeasure > 0, targetMeasure > 0, claimed.width > 0, claimed.height > 0 else { return nil }
+        let scale = refMeasure / targetMeasure
+        return CGSize(width: claimed.width * scale, height: claimed.height * scale)
     }
 }
