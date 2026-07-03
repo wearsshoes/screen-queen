@@ -46,35 +46,35 @@
   - Stays as NSViewRepresentable indefinitely: the seam sparkle/glow (`CAEmitterLayer` is
     the point), and `Arranger`'s keyboard/drag input until last (gesture parity is the
     riskiest part — port chrome first, Canvas second, input last).
-* Prep refactors that make the port mechanical (do these first, as normal cleanups):
-  1. Hoist the pure geometry (`Transform`, the fit math, `chromeViewRect`/`chromeTileScale`,
-     `ghostPoint`, hit-rect computation) off the NSView into a framework-free
-     `ArrangerGeometry` + tests, shared by both implementations.
-  2. Make `draw(_:)` side-effect-free (subview placement → refresh/layout path; hit rects →
-     pure functions of state). The mirror column is the worst offender.
-  3. Collapse `ArrangerState`'s ~15 `onFoo` closures into one `DisplayCommanding` protocol
-     (AppDelegate implements); route mutations through named state methods so
-     `changed()`/`notify()` can later become `@Observable`.
-  4. Gather the seam/ghost/beacon layers behind one `EffectsOverlayView` (inputs: seam
-     edges + cursor points) — one representable at port time instead of four layers.
-  5. Gather the event plumbing (mouse monitors + slider-drag timer in ArrangerWindows,
-     hotkey monitors + debounce in AppDelegate, FocusPolicy) into one `EventPlumbing`
-     type: cursor samples / hotkey firings / focus changes come out, nothing else touches
-     NSEvent/CGEvent monitors. Isolate by responsibility, not framework — no AppKit
-     grab-bag file. (Don't pre-isolate chrome/canvas AppKit; it's replaced wholesale.)
-  6. Split AppDelegate (742 lines, three programs in a trenchcoat): the display command
-     executor (setResolution(s)/setMain/mirror/commit + applyRevertable/preservingCursor)
-     becomes the `DisplayCommanding` impl from #3; the hotplug/profile logic
-     (handleProfiles, repinSurvivors, arrangementIsValid, edgeAdjacent, dockNewcomer)
-     gets its own file with the pure parts in Domain/ — which is also what unblocks the
-     hotplug tests wanted above. App shell (menu, hotkey, launch) stays.
+* Prep refactors that make the port mechanical:
+  1. ✅ DONE — `Domain/ArrangerGeometry` (Transform, fit, chrome placement, ghost mapping,
+     cursor→plane, pixel snap), framework-free with its own test suite.
+  2. ✅ DONE — `draw(_:)` is side-effect-free: cards/solve-panel/seam-effect feeds live on
+     the refresh path; the mirror column's hit rects are a pure `mirrorColumnLayout()`.
+     (Remaining writes in the render path: `drawTransform`'s drag-freeze cache and the
+     wallpaper/aspect memoization — both benign, revisit only if the Canvas port trips.)
+  3. ✅ DONE — `DisplayCommanding`: one `state.commander` reference replaces the twelve
+     `onFoo` closures; executor lives in AppDelegate+Commands.swift.
+     Still open from this item: route remaining direct `state.plane`-poking through named
+     ArrangerState methods so `changed()`/`notify()` can become `@Observable`.
+  4. ✅ DONE (data-flow half) — seam emitters/glow are fed from the refresh path via pure
+     edge sets. NOT boxed into one EffectsOverlayView, deliberately: the solve panel sits
+     *between* the effect layers (glow below, beacon/arrow above), so a single sibling
+     overlay would break the sandwich. At port time wrap each layer individually.
+  5. ✅ DONE — `App/EventPlumbing` owns the hotkey monitors + debounce, the ghost-mouse
+     monitors + slider-drag timer, and focus-follows-cursor (FocusPolicy folded in).
+     Nothing else installs an NSEvent monitor.
+  6. ✅ DONE — AppDelegate split (742 → ~280 shell + Commands + Hotplug); pure hotplug
+     rules in `Domain/HotplugMath` with the long-wanted tests (adjacency, validity,
+     twin-join, dock placement).
   7. Calibration.swift (1104 lines) wants the same subject split as Arranger
      (controller / panel / tape drawing) — its own pass.
-  8. Done (mechanical moves): Arranger+Drawing split into Seams/Tiles/Markers +
+  8. ✅ DONE (mechanical moves): Arranger+Drawing split into Seams/Tiles/Markers +
      orchestrator; SeamColorBook + palette out of ArrangerState.swift into SeamPalette
      (SeamLights no longer imports the arranger's state file); DragFont → Services;
      systemCPUUsage out of ScreenCaptureManager → Services/SystemLoad; UI/ subfolders
      (Arranger/, Chrome/, Seams/, Calibration/) marking the port's replace-vs-keep line.
+     Also: Beacon split out of VirtualMouse (map marker vs. pointer mirror).
 * Level assignments (decided; don't relitigate in either direction):
   - Window shell: stays NSWindow. Below it is private SkyLight/CGS — notarization risk,
     breaks across releases. NSWindow is the thinnest *stable* wrapper and it's ~40 lines.
