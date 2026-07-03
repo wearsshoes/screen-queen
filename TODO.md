@@ -37,24 +37,23 @@
   try-Comic-Sans-then-Chalkboard lookup (Font.custom can't express a
   fallible chain); NSColor remains where load-bearing: blended() (Color.mix
   is macOS 15+) and the CALayer palette pipeline.
-* AppKit-import census (July 2026, after the framework diet): 16 files, all
-  load-bearing — shells (main, AppDelegate ×2, Arranger (the window fleet),
-  KeyableBorderlessWindow, CalibrationController, SeamLights' strip windows),
-  events (EventPlumbing; +Input now speaks decoded KeyInput/ModifierKeys),
-  bridges (DisplayManager, NSScreen+DisplayID, DragFont, SeamPalette — the
-  one NSColor home; Chime covers beeps via AudioToolbox), the Canvas NSView
-  + its NSMenu, VirtualMouse (only for the footer NSTextField — would clear
-  if the footer ever joins the bar's SwiftUI view), and the tape frontier.
-  Layer files are QuartzCore-only (CGColor at the updateSeamEffects boundary);
-  ArrangerState / +Resolution / +Input / +Hotplug are framework-free.
+* AppKit-import census (July 2026, after the framework diet + name swap —
+  the per-screen view is **Canvas**, the coordinator is **Arranger**, was
+  ArrangerWindows): 13 files, all load-bearing — shells (main, AppDelegate ×2,
+  Arranger, KeyableBorderlessWindow, CalibrationController, SeamLights' strip
+  windows), events (EventPlumbing), bridges (DisplayManager, NSScreen+DisplayID,
+  SeamPalette — the one NSColor home), and the Canvas NSView + its NSMenu.
+  UI/Chrome/ files are the overlay cast (view + canvas plumbing per feature,
+  or QuartzCore-only layer critters); ArrangerState / Canvas+Resolution /
+  Canvas+Input / +Hotplug are framework-free.
 * Conventions the port established:
-  - Geometry computes **y-up** (the `Transform`/hit-test space shared with the
-    AppKit layer worlds) and flips at each draw subject's boundary
-    (`yDown` / `yDownPoint` / `yDownDir`).
+  - One y-down space end to end: plane (`CGDisplayBounds`) = view (Canvas is
+    a flipped NSView) = SwiftUI Canvas/gesture space. No flip gates anywhere;
+    `Transform` is a pure scale+translate.
   - Repaints go through `repaintSchematic()` (a rootView generation bump) —
     never `needsDisplay`.
-  - Text *measurement* may stay `NSString` (pure math) where layout parity
-    matters (mirror column); *drawing* is native.
+  - Text measures via `resolve().measure` in-pass or SwiftUI self-sizing
+    (`fittingSize`) for islands; no NSString measurement anywhere.
   - `ArrangerState.plane` is private(set) behind `setPlaneRect(_:for:)`;
     @Observable adoption is unblocked whenever an island wants to observe
     state directly.
