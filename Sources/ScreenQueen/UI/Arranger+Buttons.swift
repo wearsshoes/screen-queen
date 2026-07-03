@@ -267,9 +267,13 @@ extension Arranger {
         if #available(macOS 26.0, *) {
             for (view, base) in barMetrics.corners { (view as? NSGlassEffectView)?.cornerRadius = base * scale }
         }
+        let backing = window?.backingScaleFactor ?? 2
         for (glyph, base) in barMetrics.glyphs {
             let bold = glyph.font?.fontDescriptor.symbolicTraits.contains(.bold) ?? false
-            glyph.font = bold ? .boldSystemFont(ofSize: base * scale) : .systemFont(ofSize: base * scale)
+            let pt = (base * scale).rounded()   // whole point hints crispest (see the footer)
+            glyph.font = bold ? .boldSystemFont(ofSize: pt) : .systemFont(ofSize: pt)
+            glyph.wantsLayer = true
+            glyph.layer?.contentsScale = backing   // render the text at full display density
         }
         refreshBarIcons()
     }

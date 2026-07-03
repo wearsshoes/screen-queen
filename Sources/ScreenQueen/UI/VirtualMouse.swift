@@ -350,11 +350,17 @@ extension Arranger {
             barCentre = CGPoint(x: bar.frame.midX, y: bar.frame.midY)
             barHeight = bar.frame.height
         }
-        footerLabel.font = .systemFont(ofSize: 11 * s)   // native text at the target size
+        // Whole-point font hints crispest; a fractional 15.07pt smears slightly.
+        footerLabel.font = .systemFont(ofSize: (11 * s).rounded())
         footerLabel.sizeToFit()
+        // Render the label's text at full backing density (belt-and-suspenders with the
+        // grid snap — a stray sub-1× contentsScale would soften it).
+        footerLabel.wantsLayer = true
+        footerLabel.layer?.contentsScale = window?.backingScaleFactor ?? 2
         let barVisualBottom = barCentre.y - barHeight / 2 * s
         let size = footerLabel.frame.size
-        // Snap to the pixel grid so the text isn't smeared across pixel boundaries.
+        // Snap the origin to whole device pixels so the text sits on the pixel grid
+        // instead of straddling it.
         footerLabel.setFrameOrigin(CGPoint(x: pixelSnap(barCentre.x - size.width / 2),
                                            y: pixelSnap(barVisualBottom - 8 * s - size.height)))
     }

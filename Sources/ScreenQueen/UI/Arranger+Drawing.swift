@@ -458,7 +458,12 @@ extension Arranger {
         let iw = CGFloat(image.width), ih = CGFloat(image.height)
         let scale = max(rect.width / iw, rect.height / ih)
         let w = iw * scale, h = ih * scale
-        let dst = NSRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
+        // Snap the image's destination to whole device pixels so it lands on the pixel grid
+        // rather than straddling it — the tile rect comes from the (fractional) view
+        // transform, and a sub-pixel origin softens the whole image, most visibly the live
+        // desktop feed. (Cover-crop already bleeds past the tile, so a ≤1px nudge is free.)
+        let dst = NSRect(x: pixelSnap(rect.midX - w / 2), y: pixelSnap(rect.midY - h / 2),
+                         width: pixelSnap(w), height: pixelSnap(h))
 
         ctx.saveGState()
         defer { ctx.restoreGState() }
@@ -585,20 +590,18 @@ extension Arranger {
 
         // The text lines (drag name, government name, resolution, diagonal·ppi). These
         // *scale* with the tile to preview resolution, so they must not shove the slider
-        // around. She goes by her drag name; the EDID/System-name string is the fine
-        // print underneath — work names go in baby letters. The drag name carries a
-        // lighter-pink glow (hot pink fill); everything else is nil.
-        var lines: [(String, NSFont, NSColor, NSColor?)] = []
-        let nameGlow = NSColor.systemPink.blended(withFraction: 0.55, of: .white) ?? .white
-        lines.append((display.nickname, DragFont.script(size: 26 * fontScale), .systemPink, nameGlow))
-        lines.append((display.name, f(10), tertiary, nil))
+        // around. She goes by her drag name (hot-pink script); the EDID/System-name string
+        // is the fine print underneath — work names go in baby letters.
+        var lines: [(String, NSFont, NSColor)] = []
+        lines.append((display.nickname, DragFont.script(size: (26 * fontScale).rounded()), .systemPink))
+        lines.append((display.name, f(10), tertiary))
         let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
-        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13), primary, nil))
+        lines.append(("\(Int(sz.width))×\(Int(sz.height))" + hidpi, f(13), primary))
         let diag = display.diagonalInches > 0 ? String(format: "%.0f″ · ", display.diagonalInches) : ""
         if let effPPI {
-            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), secondary, nil))
+            lines.append((diag + String(format: "%.0f ppi", effPPI), f(13), secondary))
         } else {
-            lines.append((diag + Copy.calibratePrompt, f(13), secondary, nil))
+            lines.append((diag + Copy.calibratePrompt, f(13), secondary))
         }
 
         // The card holds only the lines that fit the tile width; oversized lines are
@@ -614,14 +617,17 @@ extension Arranger {
         let total = sizes.reduce(0) { $0 + $1.height } + gap * CGFloat(max(0, visible.count - 1))
         let padX: CGFloat = 11, padY: CGFloat = 6
         let boxW = min(widest + padX * 2, rect.width - 4)
-        let box = NSRect(x: rect.midX - boxW / 2, y: rect.midY - total / 2 - padY,
-                         width: boxW, height: total + padY * 2)
+        // Snap the card to whole device pixels so its coordinate origin is grid-aligned —
+        // the card is positioned off the (fractional) view transform, and the text snap
+        // inside the card is only meaningful if the card's own frame sits on the grid.
+        let box = NSRect(x: pixelSnap(rect.midX - boxW / 2), y: pixelSnap(rect.midY - total / 2 - padY),
+                         width: pixelSnap(boxW), height: pixelSnap(total + padY * 2))
 
         let card = ensureLabelCard(for: display.id)
         card.frame = box
         card.isHidden = false
         card.update(LabelCard.Content(
-            lines: visible.map { LabelCard.Line(text: $0.0, font: $0.1, color: $0.2, glow: $0.3) },
+            lines: visible.map { LabelCard.Line(text: $0.0, font: $0.1, color: $0.2) },
             selected: selected, gap: gap))
         // The resolution slider now lives in the bottom control cluster (between Undo and
         // Done), acting on the selected display — no longer drawn on the tile.

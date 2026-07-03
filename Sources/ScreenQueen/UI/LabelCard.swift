@@ -12,8 +12,8 @@ import AppKit
 /// the tile each frame and feeds it `Content`.
 final class LabelCard: NSView {
 
-    /// One text line: string, font, fill, optional glow colour.
-    struct Line { let text: String; let font: NSFont; let color: NSColor; let glow: NSColor? }
+    /// One text line: string, font, fill.
+    struct Line { let text: String; let font: NSFont; let color: NSColor }
     struct Content {
         var lines: [Line] = []
         var selected = false
@@ -52,6 +52,11 @@ final class LabelCard: NSView {
         blur.layer?.backgroundColor = wash.cgColor
         textLayer.content = content
         textLayer.frame = bounds
+        textLayer.wantsLayer = true
+        // Render the text at 2× the display's backing (min 2×) — the ornate script name has
+        // hairline strokes that read soft at 1×; supersampling gives them more pixels. On a
+        // non-Retina (1×) monitor this is the difference between crisp and mushy.
+        textLayer.layer?.contentsScale = max(2, (window?.backingScaleFactor ?? 2) * 2)
         textLayer.needsDisplay = true
     }
 
@@ -59,6 +64,15 @@ final class LabelCard: NSView {
     private final class TextOverlay: NSView {
         var content = Content()
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        /// Round to the nearest whole device pixel so each line sits on the grid instead
+        /// of straddling it — a fractional baseline/x smears the glyphs, worst on the big
+        /// script name.
+        private func snap(_ v: CGFloat) -> CGFloat {
+            let b = window?.backingScaleFactor ?? 2
+            return (v * b).rounded() / b
+        }
+
         override func draw(_ dirtyRect: NSRect) {
             let total = content.lines.reduce(0) { $0 + ($1.text as NSString).size(withAttributes: [.font: $1.font]).height }
                 + content.gap * CGFloat(max(0, content.lines.count - 1))
@@ -66,15 +80,9 @@ final class LabelCard: NSView {
             for line in content.lines {
                 let s = (line.text as NSString).size(withAttributes: [.font: line.font])
                 y -= s.height
-                var attrs: [NSAttributedString.Key: Any] = [.font: line.font, .foregroundColor: line.color]
-                if let glow = line.glow {
-                    let shadow = NSShadow()
-                    shadow.shadowColor = glow
-                    shadow.shadowBlurRadius = 6
-                    shadow.shadowOffset = .zero
-                    attrs[.shadow] = shadow
-                }
-                (line.text as NSString).draw(at: CGPoint(x: (bounds.width - s.width) / 2, y: y), withAttributes: attrs)
+                let attrs: [NSAttributedString.Key: Any] = [.font: line.font, .foregroundColor: line.color]
+                (line.text as NSString).draw(at: CGPoint(x: snap((bounds.width - s.width) / 2), y: snap(y)),
+                                             withAttributes: attrs)
                 y -= content.gap
             }
         }
