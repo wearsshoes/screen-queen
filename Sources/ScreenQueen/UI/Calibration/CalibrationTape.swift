@@ -17,6 +17,10 @@ import SwiftUI
 /// `Tape` is the model + CoreGraphics draw pass (y-up, run under the Stage shim);
 /// `TapeHost` is the hosting view that owns input (hit-carving so two overlapping
 /// tapes share a window, drag classification, cursor rects, arrow keys).
+///
+/// The tape-local space stays y-up deliberately (unlike the rest of the app):
+/// the "along" axis with zero at the inseam end is what keeps the grab/interval
+/// math orientation-uniform; TapeHost is the one flip boundary.
 @MainActor
 final class Tape {
     var onResize: ((CGFloat) -> Void)?

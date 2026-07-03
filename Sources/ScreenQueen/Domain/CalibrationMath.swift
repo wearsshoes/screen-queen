@@ -45,6 +45,32 @@ enum CalibrationMath {
         }
     }
 
+    /// The perpendicular-tape edge for a display that isn't constrained by a seam:
+    /// the bottom by convention, but a built-in laptop panel uses its top — the
+    /// laptop is on the desk, so its top edge is the one living near the monitor.
+    static func deskEdge(isBuiltin: Bool) -> BarPlacement.Edge {
+        isBuiltin ? .top : .bottom
+    }
+
+    /// The edge for a display's second tape, perpendicular to its primary. For a
+    /// vertical primary (side-by-side displays) that's the desk convention above;
+    /// for a horizontal primary (stacked displays) both screens use the left edge
+    /// so the pair can still be sighted across the gap.
+    static func perpendicularEdge(to primary: BarPlacement.Edge, isBuiltin: Bool) -> BarPlacement.Edge {
+        switch primary {
+        case .left, .right: return deskEdge(isBuiltin: isBuiltin)
+        case .top, .bottom: return .left
+        }
+    }
+
+    /// A placement hugging `edge` and centered on it, plus that edge's full extent
+    /// in the screen's points — the tape's starting length.
+    static func fullEdgePlacement(_ edge: BarPlacement.Edge, screenSize size: CGSize) -> (BarPlacement, CGFloat) {
+        let vertical = edge == .left || edge == .right
+        let extent = vertical ? size.height : size.width
+        return (BarPlacement(edge: edge, along: extent / 2), extent)
+    }
+
     /// Per-axis points-per-inch for a `bounds`-point screen of physical size `sizeMM`,
     /// or nil when the physical size is missing or implausible.
     static func axisPitches(bounds: CGRect, sizeMM: CGSize) -> (x: Double, y: Double)? {

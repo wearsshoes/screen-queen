@@ -29,6 +29,10 @@ final class Ensemble {
     /// change) — undo whatever `dress` built for that screen.
     var retire: (CGDirectDisplayID) -> Void = { _ in }
 
+    /// Which screens get a member. Default: the whole desk; calibration casts
+    /// only the two screens in the scene.
+    var includes: (CGDirectDisplayID) -> Bool = { _ in true }
+
     init(level: NSWindow.Level, backgroundColor: NSColor = .clear,
          collectionBehavior: NSWindow.CollectionBehavior) {
         self.level = level
@@ -42,7 +46,7 @@ final class Ensemble {
     func rebuild() {
         let screens = GlobalMap.screenMap()
         var live: Set<CGDirectDisplayID> = []
-        for (id, screen) in screens {
+        for (id, screen) in screens where includes(id) {
             live.insert(id)
             if let existing = windows[id], existing.frame != screen.frame {
                 existing.orderOut(nil)

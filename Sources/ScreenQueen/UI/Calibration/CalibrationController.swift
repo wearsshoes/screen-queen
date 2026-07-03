@@ -27,17 +27,34 @@ import AppKit
 ///
 ///   trueSize = claimedSize × (refInches / herInches)
 ///
-/// ⏎ saves and ⎋ cancels from anywhere — the panel or either tape.
+/// The stagecraft: an `Ensemble` casts the two involved screens — one scrimmed
+/// window each, holding that screen's two tapes and a control-panel island.
+/// The window routes keys (arrows nudge the liar's tape from either screen,
+/// ⏎ saves, ⎋ cancels from anywhere).
 @MainActor
 final class CalibrationController {
 
-    private var refWindow: NSWindow?
-    private var targetWindow: NSWindow?
-    private var panels: [(screen: NSScreen, panel: CalibrationPanel)] = []   // one per screen, same controls
+    /// The calibration fleet: one scrimmed window per involved screen, above the
+    /// menu bar so a tape hugging the top edge is still grabbable. The soft scrim
+    /// lives on the window so the tapes stacked in it don't each darken the screen.
+    private let ensemble = Ensemble(
+        level: NSWindow.Level(rawValue: Int(CGShieldingWindowLevel())),
+        backgroundColor: NSColor.black.withAlphaComponent(0.12),
+        collectionBehavior: [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary])
+
+    /// What each involved screen shows, staged in `begin` and consumed by `dress`.
+    private struct Scene {
+        let screen: NSScreen
+        let tapes: [Tape]
+        let panelPlacement: BarPlacement
+    }
+    private var scenes: [CGDirectDisplayID: Scene] = [:]
+    private var panelIslands: [CGDirectDisplayID: CalibrationPanelHost] = [:]
+
     private var target: DisplaySnapshot?
-    private weak var targetTape: Tape?       // for arrow-key nudges routed via the panel
-    private weak var targetHost: TapeHost?   // for the panel-key → tip-glow sync
-    private var keyObservers: [NSObjectProtocol] = []   // panel key-status → tape glow
+    private weak var targetTape: Tape?       // for arrow-key nudges routed via the scene
+    private weak var targetHost: TapeHost?   // for the key → tip-glow sync
+    private var keyObservers: [NSObjectProtocol] = []   // key-window moves → tape glow
 
     private var refPPT: Double = 0             // trusted reference PPI (fallback pitch)
     // One implicit physical measurement per screen — every tape on a screen shows
@@ -51,6 +68,11 @@ final class CalibrationController {
 
     /// Called after a save or cancel so the owner can refresh.
     var onComplete: (() -> Void)?
+
+    init() {
+        ensemble.dress = { [weak self] id, window in self?.dress(window, screenID: id) }
+        ensemble.retire = { [weak self] id in self?.panelIslands[id] = nil }
+    }
 
     func begin(target: DisplaySnapshot, reference: DisplaySnapshot) {
         guard let refPPT = reference.pointsPerInch, refPPT > 0,
@@ -69,18 +91,22 @@ final class CalibrationController {
         let seam = SchematicLayout.seam(reference.bounds, target.bounds)
         let refIsA = seam.map { CalibrationMath.referenceIsA($0, reference.bounds) } ?? true
         let refEdge = seam.map { CalibrationMath.seamEdge($0, selfIsA: refIsA) }
-            ?? deskEdge(for: reference)
+            ?? CalibrationMath.deskEdge(isBuiltin: reference.isBuiltin)
         let targetEdge = seam.map { CalibrationMath.seamEdge($0, selfIsA: !refIsA) }
-            ?? deskEdge(for: target)
+            ?? CalibrationMath.deskEdge(isBuiltin: target.isBuiltin)
 
         // Two tapes per screen: the seam-facing edge, plus a perpendicular one —
         // the bottom by convention, except a laptop panel uses its top (the laptop
         // is on the desk; its top edge is the one near the monitor's bottom). Each
         // pair is an independent axis measurement.
-        let (refPlace, refFull) = fullEdgePlacement(refEdge, on: refScreen)
-        let (refPerpPlace, refPerpFull) = fullEdgePlacement(perpendicularEdge(to: refEdge, for: reference), on: refScreen)
-        let (targetPlace, targetFull) = fullEdgePlacement(targetEdge, on: targetScreen)
-        let (targetPerpPlace, targetPerpFull) = fullEdgePlacement(perpendicularEdge(to: targetEdge, for: target), on: targetScreen)
+        let (refPlace, refFull) = CalibrationMath.fullEdgePlacement(refEdge, screenSize: refScreen.frame.size)
+        let (refPerpPlace, refPerpFull) = CalibrationMath.fullEdgePlacement(
+            CalibrationMath.perpendicularEdge(to: refEdge, isBuiltin: reference.isBuiltin),
+            screenSize: refScreen.frame.size)
+        let (targetPlace, targetFull) = CalibrationMath.fullEdgePlacement(targetEdge, screenSize: targetScreen.frame.size)
+        let (targetPerpPlace, targetPerpFull) = CalibrationMath.fullEdgePlacement(
+            CalibrationMath.perpendicularEdge(to: targetEdge, isBuiltin: target.isBuiltin),
+            screenSize: targetScreen.frame.size)
         // Per-axis pitches: the trusted screen's true points-per-inch, and the
         // pitch the target *claims* over EDID — shape trusted, scale on trial.
         // When she won't even claim a size, assume the trusted pitch.
@@ -140,8 +166,6 @@ final class CalibrationController {
             refTape?.setLength(CGFloat(self.refMeasure * refPrimaryPitch))
             self.updateReadout()
         }
-        refWindow = makeWindow(screen: refScreen,
-                               views: [TapeHost(tape: refTape), TapeHost(tape: refPerpTape)])
 
         // Target tapes (target screen). Their ribbons are ruled at the pitch the
         // display *claims* over EDID — even when a previous calibration knows
@@ -168,77 +192,100 @@ final class CalibrationController {
             calTape?.setLength(primaryLen)
             self.updateReadout()
         }
-        let calHost = TapeHost(tape: calTape)
-        targetWindow = makeWindow(screen: targetScreen,
-                                  views: [calHost, TapeHost(tape: calPerpTape)])
         targetTape = calTape
-        targetHost = calHost
 
         // Each tape echoes its partner's length in the partner's chalk color —
         // the flip-your-screen affordance (see Tape.drawChalk).
         refTape.partner = refPerpTape; refPerpTape.partner = refTape
         calTape.partner = calPerpTape; calPerpTape.partner = calTape
 
-        // ⏎ / ⎋ work from any tape, not just while the panel is key.
+        // ⏎ / ⎋ work from any tape, not just via the scene's key routing.
         for tape in [refTape, refPerpTape, calTape, calPerpTape] {
             tape.onCommit = { [weak self] in self?.save() }
             tape.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
         }
 
-        // A native floating panel on EACH screen holds the instruction, the live
-        // inferred-size readout, and Save/Cancel — wherever the user is looking,
-        // Make It Canon is one glance away. The target's panel presents last, so
-        // it opens key (its arrows route to the liar's tape).
-        panels = [(refScreen, refPlace), (targetScreen, targetPlace)].map { screen, place in
-            let panel = CalibrationPanel(displayName: target.name, claimedInches: target.edidDiagonalInches,
-                                         lastMeasuredInches: target.physicalSizeIsCalibrated ? target.diagonalInches : 0)
-            panel.onSave = { [weak self] in self?.save() }
-            panel.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
-            panel.onNudge = { [weak self] delta in self?.targetTape?.nudge(delta) }
-            panel.present(on: screen, near: place)
-            return (screen, panel)
-        }
+        // Cast the two involved screens; each member's scene holds its tapes and
+        // a control-panel island (wherever the user is looking, Make It Canon is
+        // one glance away).
+        scenes = [
+            reference.id: Scene(screen: refScreen, tapes: [refTape, refPerpTape],
+                                panelPlacement: refPlace),
+            target.id: Scene(screen: targetScreen, tapes: [calTape, calPerpTape],
+                             panelPlacement: targetPlace),
+        ]
+        ensemble.includes = { [ids = Set(scenes.keys)] id in ids.contains(id) }
+        ensemble.rebuild()
 
-        // A panel being key routes its arrows to the liar's tape; keep her
-        // active-tip glow in sync as key focus moves among panels and tapes.
-        calHost.externallyActive = true
+        // Arrows land on the liar's tape whenever a calibration window is key and
+        // no tape host holds them directly; keep her far-tip glow in sync as key
+        // focus moves.
         let nc = NotificationCenter.default
-        for (_, panel) in panels {
-            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
-                keyObservers.append(nc.addObserver(forName: name, object: panel, queue: .main) { [weak self, weak calHost] _ in
-                    MainActor.assumeIsolated {
-                        calHost?.externallyActive = self?.panels.contains { $0.panel.isKeyWindow } ?? false
-                    }
-                })
-            }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            keyObservers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.syncTargetGlow() }
+            })
         }
 
         NSApp.activate(ignoringOtherApps: true)
+        // The target's window opens key — its arrows route to the liar's tape.
+        ensemble.windows[target.id]?.makeKeyAndOrderFront(nil)
+        syncTargetGlow()
         updateReadout()
     }
 
-    /// Whether a calibration session is on stage (windows up).
-    var isActive: Bool { !panels.isEmpty }
+    /// Dress one ensemble window: that screen's tapes plus the panel island, under
+    /// a scene view that routes window-level keys.
+    private func dress(_ window: NSWindow, screenID id: CGDirectDisplayID) {
+        guard let scene = scenes[id] else { return }
+        let sceneView = CalibrationSceneView(frame: CGRect(origin: .zero, size: window.frame.size))
+        sceneView.onNudge = { [weak self] delta in self?.targetTape?.nudge(delta) }
+        sceneView.onCommit = { [weak self] in self?.save() }
+        sceneView.onCancel = { [weak self] in self?.cancel(); self?.onComplete?() }
+        for tape in scene.tapes {
+            let host = TapeHost(tape: tape)
+            host.frame = sceneView.bounds
+            host.autoresizingMask = [.width, .height]
+            sceneView.addSubview(host)
+            if tape === targetTape { targetHost = host }
+        }
+        let island = CalibrationPanelHost(rootView: panelView())
+        let size = island.fittingSize
+        island.frame = NSRect(origin: CalibrationPanelHost.origin(near: scene.panelPlacement,
+                                                                  screen: scene.screen, panelSize: size),
+                              size: size)
+        sceneView.addSubview(island)
+        panelIslands[id] = island
+        window.contentView = sceneView
+        window.makeFirstResponder(sceneView)
+    }
 
-    /// Hand key focus to this screen's calibration panel, if there is one — the
-    /// hook for an app-level focus-follows-cursor policy (owned outside this
-    /// controller). Deliberately won't steal focus when a window on the same
-    /// screen is already key — e.g. a tape the user just grabbed, whose arrow
-    /// keys they're using.
+    /// Whether a calibration session is on stage (windows up).
+    var isActive: Bool { ensemble.isVisible }
+
+    /// Hand key focus to this screen's calibration window, if it's in the cast —
+    /// the hook for the app-level focus-follows-cursor policy. Don't-steal
+    /// semantics live in the ensemble.
     func focusPanel(on screen: NSScreen) {
-        guard isActive,
-              let panel = panels.first(where: { $0.screen.frame == screen.frame })?.panel,
-              !panel.isKeyWindow else { return }
-        if let key = NSApp.keyWindow, key.screen?.frame == screen.frame { return }
-        panel.makeKeyAndOrderFront(nil)
+        ensemble.focusWindow(on: screen)
+    }
+
+    /// The liar's far-tip glow: lit whenever a calibration window is key and a
+    /// tape host isn't itself holding the keys (the scene routes arrows to her).
+    private func syncTargetGlow() {
+        guard let key = NSApp.keyWindow, ensemble.windows.values.contains(key) else {
+            targetHost?.externallyActive = false
+            return
+        }
+        targetHost?.externallyActive = !(key.firstResponder is TapeHost)
     }
 
     func cancel() {
         keyObservers.forEach { NotificationCenter.default.removeObserver($0) }
         keyObservers.removeAll()
-        refWindow?.orderOut(nil); refWindow = nil
-        targetWindow?.orderOut(nil); targetWindow = nil
-        panels.forEach { $0.panel.orderOut(nil) }; panels = []
+        ensemble.dismiss()
+        scenes.removeAll()
+        panelIslands.removeAll()
         target = nil
     }
 
@@ -247,9 +294,20 @@ final class CalibrationController {
                                      refMeasure: refMeasure, targetMeasure: targetMeasure)
     }
 
-    private func updateReadout() {
+    private func panelView() -> CalibrationPanelView {
         let diag = inferredSizeInches().map { hypot(Double($0.width), Double($0.height)) } ?? 0
-        panels.forEach { $0.panel.setInferredDiagonal(diag) }
+        return CalibrationPanelView(
+            displayName: target?.name ?? "",
+            claimedInches: target?.edidDiagonalInches ?? 0,
+            lastMeasuredInches: (target?.physicalSizeIsCalibrated ?? false) ? (target?.diagonalInches ?? 0) : 0,
+            inferredInches: diag,
+            save: { [weak self] in self?.save() },
+            cancel: { [weak self] in self?.cancel(); self?.onComplete?() })
+    }
+
+    private func updateReadout() {
+        let view = panelView()
+        panelIslands.values.forEach { $0.rootView = view }
     }
 
     private func save() {
@@ -259,59 +317,26 @@ final class CalibrationController {
         cancel()
         onComplete?()
     }
+}
 
-    // MARK: - Placement helpers
+/// The calibration window's content view: hosts the tapes and the panel island,
+/// and routes window-level keys — arrows nudge the liar's tape from either
+/// screen (⇧ = ×10), ⏎ saves, ⎋ cancels.
+private final class CalibrationSceneView: NSView {
+    var onNudge: ((CGFloat) -> Void)?
+    var onCommit: (() -> Void)?
+    var onCancel: (() -> Void)?
 
-    /// The perpendicular-tape edge for a display that isn't constrained by a seam:
-    /// the bottom by convention, but a built-in laptop panel uses its top — the
-    /// laptop is on the desk, so its top edge is the one living near the monitor.
-    private func deskEdge(for d: DisplaySnapshot) -> BarPlacement.Edge {
-        d.isBuiltin ? .top : .bottom
-    }
+    override var acceptsFirstResponder: Bool { true }
 
-    /// The edge for a display's second tape, perpendicular to its primary. For a
-    /// vertical primary (side-by-side displays) that's the desk convention above;
-    /// for a horizontal primary (stacked displays) both screens use the left edge
-    /// so the pair can still be sighted across the gap.
-    private func perpendicularEdge(to primary: BarPlacement.Edge, for d: DisplaySnapshot) -> BarPlacement.Edge {
-        switch primary {
-        case .left, .right: return deskEdge(for: d)
-        case .top, .bottom: return .left
+    override func keyDown(with event: NSEvent) {
+        let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
+        switch event.keyCode {
+        case 124, 126: onNudge?(step)     // → / ↑
+        case 123, 125: onNudge?(-step)    // ← / ↓
+        case 36, 76: onCommit?()          // ⏎ / keypad enter
+        case 53: onCancel?()              // ⎋
+        default: super.keyDown(with: event)
         }
     }
-
-    /// A placement hugging `edge` and centered on it, plus that edge's full extent
-    /// in the screen's points — the tape's starting length.
-    private func fullEdgePlacement(_ edge: BarPlacement.Edge, on screen: NSScreen) -> (BarPlacement, CGFloat) {
-        let size = screen.frame.size
-        let vertical = edge == .left || edge == .right
-        let extent = vertical ? size.height : size.width
-        return (BarPlacement(edge: edge, along: extent / 2), extent)
-    }
-
-    // MARK: - Window/screen helpers
-
-    private func makeWindow(screen: NSScreen, views: [NSView]) -> NSWindow {
-        let window = KeyableBorderlessWindow(contentRect: screen.frame, styleMask: .borderless,
-                                             backing: .buffered, defer: false)
-        window.isOpaque = false
-        // The soft scrim lives on the window so the tapes stacked in it don't
-        // each darken the screen again.
-        window.backgroundColor = NSColor.black.withAlphaComponent(0.12)
-        window.hasShadow = false
-        // Above the menu bar so a bar hugging the top edge is still grabbable.
-        window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        window.isReleasedWhenClosed = false
-        let container = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
-        for view in views {
-            view.frame = container.bounds
-            view.autoresizingMask = [.width, .height]
-            container.addSubview(view)
-        }
-        window.contentView = container
-        window.orderFrontRegardless()
-        return window
-    }
-
 }

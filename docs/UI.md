@@ -224,21 +224,25 @@ windows. Arranger becomes fleet-consumer #1. SeamLights stays as-is (its
 windows are per-*seam* strips, not per-screen; forcing it onto the fleet is
 taxonomy for its own sake).
 
-### Phase 3 — calibration joins the world (large; the payoff)
-- Tapes port to y-down `GraphicsContext` (the shim dies; NSFont leaves the
-  tape art; the last y-up code in the app is gone). The art draws in its own
-  rotated local frame, so the port is at the boundary, not in the ribbon.
-- The calibration session becomes fleet-consumer #2: fleet windows at
-  shielding level with the scrim, tapes as hosted elements, the panel as an
-  island on the fleet window (its arrow-nudge keys ride the same key routing
-  the arranger uses, killing the NSNotification key-glow dance and
-  `externallyActive`).
-- CalibrationController shrinks to what it actually is: session state +
-  `CalibrationMath` wiring + the readout.
-- Its edge-placement geometry moves to the global map (Phase 1's home) —
-  this is the "most of calibration is global map, part is an element that
-  scales with it" split: placement/pitch = global map; the ribbon = an
-  element ruled at pitch.
+### Phase 3 — calibration joins the world (large; the payoff) — DONE, one amendment
+- ~~Tapes port to y-down~~ **Overruled in execution**: the tape-local y-up
+  space turned out to be load-bearing — its "along" axis (zero at the inseam
+  end) is what keeps the grab/interval math orientation-uniform, and a y-down
+  port trades the one boundary flip (TapeHost, where every flip already
+  lives) for per-orientation sign conditionals in the interval math. The
+  flips stay confined to the host boundary; noted in the Tape header.
+- The calibration session became Ensemble-consumer #2: one scrimmed window
+  per involved screen at shielding level, tapes as hosted elements, the
+  NSPanel replaced by a `CalibrationPanelHost` island on the window. The
+  scene view routes window keys (arrows→liar's tape, ⏎/⎋); the per-panel
+  NSNotification dance collapsed to one app-wide key-window observer pair
+  driving the tip glow.
+- Edge-placement conventions (`deskEdge`/`perpendicularEdge`/
+  `fullEdgePlacement`) moved to `CalibrationMath` (the pure, tested home) —
+  not GlobalMap, which shouldn't speak calibration vocabulary.
+- One deliberate loss: the old NSPanel was draggable
+  (`isMovableByWindowBackground`); the island is fixed at its placement.
+  Re-add island dragging if it's missed.
 
 ### Phase 4 — optional long game (flag it, don't start it)
 `@Observable ArrangerState`: islands observe state directly, Stage's
