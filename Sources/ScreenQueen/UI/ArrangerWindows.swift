@@ -14,6 +14,13 @@ final class ArrangerWindows {
 
     private let capture = ScreenCaptureManager()
 
+    /// Mouse-move monitors driving the ghost mouse (see VirtualMouse.swift); installed
+    /// while visible, empty otherwise.
+    private var mouseMonitors: [Any] = []
+    /// The display the cursor is on (the "active" screen the ghost mirrors). The chrome
+    /// projection is recomputed only when this changes; the ghost mouse, every move.
+    private var activeDisplayID: CGDirectDisplayID?
+
     /// At this many screens the live feed is a production number: it defaults off, and
     /// switching it on arms the feed-guard countdown + watchdog.
     static let bigCastThreshold = 4
@@ -23,7 +30,7 @@ final class ArrangerWindows {
     init() {
         state.changed = { [weak self] in
             self?.canvases.forEach { $0.refresh() }
-            self?.refreshGhostChrome()   // a layout/panel change moves the projections
+            self?.relayoutGhostChrome()   // a layout/panel change moves the twins
         }
         state.capture = capture
         // A new frame from any display just repaints the tiles (coalesced by AppKit).
@@ -36,14 +43,16 @@ final class ArrangerWindows {
         }
     }
 
-    /// Reproject the ghost chrome (see VirtualMouse.swift): every canvas draws pink
-    /// images of every *other* canvas's controls, through the shared affine transform.
-    /// Deferred one runloop turn so button-bar autolayout has settled into real frames.
-    private func refreshGhostChrome() {
+    /// Re-lay the ghost twins from the (possibly moved) chrome and re-project for the
+    /// current active screen. Deferred a runloop turn so button-bar autolayout has
+    /// settled into real frames.
+    private func relayoutGhostChrome() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            let active = self.activeDisplayID.flatMap { id in self.canvases.first { $0.centerID == id } }
             for canvas in self.canvases {
-                canvas.renderGhostChrome(from: self.canvases.filter { $0 !== canvas })
+                canvas.layoutGhostTwins()
+                canvas.projectGhostChrome(active: canvas === active ? nil : active)
             }
         }
     }
@@ -108,7 +117,10 @@ final class ArrangerWindows {
         let busy = (ScreenCaptureManager.systemCPUUsage() ?? 0) > 0.5
         let bigCast = NSScreen.screens.count >= Self.bigCastThreshold
         setFeed(!busy && !bigCast)
-        refreshGhostChrome()   // project each screen's controls onto the others
+        installMouseMonitors()
+        canvases.forEach { $0.layoutGhostTwins() }
+        activeDisplayID = nil
+        mouseDidMove()   // seed the active screen + project + place the ghost mouse
     }
 
     /// Make the arranger window on the main display key (falling back to any window).
@@ -131,9 +143,52 @@ final class ArrangerWindows {
     func hide() {
         capture.stop()
         cancelFeedWatchdog()
+        mouseMonitors.forEach { NSEvent.removeMonitor($0) }
+        mouseMonitors.removeAll()
+        activeDisplayID = nil
         windows.values.forEach { $0.orderOut(nil) }
         windows.removeAll()
         canvases.removeAll()
+    }
+
+    // MARK: - Ghost mouse feed (see VirtualMouse.swift)
+
+    /// Follow the real mouse while visible. A global monitor covers moves over other
+    /// apps' screens; a local one covers our own overlays.
+    private func installMouseMonitors() {
+        guard VirtualMouse.ghostMouseEnabled, mouseMonitors.isEmpty else { return }
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged,
+                                           .rightMouseDragged, .otherMouseDragged]
+        if let g = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            self?.mouseDidMove()
+        }) { mouseMonitors.append(g) }
+        if let l = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            self?.mouseDidMove()
+            return event
+        }) { mouseMonitors.append(l) }
+    }
+
+    /// One cursor sample: reproject the chrome only when the active screen changed,
+    /// and always move the ghost mouse (both ride the same per-canvas affine).
+    private func mouseDidMove() {
+        guard isVisible else { return }
+        let cursor = CGEvent(source: nil)?.location ?? .zero
+        let activeID = (state.planeDisplays.first { CGDisplayBounds($0.id).contains(cursor) }
+            ?? state.displays.first { CGDisplayBounds($0.id).contains(cursor) })?.id
+        let active = activeID.flatMap { id in canvases.first { $0.centerID == id } }
+        // The cursor in the active canvas's own view coords (Cocoa global is y-up).
+        var cursorActivePoint: CGPoint?
+        if let activeID, let window = windows[activeID] {
+            let loc = NSEvent.mouseLocation
+            cursorActivePoint = CGPoint(x: loc.x - window.frame.minX, y: loc.y - window.frame.minY)
+        }
+        if activeID != activeDisplayID {
+            activeDisplayID = activeID
+            for canvas in canvases { canvas.projectGhostChrome(active: canvas === active ? nil : active) }
+        }
+        for canvas in canvases {
+            canvas.updateGhostArrow(cursorActivePoint: cursorActivePoint, isActive: canvas === active)
+        }
     }
 
     /// Re-interpret the OS layout into the shared plane and repaint (external change).
@@ -144,7 +199,7 @@ final class ArrangerWindows {
         state.update(with: displays, force: force)
         rebuild()   // screens may have changed
         canvases.forEach { $0.refresh() }
-        refreshGhostChrome()
+        relayoutGhostChrome()
     }
 
     /// Refresh the unified chrome metrics (see `ArrangerState`): the largest Dock and

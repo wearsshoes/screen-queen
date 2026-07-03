@@ -61,9 +61,14 @@ final class Arranger: NSView {
     /// canvases (see VirtualMouse.swift).
     weak var barContainer: NSView?
 
-    /// Projected pink ghost images of the *other* screens' controls (VirtualMouse.swift),
-    /// keyed by (source display, control) so each layer persists across redraws.
-    var ghostLayers: [GhostKey: GhostElementLayer] = [:]
+    /// The ghost of the active screen (VirtualMouse.swift): a container of pink twins
+    /// of the UI elements (built once, keyed by element), projected as one bundle by
+    /// the container's transform; a dashed arrow for the ghost mouse; and the affine
+    /// (active canvas → this canvas) both ride, recomputed only on active-screen change.
+    var ghostChrome: CALayer?
+    var ghostTwins: [GhostChromeElement: GhostElementLayer] = [:]
+    var ghostArrow: GhostCursorLayer?
+    var ghostAffine: CGAffineTransform = .identity
 
     /// The bar's controls by role, for the ghost's twin lookup (same six controls on
     /// every canvas). On macOS 26 the circle capsules stand in for their buttons —
