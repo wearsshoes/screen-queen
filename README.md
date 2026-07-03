@@ -18,6 +18,10 @@ where the Dock is going to sashay off to. She does not tuck. She does not compro
 - **Physical-size arrangement.** Displays are drawn to true scale, so the layout matches the
   monitors on your desk — not macOS's flat, padded, point-space *illusion* of them.
 - **Clear crossover areas.** If two screens share a connection, move your mouse through the glowy part and it'll show up on the other screen.
+- **Always-on seam lights.** Flip **Keep the Seams Showing** in the 👑 menu and she leaves a
+  thin colored bar glowing at every seam, all the time — so you always know where your cursor's
+  about to cross, even with the arranger closed. Costs nothing while nothing's moving: she only
+  re-marks the seams when you plug, unplug, or rearrange. (Fullscreen apps stay pristine.)
 - **Seam-aware alignment.** Snaps and aligns displays along the edge your cursor really
   crosses, accounting for differing pixel densities, because size *and* density matter and
   anyone who tells you otherwise is lying.
@@ -89,6 +93,9 @@ Summon the arranger with <kbd>⌘⌥F1</kbd> or the menu-bar icon.
   full menu, no bottle service minimum.
 - **Drag the menu-bar strip** of a tile to crown that display the main. Long live the queen.
 - **Option-drag** a display onto another to mirror it.
+- **The "what she sees" card** (bottom-left) shows the raw macOS layout she's reading — a live
+  map of your displays in point-space with the seams she's found, each in its own color. Drag it
+  by its handle if it's in your light. It's the receipts, in real time.
 - <kbd>Esc</kbd> / <kbd>Return</kbd> and she takes her bow.
 
 ## How she works
