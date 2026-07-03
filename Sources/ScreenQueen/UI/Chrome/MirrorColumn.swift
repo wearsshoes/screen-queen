@@ -10,7 +10,7 @@ struct MirrorColumnContent {
         let nickname: String
         let name: String
         let resolution: String
-        let detail: String?
+        let detail: String
         let mirrors: String
         /// From the mirrored screen's aspect, clamped so the text still fits.
         let height: CGFloat
@@ -50,9 +50,7 @@ struct MirrorColumnView: View {
                 .shadow(color: nameGlow, radius: 6)
             Text(card.name).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
             Text(card.resolution).font(.system(size: 15)).foregroundStyle(.white)
-            if let detail = card.detail {
-                Text(detail).font(.system(size: 15)).foregroundStyle(dim)
-            }
+            Text(card.detail).font(.system(size: 15)).foregroundStyle(dim)
             Text(card.mirrors).font(.system(size: 15)).foregroundStyle(dim)
         }
         .padding(EdgeInsets(top: 16, leading: 18, bottom: 16, trailing: 18))
@@ -125,16 +123,12 @@ extension Stage {
         for d in mirrored {
             let sz = pointSize(d)
             let aspect = sz.height > 0 ? sz.width / sz.height : 16.0 / 9
-            let effPPI = state.effectivePPI(d)
-            let diag = d.diagonalInches > 0 ? String(format: "%.0f″ · ", d.diagonalInches) : ""
-            let detail = effPPI.map { diag + String(format: "%.0f ppi", $0) }
-                ?? (diag.isEmpty ? nil : String(diag.dropLast(3)))
-            let hidpi = Int(d.pixelSize.width) > Int(sz.width) ? " HiDPI" : ""
+            let stats = state.statLines(for: d)
             let master = displays.first { $0.id == d.mirrorMaster }?.name ?? Copy.unknownDisplayName
             content.cards.append(.init(
                 id: d.id, nickname: d.nickname, name: d.name,
-                resolution: "\(Int(sz.width))×\(Int(sz.height))\(hidpi)",
-                detail: detail, mirrors: Copy.mirrorsLine(master),
+                resolution: stats.resolution,
+                detail: stats.detail, mirrors: Copy.mirrorsLine(master),
                 height: min(max(cardW / max(aspect, 0.1), 120), 260)))
         }
         if airplaySession != nil {

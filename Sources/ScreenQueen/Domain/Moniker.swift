@@ -2,10 +2,9 @@ import Foundation
 
 /// A stable drag name for a display, deterministically derived from its hardware
 /// fingerprint (vendor/model/serial) — she keeps the same name every time she plugs in,
-/// forever, because the fingerprint doesn't change. First name is pure glamour; last
-/// name winks at what she actually is (built-in, dense, or ultrawide get a suffix; a
-/// plain external monitor is just First Last). No RNG, no state — same fingerprint in,
-/// same name out, always.
+/// forever, because the fingerprint doesn't change. First name is pure glamour; an
+/// ultrawide earns the ", XL" suffix. No RNG, no state — same fingerprint in, same
+/// name out, always.
 enum Moniker {
     private static let firstNames = [
         "Pixel", "Crystal", "Vanity", "Ivory", "Champagne", "Velvet", "Marquee",
@@ -21,11 +20,9 @@ enum Moniker {
         "Everclear", "Van Cartier", "LaBelle", "Sinclair", "Wildfire", "Glow",
     ]
 
-    /// A deterministic "First Last[, Suffix]" drag name for `fingerprint`. `isBuiltin`
-    /// and the density/aspect hints tune the suffix; all are optional so a bare
-    /// fingerprint still yields a valid (unsuffixed) name.
-    static func nickname(for fingerprint: String, isBuiltin: Bool = false,
-                         pixelsPerInch: Double? = nil, aspectRatio: Double? = nil) -> String {
+    /// A deterministic "First Last[, XL]" drag name for `fingerprint`; the aspect
+    /// hint is optional so a bare fingerprint still yields a valid name.
+    static func nickname(for fingerprint: String, aspectRatio: Double? = nil) -> String {
         var h: UInt64 = 1469598103934665603   // FNV-1a
         for b in fingerprint.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
         let first = firstNames[Int(h % UInt64(firstNames.count))]

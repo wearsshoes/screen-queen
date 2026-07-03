@@ -109,7 +109,7 @@ struct DisplaySnapshot: Identifiable, Equatable {
     /// forever the same girl. The suffix reacts to what she actually is.
     var nickname: String {
         let aspect = bounds.height > 0 ? Double(bounds.width / bounds.height) : nil
-        return Moniker.nickname(for: fingerprint, isBuiltin: isBuiltin, pixelsPerInch: ppi, aspectRatio: aspect)
+        return Moniker.nickname(for: fingerprint, aspectRatio: aspect)
     }
 
     /// A copy with new `bounds` — for building a *prospective* layout (drag or

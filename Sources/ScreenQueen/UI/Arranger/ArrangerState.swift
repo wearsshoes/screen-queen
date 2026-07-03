@@ -239,6 +239,20 @@ final class ArrangerState {
         return Double(sz.width) / (Double(d.physicalSizeMM.width) / 25.4)
     }
 
+    /// The stat strings the label card and the mirror card share: "W×H( HiDPI)" and
+    /// "NN″ · NN ppi" — or the calibrate prompt when she won't say her size, on both
+    /// cards (a mirrored girl can lie about her size too).
+    func statLines(for d: DisplaySnapshot) -> (resolution: String, detail: String) {
+        let sz = pointSize(d)
+        let pixelW = pendingModes[d.id]?.pixelWidth ?? Int(d.pixelSize.width)
+        let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
+        let resolution = "\(Int(sz.width))×\(Int(sz.height))" + hidpi
+        let diag = d.diagonalInches > 0 ? String(format: "%.0f″ · ", d.diagonalInches) : ""
+        let detail = effectivePPI(d).map { diag + String(format: "%.0f ppi", $0) }
+            ?? (diag + Copy.calibratePrompt)
+        return (resolution, detail)
+    }
+
     /// Plane displays with the effective point size applied. Mirrored slaves excluded.
     func sizedDisplays() -> [DisplaySnapshot] {
         planeDisplays.map { $0.with(bounds: CGRect(origin: $0.bounds.origin, size: pointSize($0))) }

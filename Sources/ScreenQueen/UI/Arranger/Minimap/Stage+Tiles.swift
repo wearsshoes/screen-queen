@@ -238,10 +238,6 @@ extension Stage {
     }
 
     private func layoutLabelCard(for display: DisplaySnapshot, in rect: NSRect, selected: Bool, viewScale: CGFloat) {
-        let sz = pointSize(display)
-        let pending = state.pendingMode(for: display.id)
-        let pixelW = pending?.pixelWidth ?? Int(display.pixelSize.width)
-
         let effPPI = state.effectivePPI(display)
 
         // True-size preview: the faithful on-tile font scale is `viewScale / ppi`, so
@@ -260,14 +256,12 @@ extension Stage {
 
         // Drag name (hot-pink script), government name (fine print — work names go in
         // baby letters), resolution, diagonal·ppi.
+        let stats = state.statLines(for: display)
         var lines: [LabelCardContent.Line] = []
         lines.append(.init(text: display.nickname, font: .script(size: (26 * fontScale).rounded()), color: .pink))
         lines.append(.init(text: display.name, font: f(10), color: Color(nsColor: tertiary)))
-        let hidpi = pixelW > Int(sz.width) ? " HiDPI" : ""
-        lines.append(.init(text: "\(Int(sz.width))×\(Int(sz.height))" + hidpi, font: f(13), color: Color(nsColor: primary)))
-        let diag = display.diagonalInches > 0 ? String(format: "%.0f″ · ", display.diagonalInches) : ""
-        let detail = effPPI.map { diag + String(format: "%.0f ppi", $0) } ?? (diag + Copy.calibratePrompt)
-        lines.append(.init(text: detail, font: f(13), color: Color(nsColor: secondary)))
+        lines.append(.init(text: stats.resolution, font: f(13), color: Color(nsColor: primary)))
+        lines.append(.init(text: stats.detail, font: f(13), color: Color(nsColor: secondary)))
 
         // The card sizes itself; the stage just centers the fitting size on the tile,
         // capping the width (long lines truncate) and hiding it when the tile is too
